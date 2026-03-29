@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>pickle — Pin Configurator</title>
+    <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+    <header class="app-header">
+        <div class="header-brand">
+            <img src="static/pickle-icon.svg" alt="pickle" class="brand-icon">
+            <h1>pickle</h1>
+        </div>
+
+        <div class="header-controls">
+            <div class="part-control">
+                <div class="part-picker">
+                    <input type="text" id="part-input" list="device-list" placeholder="Part number (e.g. DSPIC33CK64MP102)" value="DSPIC33CK64MP102" autocomplete="off">
+                    <datalist id="device-list"></datalist>
+                    <button id="load-btn">Load Device</button>
+                    <select id="pkg-select" style="display:none">
+                    </select>
+                </div>
+            </div>
+
+            <div class="header-actions">
+                <button id="verify-btn" class="verify-btn" style="display:none" title="Cross-check pinout against datasheet PDF using Anthropic">Verify Pinout</button>
+                <button id="save-btn" style="display:none">Save Config</button>
+                <button id="load-btn-file">Open Config</button>
+            </div>
+        </div>
+
+        <div class="header-meta">
+            <span id="status" class="status-pill">Ready</span>
+            <span id="index-badge" class="index-badge" style="display:none" onclick="refreshIndex()" title="Click to refresh"></span>
+            <button id="theme-toggle">Light</button>
+        </div>
+    </header>
+
+    <div class="main">
+        <div class="panel panel-left">
+            <div class="panel-left-top">
+                <div id="pkg-container"></div>
+                <div id="conflict-box" class="conflict"></div>
+                <div id="summary" class="summary" style="display:none">
+                    <div class="summary-item">
+                        <span class="summary-label">Pins:</span>
+                        <span class="summary-value" id="sum-pins">—</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">RP pins:</span>
+                        <span class="summary-value" id="sum-rp">—</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">Assigned:</span>
+                        <span class="summary-value" id="sum-assigned">0</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">Package:</span>
+                        <span class="summary-value" id="sum-pkg">—</span>
+                    </div>
+                    <div class="summary-item">
+                        <button id="pinlist-btn" class="summary-btn">Save Pin List</button>
+                        <label class="summary-check"><input type="checkbox" id="pinlist-grid" checked> Grid</label>
+                    </div>
+                </div>
+            </div>
+            <div class="panel-left-scroll">
+                <table class="pin-table" id="pin-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Pin</th>
+                            <th>Functions</th>
+                            <th>Assignment</th>
+                            <th>Signal Name</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pin-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="panel panel-right">
+            <div class="config-grid">
+                <div id="osc-config" class="osc-config" style="display:none">
+                    <h2>Oscillator</h2>
+                    <div class="osc-row">
+                        <label>Clock Source</label>
+                        <select id="osc-source">
+                            <option value="">— none —</option>
+                            <option value="frc">FRC (8 MHz)</option>
+                            <option value="frc_pll">FRC + PLL</option>
+                            <option value="pri">Primary (EC/XT/HS)</option>
+                            <option value="pri_pll">Primary + PLL</option>
+                            <option value="lprc">LPRC (32 kHz)</option>
+                        </select>
+                    </div>
+                    <div class="osc-row" id="osc-crystal-row" style="display:none">
+                        <label>Crystal Freq (MHz)</label>
+                        <input type="number" id="osc-crystal" value="8" min="0.032" max="64" step="0.001">
+                        <select id="osc-poscmd">
+                            <option value="EC">EC (External Clock)</option>
+                            <option value="XT">XT (Crystal)</option>
+                            <option value="HS">HS (High-Speed Crystal)</option>
+                        </select>
+                    </div>
+                    <div class="osc-row" id="osc-target-row" style="display:none">
+                        <label>Target Fosc (MHz)</label>
+                        <input type="number" id="osc-target" value="200" min="1" max="200" step="0.001">
+                        <span class="osc-hint" id="osc-fcy-hint"></span>
+                    </div>
+                </div>
+
+                <div id="fuse-config" class="fuse-config" style="display:none">
+                    <h2>Configuration Fuses</h2>
+                    <div class="fuse-row">
+                        <label>ICSP Channel (ICS)</label>
+                        <select id="fuse-ics">
+                            <option value="1" selected>PGC1/PGD1</option>
+                            <option value="2">PGC2/PGD2</option>
+                            <option value="3">PGC3/PGD3</option>
+                        </select>
+                    </div>
+                    <div class="fuse-row">
+                        <label>JTAG Enable</label>
+                        <select id="fuse-jtagen">
+                            <option value="OFF" selected>OFF</option>
+                            <option value="ON">ON</option>
+                        </select>
+                    </div>
+                    <div class="fuse-row">
+                        <label>Watchdog Timer</label>
+                        <select id="fuse-fwdten">
+                            <option value="OFF" selected>OFF (disabled)</option>
+                            <option value="ON">ON (always enabled)</option>
+                            <option value="SWON">SWON (software-controlled)</option>
+                        </select>
+                    </div>
+                    <div class="fuse-row">
+                        <label>WDT Prescaler</label>
+                        <select id="fuse-wdtps">
+                            <option value="PS1">PS1</option>
+                            <option value="PS2">PS2</option>
+                            <option value="PS4">PS4</option>
+                            <option value="PS8">PS8</option>
+                            <option value="PS16">PS16</option>
+                            <option value="PS32">PS32</option>
+                            <option value="PS64">PS64</option>
+                            <option value="PS128">PS128</option>
+                            <option value="PS256">PS256</option>
+                            <option value="PS512">PS512</option>
+                            <option value="PS1024" selected>PS1024</option>
+                            <option value="PS2048">PS2048</option>
+                            <option value="PS4096">PS4096</option>
+                            <option value="PS8192">PS8192</option>
+                            <option value="PS16384">PS16384</option>
+                            <option value="PS32768">PS32768</option>
+                        </select>
+                    </div>
+                    <div class="fuse-row">
+                        <label>Brown-out Reset</label>
+                        <select id="fuse-boren">
+                            <option value="ON" selected>ON</option>
+                            <option value="OFF">OFF</option>
+                        </select>
+                    </div>
+                    <div class="fuse-row">
+                        <label>Brown-out Voltage</label>
+                        <select id="fuse-borv">
+                            <option value="BOR_HIGH" selected>BOR_HIGH</option>
+                            <option value="BOR_MID">BOR_MID</option>
+                            <option value="BOR_LOW">BOR_LOW</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="code-shell">
+                <div class="toolbar">
+                    <button id="gen-btn">Generate C Code</button>
+                    <button id="check-btn" style="display:none">Check with XC16</button>
+                    <button id="copy-btn">Copy</button>
+                    <button id="export-btn">Export Files</button>
+                </div>
+                <div id="compile-result" class="compile-result"></div>
+                <div class="code-tabs" id="code-tabs" style="display:none">
+                    <button class="code-tab active" data-file="pin_config.c">pin_config.c</button>
+                    <button class="code-tab" data-file="pin_config.h">pin_config.h</button>
+                </div>
+                <pre id="code-output">Load a device and assign peripherals to generate code.</pre>
+            </div>
+
+            <div id="verify-panel" class="verify-panel" style="display:none">
+                <h2>Pinout Verification</h2>
+                <div id="verify-output"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="static/pin_descriptions.js"></script>
+    <script src="static/app.js"></script>
+</body>
+</html>

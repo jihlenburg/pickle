@@ -1,0 +1,40 @@
+# Rust
+target/
+Cargo.lock
+
+# macOS
+.DS_Store
+._*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# DFP cache — extracted from .atpack files, regenerated on demand
+dfp_cache/
+
+# Parsed device data — regenerated from DFP files
+devices/
+
+# Pinout overlays generated at runtime
+pinouts/
+
+# Environment / secrets
+.env
+*.key
+
+# Anthropic Code
+.anthropic/
+
+# Tauri build output
+src-tauri/target/
+
+# Local app bundle
+bin/
+
+# Node (Tauri dev may create these)
+node_modules/
+package-lock.json

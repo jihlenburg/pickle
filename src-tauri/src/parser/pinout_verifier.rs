@@ -1,0 +1,508 @@
+//! Pinout Verifier: cross-check parsed EDC pinout data against the device datasheet
+//! using the Anthropic API.
+
+use base64::Engine;
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
+
+use crate::parser::dfp_manager::pinouts_dir;
+
+const API_URL: &str = "https://api.anthropic.com/v1/messages";
+const API_VERSION: &str = "2023-06-01";
+const MODEL: &str = "anthropic-sonnet-4-6";
+const MAX_TOKENS: u32 = 16384;
+
+pub fn get_api_key() -> Option<String> {
+    if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+        if !key.is_empty() {
+            return Some(key);
+        }
+    }
+
+    for root in crate::parser::dfp_manager::read_roots() {
+        let env_path = root.join(".env");
+        if env_path.exists() {
+            if let Ok(text) = fs::read_to_string(&env_path) {
+                for line in text.lines() {
+                    let line = line.trim();
+                    if let Some(rest) = line.strip_prefix("ANTHROPIC_API_KEY=") {
+                        let key = rest.trim();
+                        if !key.is_empty() {
+                            return Some(key.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PinCorrection {
+    pub pin_position: u32,
+    pub current_pad: String,
+    pub datasheet_pad: String,
+    pub current_functions: Vec<String>,
+    pub datasheet_functions: Vec<String>,
+    pub correction_type: String,
+    #[serde(default)]
+    pub note: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackageResult {
+    pub package_name: String,
+    pub pin_count: u32,
+    pub pins: HashMap<u32, String>,
+    pub pin_functions: HashMap<String, Vec<String>>,
+    #[serde(default)]
+    pub corrections: Vec<PinCorrection>,
+    #[serde(default)]
+    pub match_score: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerifyResult {
+    pub part_number: String,
+    pub packages: HashMap<String, PackageResult>,
+    #[serde(default)]
+    pub notes: Vec<String>,
+    #[serde(skip)]
+    pub raw_response: String,
+}
+
+impl VerifyResult {
+    pub fn to_overlay_json(&self) -> Value {
+        let mut packages = serde_json::Map::new();
+        for (name, pkg) in &self.packages {
+            let mut pins_map = serde_json::Map::new();
+            let mut sorted_pins: Vec<_> = pkg.pins.iter().collect();
+            sorted_pins.sort_by_key(|(k, _)| **k);
+            for (pos, pad) in sorted_pins {
+                pins_map.insert(pos.to_string(), Value::String(pad.clone()));
+            }
+            let mut pkg_obj = serde_json::Map::new();
+            pkg_obj.insert("source".into(), Value::String("overlay".into()));
+            pkg_obj.insert("pin_count".into(), Value::Number(pkg.pin_count.into()));
+            pkg_obj.insert("pins".into(), Value::Object(pins_map));
+            packages.insert(name.clone(), Value::Object(pkg_obj));
+        }
+        let mut root = serde_json::Map::new();
+        root.insert("packages".into(), Value::Object(packages));
+        Value::Object(root)
+    }
+}
+
+const VERIFY_PROMPT: &str = r#"You are analyzing a Microchip dsPIC33/PIC24 datasheet PDF to extract and verify pin mapping data.
+
+## Task
+
+1. Find ALL package pinout tables in this datasheet (e.g., SPDIP, SOIC, SSOP, QFN, TQFP, UQFN, etc.)
+2. For each package, extract the COMPLETE pin-to-pad mapping (every pin number → pad name)
+3. For each pad, extract ALL listed functions/alternate names
+4. Compare against the current parsed data (provided below) and identify any discrepancies
+
+## Current Parsed Data
+
+{current_data}
+
+## Output Format
+
+Return a JSON object with this exact structure (no markdown fencing, just raw JSON):
+
+{{
+  "packages": {{
+    "<PackageName>": {{
+      "pin_count": <int>,
+      "pins": {{
+        "<pin_number>": "<pad_name>",
+        ...
+      }},
+      "pin_functions": {{
+        "<pad_name>": ["func1", "func2", ...],
+        ...
+      }}
+    }}
+  }},
+  "corrections": [
+    {{
+      "pin_position": <int>,
+      "package": "<PackageName>",
+      "current_pad": "<what EDC says>",
+      "datasheet_pad": "<what datasheet says>",
+      "type": "<wrong_pad|missing_functions|extra_functions|missing_pin>",
+      "note": "<explanation>"
+    }}
+  ],
+  "notes": ["<any general observations about data quality>"]
+}}
+
+## Important Guidelines
+
+- Use UPPERCASE for pad names (e.g., "RA0", "RB5", "MCLR", "VDD", "VSS", "AVDD")
+- Pin numbers must be integers (as strings in JSON keys)
+- Include ALL pins including power (VDD, VSS, AVDD, AVSS, VCAP) and special (MCLR)
+- For pads with numbered duplicates (multiple VDD pins), use suffixes: VDD, VDD_2, VDD_3, etc.
+- Functions should include the primary I/O name (e.g., "RA0"), analog channel (e.g., "AN0"), and any fixed peripheral functions
+- If the datasheet shows a package not in the current data, include it as a new entry
+- If pin data matches perfectly, say so in notes — don't invent corrections
+- Be precise: only flag actual discrepancies, not formatting differences
+"#;
+
+fn build_current_data_summary(device_data: &Value) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "Part: {}",
+        device_data
+            .get("part_number")
+            .and_then(|v| v.as_str())
+            .unwrap_or("UNKNOWN")
+    ));
+    lines.push(format!(
+        "Selected package: {}",
+        device_data
+            .get("selected_package")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default")
+    ));
+
+    if let Some(pins) = device_data.get("pins").and_then(|v| v.as_array()) {
+        lines.push(format!("\nCurrent pin mapping ({} pins):", pins.len()));
+        for pin in pins {
+            let pos = pin.get("position").and_then(|v| v.as_u64()).unwrap_or(0);
+            let pad = pin
+                .get("pad_name")
+                .or_else(|| pin.get("pad"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let funcs: Vec<&str> = pin
+                .get("functions")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|v| v.as_str()).take(8).collect())
+                .unwrap_or_default();
+            let is_power = pin
+                .get("is_power")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let rp = pin.get("rp_number").and_then(|v| v.as_u64());
+            let func_str = funcs.join(", ");
+            let rp_str = rp.map(|r| format!(" [RP{}]", r)).unwrap_or_default();
+            let pwr_str = if is_power { " [POWER]" } else { "" };
+            lines.push(format!(
+                "  Pin {}: {}{}{} — {}",
+                pos, pad, pwr_str, rp_str, func_str
+            ));
+        }
+    }
+
+    lines.join("\n")
+}
+
+fn call_anthropic_api(pdf_bytes: &[u8], prompt: &str, api_key: &str) -> Result<String, String> {
+    let pdf_b64 = base64::engine::general_purpose::STANDARD.encode(pdf_bytes);
+
+    let payload = serde_json::json!({
+        "model": MODEL,
+        "max_tokens": MAX_TOKENS,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": pdf_b64
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": prompt
+                }
+            ]
+        }]
+    });
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("HTTP client error: {e}"))?;
+
+    let resp = client
+        .post(API_URL)
+        .header("x-api-key", api_key)
+        .header("anthropic-version", API_VERSION)
+        .header("content-type", "application/json")
+        .body(serde_json::to_vec(&payload).unwrap())
+        .send()
+        .map_err(|e| format!("API request error: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        return Err(format!("Anthropic API error {}: {}", status, body));
+    }
+
+    let result: Value = resp.json().map_err(|e| format!("JSON parse error: {e}"))?;
+
+    let mut text_parts: Vec<String> = Vec::new();
+    if let Some(content) = result.get("content").and_then(|v: &Value| v.as_array()) {
+        for block in content {
+            if block.get("type").and_then(|v: &Value| v.as_str()) == Some("text") {
+                if let Some(text) = block.get("text").and_then(|v: &Value| v.as_str()) {
+                    text_parts.push(text.to_string());
+                }
+            }
+        }
+    }
+
+    Ok(text_parts.join("\n"))
+}
+
+fn normalize_pad(name: &str) -> String {
+    let re = Regex::new(r"_\d+$").unwrap();
+    re.replace(&name.to_uppercase().trim().to_string(), "")
+        .to_string()
+}
+
+fn parse_anthropic_response(raw: &str, device_data: &Value) -> VerifyResult {
+    let part = device_data
+        .get("part_number")
+        .and_then(|v| v.as_str())
+        .unwrap_or("UNKNOWN")
+        .to_string();
+
+    let mut result = VerifyResult {
+        part_number: part,
+        packages: HashMap::new(),
+        notes: Vec::new(),
+        raw_response: raw.to_string(),
+    };
+
+    // Extract JSON (handle markdown fencing)
+    let mut json_str = raw.trim().to_string();
+    if json_str.starts_with("```") {
+        let lines: Vec<&str> = json_str.lines().collect();
+        let start = lines
+            .iter()
+            .position(|l| l.trim().starts_with('{'))
+            .unwrap_or(1);
+        let end = lines
+            .iter()
+            .rposition(|l| l.trim().starts_with('}'))
+            .unwrap_or(lines.len() - 1);
+        json_str = lines[start..=end].join("\n");
+    }
+
+    let data: Value = match serde_json::from_str(&json_str) {
+        Ok(v) => v,
+        Err(e) => {
+            result
+                .notes
+                .push(format!("Failed to parse Anthropic response as JSON: {}", e));
+            return result;
+        }
+    };
+
+    // Build current pins map for match scoring
+    let current_pins: HashMap<u64, &Value> = device_data
+        .get("pins")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|p| {
+                    p.get("position")
+                        .and_then(|v| v.as_u64())
+                        .map(|pos| (pos, p))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if let Some(packages) = data.get("packages").and_then(|v| v.as_object()) {
+        for (pkg_name, pkg_data) in packages {
+            let mut pins: HashMap<u32, String> = HashMap::new();
+            if let Some(pin_obj) = pkg_data.get("pins").and_then(|v| v.as_object()) {
+                for (pos_str, pad) in pin_obj {
+                    if let (Ok(pos), Some(pad_str)) = (pos_str.parse::<u32>(), pad.as_str()) {
+                        pins.insert(pos, pad_str.to_string());
+                    }
+                }
+            }
+
+            let pin_functions: HashMap<String, Vec<String>> = pkg_data
+                .get("pin_functions")
+                .and_then(|v| v.as_object())
+                .map(|obj| {
+                    obj.iter()
+                        .map(|(k, v)| {
+                            let funcs = v
+                                .as_array()
+                                .map(|a| {
+                                    a.iter()
+                                        .filter_map(|s| s.as_str().map(|s| s.to_string()))
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            (k.clone(), funcs)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let pin_count = pkg_data
+                .get("pin_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(pins.len() as u64) as u32;
+
+            // Calculate match score
+            let mut matches = 0u32;
+            let mut total = 0u32;
+            for (pos, pad) in &pins {
+                if let Some(current) = current_pins.get(&(*pos as u64)) {
+                    total += 1;
+                    let current_pad = current
+                        .get("pad_name")
+                        .or_else(|| current.get("pad"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if normalize_pad(pad) == normalize_pad(current_pad) {
+                        matches += 1;
+                    }
+                }
+            }
+            let match_score = if total > 0 {
+                matches as f64 / total as f64
+            } else {
+                0.0
+            };
+
+            result.packages.insert(
+                pkg_name.clone(),
+                PackageResult {
+                    package_name: pkg_name.clone(),
+                    pin_count,
+                    pins,
+                    pin_functions,
+                    corrections: Vec::new(),
+                    match_score,
+                },
+            );
+        }
+    }
+
+    // Parse corrections
+    if let Some(corrections) = data.get("corrections").and_then(|v| v.as_array()) {
+        for corr in corrections {
+            let pkg_name = corr
+                .get("package")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if let Some(pkg) = result.packages.get_mut(&pkg_name) {
+                pkg.corrections.push(PinCorrection {
+                    pin_position: corr
+                        .get("pin_position")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as u32,
+                    current_pad: corr
+                        .get("current_pad")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    datasheet_pad: corr
+                        .get("datasheet_pad")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    current_functions: Vec::new(),
+                    datasheet_functions: Vec::new(),
+                    correction_type: corr
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string(),
+                    note: corr
+                        .get("note")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                });
+            }
+        }
+    }
+
+    if let Some(notes) = data.get("notes").and_then(|v| v.as_array()) {
+        result.notes = notes
+            .iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect();
+    }
+
+    result
+}
+
+pub fn verify_pinout(
+    pdf_bytes: &[u8],
+    device_data: &Value,
+    api_key: Option<&str>,
+) -> Result<VerifyResult, String> {
+    let key = match api_key {
+        Some(k) if !k.is_empty() => k.to_string(),
+        _ => get_api_key().ok_or_else(|| {
+            "No Anthropic API key configured. Set ANTHROPIC_API_KEY in .env or provide via settings."
+                .to_string()
+        })?,
+    };
+
+    let current_summary = build_current_data_summary(device_data);
+    let prompt = VERIFY_PROMPT.replace("{current_data}", &current_summary);
+
+    let raw_response = call_anthropic_api(pdf_bytes, &prompt, &key)?;
+    Ok(parse_anthropic_response(&raw_response, device_data))
+}
+
+pub fn save_overlay(
+    part_number: &str,
+    verify_result: &VerifyResult,
+    selected_packages: Option<&[String]>,
+) -> Result<PathBuf, String> {
+    let dir = pinouts_dir();
+    fs::create_dir_all(&dir).map_err(|e| format!("Cannot create pinouts dir: {e}"))?;
+    let overlay_path = dir.join(format!("{}.json", part_number.to_uppercase()));
+
+    let mut existing: Value = if overlay_path.exists() {
+        let text = fs::read_to_string(&overlay_path).unwrap_or_else(|_| "{}".to_string());
+        serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    if existing.get("packages").is_none() {
+        existing["packages"] = serde_json::json!({});
+    }
+
+    let overlay_data = verify_result.to_overlay_json();
+    if let Some(new_packages) = overlay_data.get("packages").and_then(|v| v.as_object()) {
+        for (pkg_name, pkg_data) in new_packages {
+            if let Some(selected) = selected_packages {
+                if !selected.contains(pkg_name) {
+                    continue;
+                }
+            }
+            existing["packages"][pkg_name] = pkg_data.clone();
+        }
+    }
+
+    let json = serde_json::to_string_pretty(&existing)
+        .map_err(|e| format!("JSON serialize error: {e}"))?;
+    fs::write(&overlay_path, json).map_err(|e| format!("Write error: {e}"))?;
+
+    Ok(overlay_path)
+}

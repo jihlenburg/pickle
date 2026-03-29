@@ -1,0 +1,1919 @@
+{
+  "part_number": "DSPIC33CK64MP102",
+  "pads": {
+    "RA1": {
+      "name": "RA1",
+      "functions": [
+        "OA1IN-",
+        "ANA1",
+        "RA1"
+      ],
+      "rp_number": null,
+      "port": "A",
+      "port_bit": 1,
+      "analog_channels": [
+        "ANA1"
+      ],
+      "is_power": false
+    },
+    "RA2": {
+      "name": "RA2",
+      "functions": [
+        "OA1IN+",
+        "AN9",
+        "RA2"
+      ],
+      "rp_number": null,
+      "port": "A",
+      "port_bit": 2,
+      "analog_channels": [
+        "AN9"
+      ],
+      "is_power": false
+    },
+    "RA3": {
+      "name": "RA3",
+      "functions": [
+        "DACOUT",
+        "AN3",
+        "CMP1C",
+        "RA3"
+      ],
+      "rp_number": null,
+      "port": "A",
+      "port_bit": 3,
+      "analog_channels": [
+        "AN3"
+      ],
+      "is_power": false
+    },
+    "RA4": {
+      "name": "RA4",
+      "functions": [
+        "AN4",
+        "CMP3B",
+        "IBIAS3",
+        "RA4"
+      ],
+      "rp_number": null,
+      "port": "A",
+      "port_bit": 4,
+      "analog_channels": [
+        "AN4"
+      ],
+      "is_power": false
+    },
+    "AVDD": {
+      "name": "AVDD",
+      "functions": [
+        "AVDD"
+      ],
+      "rp_number": null,
+      "port": null,
+      "port_bit": null,
+      "analog_channels": [],
+      "is_power": true
+    },
+    "AVSS": {
+      "name": "AVSS",
+      "functions": [
+        "AVSS"
+      ],
+      "rp_number": null,
+      "port": null,
+      "port_bit": null,
+      "analog_channels": [],
+      "is_power": true
+    },
+    "VDD": {
+      "name": "VDD",
+      "functions": [
+        "VDD"
+      ],
+      "rp_number": null,
+      "port": null,
+      "port_bit": null,
+      "analog_channels": [],
+      "is_power": true
+    },
+    "VSS": {
+      "name": "VSS",
+      "functions": [
+        "VSS"
+      ],
+      "rp_number": null,
+      "port": null,
+      "port_bit": null,
+      "analog_channels": [],
+      "is_power": true
+    },
+    "RB0": {
+      "name": "RB0",
+      "functions": [
+        "OSCI",
+        "CLKI",
+        "AN5",
+        "RP32",
+        "RB0"
+      ],
+      "rp_number": 32,
+      "port": "B",
+      "port_bit": 0,
+      "analog_channels": [
+        "AN5"
+      ],
+      "is_power": false
+    },
+    "RB1": {
+      "name": "RB1",
+      "functions": [
+        "OSCO",
+        "CLKO",
+        "AN6",
+        "RP33",
+        "RB1"
+      ],
+      "rp_number": 33,
+      "port": "B",
+      "port_bit": 1,
+      "analog_channels": [
+        "AN6"
+      ],
+      "is_power": false
+    },
+    "RB2": {
+      "name": "RB2",
+      "functions": [
+        "OA2OUT",
+        "AN1",
+        "AN7",
+        "ANA0",
+        "CMP1D",
+        "CMP2D",
+        "CMP3D",
+        "RP34",
+        "INT0",
+        "RB2"
+      ],
+      "rp_number": 34,
+      "port": "B",
+      "port_bit": 2,
+      "analog_channels": [
+        "AN1",
+        "AN7",
+        "ANA0"
+      ],
+      "is_power": false
+    },
+    "RB3": {
+      "name": "RB3",
+      "functions": [
+        "PGD2",
+        "OA2IN-",
+        "AN8",
+        "RP35",
+        "RB3"
+      ],
+      "rp_number": 35,
+      "port": "B",
+      "port_bit": 3,
+      "analog_channels": [
+        "AN8"
+      ],
+      "is_power": false
+    },
+    "RB4": {
+      "name": "RB4",
+      "functions": [
+        "PGC2",
+        "OA2IN+",
+        "RP36",
+        "RB4"
+      ],
+      "rp_number": 36,
+      "port": "B",
+      "port_bit": 4,
+      "analog_channels": [],
+      "is_power": false
+    },
+    "RB5": {
+      "name": "RB5",
+      "functions": [
+        "PGD3",
+        "RP37",
+        "SDA2",
+        "RB5"
+      ],
+      "rp_number": 37,
+      "port": "B",
+      "port_bit": 5,
+      "analog_channels": [],
+      "is_power": false
+    },
+    "RB6": {
+      "name": "RB6",
+      "functions": [
+        "PGC3",
+        "RP38",
+        "SCL2",
+        "RB6"
+      ],
+      "rp_number": 38,
+      "port": "B",
+      "port_bit": 6,
+      "analog_channels": [],
+      "is_power": false
+    },
+    "RB7": {
+      "name": "RB7",
+      "functions": [
+        "TDO",
+        "AN2",
+        "CMP3A",
+        "RP39",
+        "RB7"
+      ],
+      "rp_number": 39,
+      "port": "B",
+      "port_bit": 7,
+      "analog_channels": [
+        "AN2"
+      ],
+      "is_power": false
+    },
+    "RB8": {
+      "name": "RB8",
+      "functions": [
+        "PGD1",
+        "AN10",
+        "RP40",
+        "SCL1",
+        "RB8"
+      ],
+      "rp_number": 40,
+      "port": "B",
+      "port_bit": 8,
+      "analog_channels": [
+        "AN10"
+      ],
+      "is_power": false
+    },
+    "RB9": {
+      "name": "RB9",
+      "functions": [
+        "PGC1",
+        "AN11",
+        "RP41",
+        "SDA1",
+        "RB9"
+      ],
+      "rp_number": 41,
+      "port": "B",
+      "port_bit": 9,
+      "analog_channels": [
+        "AN11"
+      ],
+      "is_power": false
+    },
+    "VSS_2": {
+      "name": "VSS_2",
+      "functions": [
+        "VSS"
+      ],
+      "rp_number": null,
+      "port": null,
+      "port_bit": null,
+      "analog_channels": [],
+      "is_power": true
+    },
+    "VDD_2": {
+      "name": "VDD_2",
+      "functions": [
+        "VDD"
+      ],
+      "rp_number": null,
+      "port": null,
+      "port_bit": null,
+      "analog_channels": [],
+      "is_power": true
+    },
+    "RB10": {
+      "name": "RB10",
+      "functions": [
+        "TMS",
+        "RP42",
+        "PWM3H",
+        "RB10"
+      ],
+      "rp_number": 42,
+      "port": "B",
+      "port_bit": 10,
+      "analog_channels": [],
+      "is_power": false
+    },
+    "RB11": {
+      "name": "RB11",
+      "functions": [
+        "TCK",
+        "RP43",
+        "PWM3L",
+        "RB11"
+      ],
+      "rp_number": 43,
+      "port": "B",
+      "port_bit": 11,
+      "analog_channels": [],
+      "is_power": false
+    },
+    "RB12": {
+      "name": "RB12",
+      "functions": [
+        "TDI",
+        "RP44",
+        "PWM2H",
+        "RB12"
+      ],
+      "rp_number": 44,
+      "port": "B",
+      "port_bit": 12,
+      "analog_channels": [],
+      "is_power": false
+    },
+    "RB13": {
+      "name": "RB13",
+      "functions": [
+        "RP45",
+        "PWM2L",
+        "RB13"
+      ],
+      "rp_number": 45,
+      "port": "B",
+      "port_bit": 13,
+      "analog_channels": [],
+      "is_power": false
+    },
+    "RB14": {
+      "name": "RB14",
+      "functions": [
+        "RP46",
+        "PWM1H",
+        "RB14"
+      ],
+      "rp_number": 46,
+      "port": "B",
+      "port_bit": 14,
+      "analog_channels": [],
+      "is_power": false
+    },
+    "RB15": {
+      "name": "RB15",
+      "functions": [
+        "RP47",
+        "PWM1L",
+        "RB15"
+      ],
+      "rp_number": 47,
+      "port": "B",
+      "port_bit": 15,
+      "analog_channels": [],
+      "is_power": false
+    },
+    "MCLR": {
+      "name": "MCLR",
+      "functions": [
+        "MCLR"
+      ],
+      "rp_number": null,
+      "port": null,
+      "port_bit": null,
+      "analog_channels": [],
+      "is_power": true
+    },
+    "RA0": {
+      "name": "RA0",
+      "functions": [
+        "OA1OUT",
+        "AN0",
+        "CMP1A",
+        "IBIAS0",
+        "RA0"
+      ],
+      "rp_number": null,
+      "port": "A",
+      "port_bit": 0,
+      "analog_channels": [
+        "AN0"
+      ],
+      "is_power": false
+    }
+  },
+  "pinouts": {
+    "28-pin SSOP": {
+      "package": "28-pin SSOP",
+      "pin_count": 28,
+      "source": "edc",
+      "pins": {
+        "1": "RA1",
+        "2": "RA2",
+        "3": "RA3",
+        "4": "RA4",
+        "5": "AVDD",
+        "6": "AVSS",
+        "7": "VDD",
+        "8": "VSS",
+        "9": "RB0",
+        "10": "RB1",
+        "11": "RB2",
+        "12": "RB3",
+        "13": "RB4",
+        "14": "RB5",
+        "15": "RB6",
+        "16": "RB7",
+        "17": "RB8",
+        "18": "RB9",
+        "19": "VSS_2",
+        "20": "VDD_2",
+        "21": "RB10",
+        "22": "RB11",
+        "23": "RB12",
+        "24": "RB13",
+        "25": "RB14",
+        "26": "RB15",
+        "27": "MCLR",
+        "28": "RA0"
+      }
+    }
+  },
+  "default_pinout": "28-pin SSOP",
+  "remappable_inputs": [
+    {
+      "name": "U1RX",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "U2RX",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "U3RX",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "U1CTS",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "U2CTS",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "U3CTS",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "SDI1",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "SDI2",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "SDI3",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "ICM1",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "ICM5",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "INT1",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "ADCTRG31",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "RPV0IN",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "RPV4IN",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "T1CK",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "TCKI1",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "TCKI5",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "OCFA",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "OCFB",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "OCFC",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "OCFD",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "QEA1",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "QEA2",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "SENT1IN",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "PCI8",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "PCI12",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "PCI16",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "PWMTRG1",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "REFI",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "CLCINA",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "U1DSR",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "U2DSR",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "U3DSR",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "SCK1IN",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "SCK2IN",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "SCK3IN",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "ICM2",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "INT2",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "RPV1IN",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "RPV5IN",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "TCKI2",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "TCKI6",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "QEB1",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "QEB2",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "SENT2IN",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "PCI9",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "PCI13",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "PCI17",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "PWMTRG2",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "CLCINB",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "SS1",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "SS2",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "SS3",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "ICM3",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "INT3",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "RPV2IN",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "TCKI3",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "INDX1",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "INDX2",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "PCI10",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "PCI14",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "PCI18",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "PWMTRG3",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "CLCINC",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "ICM4",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "ICM8",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "RPV3IN",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "TCKI4",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "HOME1",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "HOME2",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "PCI11",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "PCI15",
+      "direction": "in",
+      "ppsval": null
+    },
+    {
+      "name": "CLCIND",
+      "direction": "in",
+      "ppsval": null
+    }
+  ],
+  "remappable_outputs": [
+    {
+      "name": "U1TX",
+      "direction": "out",
+      "ppsval": 1
+    },
+    {
+      "name": "U1RTS",
+      "direction": "out",
+      "ppsval": 2
+    },
+    {
+      "name": "U2TX",
+      "direction": "out",
+      "ppsval": 3
+    },
+    {
+      "name": "U2RTS",
+      "direction": "out",
+      "ppsval": 4
+    },
+    {
+      "name": "SDO1",
+      "direction": "out",
+      "ppsval": 5
+    },
+    {
+      "name": "SCK1OUT",
+      "direction": "out",
+      "ppsval": 6
+    },
+    {
+      "name": "SS1OUT",
+      "direction": "out",
+      "ppsval": 7
+    },
+    {
+      "name": "SDO2",
+      "direction": "out",
+      "ppsval": 8
+    },
+    {
+      "name": "SCK2OUT",
+      "direction": "out",
+      "ppsval": 9
+    },
+    {
+      "name": "SS2OUT",
+      "direction": "out",
+      "ppsval": 10
+    },
+    {
+      "name": "SDO3",
+      "direction": "out",
+      "ppsval": 11
+    },
+    {
+      "name": "SCK3OUT",
+      "direction": "out",
+      "ppsval": 12
+    },
+    {
+      "name": "SS3OUT",
+      "direction": "out",
+      "ppsval": 13
+    },
+    {
+      "name": "REFO",
+      "direction": "out",
+      "ppsval": 14
+    },
+    {
+      "name": "OCM1A",
+      "direction": "out",
+      "ppsval": 15
+    },
+    {
+      "name": "OCM2A",
+      "direction": "out",
+      "ppsval": 16
+    },
+    {
+      "name": "OCM3A",
+      "direction": "out",
+      "ppsval": 17
+    },
+    {
+      "name": "OCM4A",
+      "direction": "out",
+      "ppsval": 18
+    },
+    {
+      "name": "CMP1",
+      "direction": "out",
+      "ppsval": 23
+    },
+    {
+      "name": "CMP2",
+      "direction": "out",
+      "ppsval": 24
+    },
+    {
+      "name": "CMP3",
+      "direction": "out",
+      "ppsval": 25
+    },
+    {
+      "name": "U3TX",
+      "direction": "out",
+      "ppsval": 27
+    },
+    {
+      "name": "U3RTS",
+      "direction": "out",
+      "ppsval": 28
+    },
+    {
+      "name": "PWM4H",
+      "direction": "out",
+      "ppsval": 34
+    },
+    {
+      "name": "PWM4L",
+      "direction": "out",
+      "ppsval": 35
+    },
+    {
+      "name": "PWMEA",
+      "direction": "out",
+      "ppsval": 36
+    },
+    {
+      "name": "PWMEB",
+      "direction": "out",
+      "ppsval": 37
+    },
+    {
+      "name": "QEICCMP1",
+      "direction": "out",
+      "ppsval": 38
+    },
+    {
+      "name": "QEICCMP2",
+      "direction": "out",
+      "ppsval": 39
+    },
+    {
+      "name": "CLC1OUT",
+      "direction": "out",
+      "ppsval": 40
+    },
+    {
+      "name": "CLC2OUT",
+      "direction": "out",
+      "ppsval": 41
+    },
+    {
+      "name": "PWMEC",
+      "direction": "out",
+      "ppsval": 44
+    },
+    {
+      "name": "PWMED",
+      "direction": "out",
+      "ppsval": 45
+    },
+    {
+      "name": "PTGTRG24",
+      "direction": "out",
+      "ppsval": 46
+    },
+    {
+      "name": "PTGTRG25",
+      "direction": "out",
+      "ppsval": 47
+    },
+    {
+      "name": "SENT1OUT",
+      "direction": "out",
+      "ppsval": 48
+    },
+    {
+      "name": "SENT2OUT",
+      "direction": "out",
+      "ppsval": 49
+    },
+    {
+      "name": "OCM5A",
+      "direction": "out",
+      "ppsval": 50
+    },
+    {
+      "name": "OCM5B",
+      "direction": "out",
+      "ppsval": 51
+    },
+    {
+      "name": "OCM5C",
+      "direction": "out",
+      "ppsval": 52
+    },
+    {
+      "name": "OCM5D",
+      "direction": "out",
+      "ppsval": 53
+    },
+    {
+      "name": "OCM5E",
+      "direction": "out",
+      "ppsval": 54
+    },
+    {
+      "name": "OCM5F",
+      "direction": "out",
+      "ppsval": 55
+    },
+    {
+      "name": "CLC3OUT",
+      "direction": "out",
+      "ppsval": 59
+    },
+    {
+      "name": "CLC4OUT",
+      "direction": "out",
+      "ppsval": 60
+    },
+    {
+      "name": "U1DTR",
+      "direction": "out",
+      "ppsval": 61
+    },
+    {
+      "name": "U2DTR",
+      "direction": "out",
+      "ppsval": 62
+    },
+    {
+      "name": "U3DTR",
+      "direction": "out",
+      "ppsval": 63
+    }
+  ],
+  "pps_input_mappings": [
+    {
+      "peripheral": "INT1R",
+      "register": "RPINR0",
+      "register_addr": 3332,
+      "field_name": "INT1R",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "INT2R",
+      "register": "RPINR1",
+      "register_addr": 3334,
+      "field_name": "INT2R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "INT3R",
+      "register": "RPINR1",
+      "register_addr": 3334,
+      "field_name": "INT3R",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "T1CKR",
+      "register": "RPINR2",
+      "register_addr": 3336,
+      "field_name": "T1CKR",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "TCKI1R",
+      "register": "RPINR3",
+      "register_addr": 3338,
+      "field_name": "TCKI1R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "ICM1R",
+      "register": "RPINR3",
+      "register_addr": 3338,
+      "field_name": "ICM1R",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "TCKI2R",
+      "register": "RPINR4",
+      "register_addr": 3340,
+      "field_name": "TCKI2R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "ICM2R",
+      "register": "RPINR4",
+      "register_addr": 3340,
+      "field_name": "ICM2R",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "TCKI3R",
+      "register": "RPINR5",
+      "register_addr": 3342,
+      "field_name": "TCKI3R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "ICM3R",
+      "register": "RPINR5",
+      "register_addr": 3342,
+      "field_name": "ICM3R",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "TCKI4R",
+      "register": "RPINR6",
+      "register_addr": 3344,
+      "field_name": "TCKI4R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "ICM4R",
+      "register": "RPINR6",
+      "register_addr": 3344,
+      "field_name": "ICM4R",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "TCKI5R",
+      "register": "RPINR7",
+      "register_addr": 3346,
+      "field_name": "TCKI5R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "ICM5R",
+      "register": "RPINR7",
+      "register_addr": 3346,
+      "field_name": "ICM5R",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "OCFAR",
+      "register": "RPINR11",
+      "register_addr": 3354,
+      "field_name": "OCFAR",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "OCFBR",
+      "register": "RPINR11",
+      "register_addr": 3354,
+      "field_name": "OCFBR",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "PCI8R",
+      "register": "RPINR12",
+      "register_addr": 3356,
+      "field_name": "PCI8R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "PCI9R",
+      "register": "RPINR12",
+      "register_addr": 3356,
+      "field_name": "PCI9R",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "PCI10R",
+      "register": "RPINR13",
+      "register_addr": 3358,
+      "field_name": "PCI10R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "PCI11R",
+      "register": "RPINR13",
+      "register_addr": 3358,
+      "field_name": "PCI11R",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "QEIA1R",
+      "register": "RPINR14",
+      "register_addr": 3360,
+      "field_name": "QEIA1R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "QEIB1R",
+      "register": "RPINR14",
+      "register_addr": 3360,
+      "field_name": "QEIB1R",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "QEINDX1R",
+      "register": "RPINR15",
+      "register_addr": 3362,
+      "field_name": "QEINDX1R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "QEIHOM1R",
+      "register": "RPINR15",
+      "register_addr": 3362,
+      "field_name": "QEIHOM1R",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "QEIA2R",
+      "register": "RPINR16",
+      "register_addr": 3364,
+      "field_name": "QEIA2R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "QEIB2R",
+      "register": "RPINR16",
+      "register_addr": 3364,
+      "field_name": "QEIB2R",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "QEINDX2R",
+      "register": "RPINR17",
+      "register_addr": 3366,
+      "field_name": "QEINDX2R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "QEIHOM2R",
+      "register": "RPINR17",
+      "register_addr": 3366,
+      "field_name": "QEIHOM2R",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "U1RXR",
+      "register": "RPINR18",
+      "register_addr": 3368,
+      "field_name": "U1RXR",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "U1DSRR",
+      "register": "RPINR18",
+      "register_addr": 3368,
+      "field_name": "U1DSRR",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "U2RXR",
+      "register": "RPINR19",
+      "register_addr": 3370,
+      "field_name": "U2RXR",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "U2DSRR",
+      "register": "RPINR19",
+      "register_addr": 3370,
+      "field_name": "U2DSRR",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "SDI1R",
+      "register": "RPINR20",
+      "register_addr": 3372,
+      "field_name": "SDI1R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "SCK1R",
+      "register": "RPINR20",
+      "register_addr": 3372,
+      "field_name": "SCK1R",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "SS1R",
+      "register": "RPINR21",
+      "register_addr": 3374,
+      "field_name": "SS1R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "REFOIR",
+      "register": "RPINR21",
+      "register_addr": 3374,
+      "field_name": "REFOIR",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "SDI2R",
+      "register": "RPINR22",
+      "register_addr": 3376,
+      "field_name": "SDI2R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "SCK2R",
+      "register": "RPINR22",
+      "register_addr": 3376,
+      "field_name": "SCK2R",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "SS2R",
+      "register": "RPINR23",
+      "register_addr": 3378,
+      "field_name": "SS2R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "U3RXR",
+      "register": "RPINR27",
+      "register_addr": 3386,
+      "field_name": "U3RXR",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "U3DSRR",
+      "register": "RPINR27",
+      "register_addr": 3386,
+      "field_name": "U3DSRR",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "SDI3R",
+      "register": "RPINR29",
+      "register_addr": 3390,
+      "field_name": "SDI3R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "SCK3R",
+      "register": "RPINR29",
+      "register_addr": 3390,
+      "field_name": "SCK3R",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "SS3R",
+      "register": "RPINR30",
+      "register_addr": 3392,
+      "field_name": "SS3R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "OCFCR",
+      "register": "RPINR37",
+      "register_addr": 3406,
+      "field_name": "OCFCR",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "PCI17R",
+      "register": "RPINR37",
+      "register_addr": 3406,
+      "field_name": "PCI17R",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "PCI18R",
+      "register": "RPINR38",
+      "register_addr": 3408,
+      "field_name": "PCI18R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "PCI12R",
+      "register": "RPINR42",
+      "register_addr": 3416,
+      "field_name": "PCI12R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "PCI13R",
+      "register": "RPINR42",
+      "register_addr": 3416,
+      "field_name": "PCI13R",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "PCI14R",
+      "register": "RPINR43",
+      "register_addr": 3418,
+      "field_name": "PCI14R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "PCI15R",
+      "register": "RPINR43",
+      "register_addr": 3418,
+      "field_name": "PCI15R",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "PCI16R",
+      "register": "RPINR44",
+      "register_addr": 3420,
+      "field_name": "PCI16R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "SENT1R",
+      "register": "RPINR44",
+      "register_addr": 3420,
+      "field_name": "SENT1R",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "SENT2R",
+      "register": "RPINR45",
+      "register_addr": 3422,
+      "field_name": "SENT2R",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "CLCINAR",
+      "register": "RPINR45",
+      "register_addr": 3422,
+      "field_name": "CLCINAR",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "CLCINBR",
+      "register": "RPINR46",
+      "register_addr": 3424,
+      "field_name": "CLCINBR",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "CLCINCR",
+      "register": "RPINR46",
+      "register_addr": 3424,
+      "field_name": "CLCINCR",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "CLCINDR",
+      "register": "RPINR47",
+      "register_addr": 3426,
+      "field_name": "CLCINDR",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "ADCTRGR",
+      "register": "RPINR47",
+      "register_addr": 3426,
+      "field_name": "ADCTRGR",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "OCFDR",
+      "register": "RPINR48",
+      "register_addr": 3428,
+      "field_name": "OCFDR",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "U1CTSR",
+      "register": "RPINR48",
+      "register_addr": 3428,
+      "field_name": "U1CTSR",
+      "field_mask": 255,
+      "field_offset": 8
+    },
+    {
+      "peripheral": "U2CTSR",
+      "register": "RPINR49",
+      "register_addr": 3430,
+      "field_name": "U2CTSR",
+      "field_mask": 255,
+      "field_offset": 0
+    },
+    {
+      "peripheral": "U3CTSR",
+      "register": "RPINR49",
+      "register_addr": 3430,
+      "field_name": "U3CTSR",
+      "field_mask": 255,
+      "field_offset": 8
+    }
+  ],
+  "pps_output_mappings": [
+    {
+      "rp_number": 32,
+      "register": "RPOR0",
+      "register_addr": 3456,
+      "field_name": "RP32R",
+      "field_mask": 63,
+      "field_offset": 0
+    },
+    {
+      "rp_number": 33,
+      "register": "RPOR0",
+      "register_addr": 3456,
+      "field_name": "RP33R",
+      "field_mask": 63,
+      "field_offset": 8
+    },
+    {
+      "rp_number": 34,
+      "register": "RPOR1",
+      "register_addr": 3458,
+      "field_name": "RP34R",
+      "field_mask": 63,
+      "field_offset": 0
+    },
+    {
+      "rp_number": 35,
+      "register": "RPOR1",
+      "register_addr": 3458,
+      "field_name": "RP35R",
+      "field_mask": 63,
+      "field_offset": 8
+    },
+    {
+      "rp_number": 36,
+      "register": "RPOR2",
+      "register_addr": 3460,
+      "field_name": "RP36R",
+      "field_mask": 63,
+      "field_offset": 0
+    },
+    {
+      "rp_number": 37,
+      "register": "RPOR2",
+      "register_addr": 3460,
+      "field_name": "RP37R",
+      "field_mask": 63,
+      "field_offset": 8
+    },
+    {
+      "rp_number": 38,
+      "register": "RPOR3",
+      "register_addr": 3462,
+      "field_name": "RP38R",
+      "field_mask": 63,
+      "field_offset": 0
+    },
+    {
+      "rp_number": 39,
+      "register": "RPOR3",
+      "register_addr": 3462,
+      "field_name": "RP39R",
+      "field_mask": 63,
+      "field_offset": 8
+    },
+    {
+      "rp_number": 40,
+      "register": "RPOR4",
+      "register_addr": 3464,
+      "field_name": "RP40R",
+      "field_mask": 63,
+      "field_offset": 0
+    },
+    {
+      "rp_number": 41,
+      "register": "RPOR4",
+      "register_addr": 3464,
+      "field_name": "RP41R",
+      "field_mask": 63,
+      "field_offset": 8
+    },
+    {
+      "rp_number": 42,
+      "register": "RPOR5",
+      "register_addr": 3466,
+      "field_name": "RP42R",
+      "field_mask": 63,
+      "field_offset": 0
+    },
+    {
+      "rp_number": 43,
+      "register": "RPOR5",
+      "register_addr": 3466,
+      "field_name": "RP43R",
+      "field_mask": 63,
+      "field_offset": 8
+    },
+    {
+      "rp_number": 44,
+      "register": "RPOR6",
+      "register_addr": 3468,
+      "field_name": "RP44R",
+      "field_mask": 63,
+      "field_offset": 0
+    },
+    {
+      "rp_number": 45,
+      "register": "RPOR6",
+      "register_addr": 3468,
+      "field_name": "RP45R",
+      "field_mask": 63,
+      "field_offset": 8
+    },
+    {
+      "rp_number": 46,
+      "register": "RPOR7",
+      "register_addr": 3470,
+      "field_name": "RP46R",
+      "field_mask": 63,
+      "field_offset": 0
+    },
+    {
+      "rp_number": 47,
+      "register": "RPOR7",
+      "register_addr": 3470,
+      "field_name": "RP47R",
+      "field_mask": 63,
+      "field_offset": 8
+    },
+    {
+      "rp_number": 48,
+      "register": "RPOR8",
+      "register_addr": 3472,
+      "field_name": "RP48R",
+      "field_mask": 63,
+      "field_offset": 0
+    },
+    {
+      "rp_number": 49,
+      "register": "RPOR8",
+      "register_addr": 3472,
+      "field_name": "RP49R",
+      "field_mask": 63,
+      "field_offset": 8
+    },
+    {
+      "rp_number": 50,
+      "register": "RPOR9",
+      "register_addr": 3474,
+      "field_name": "RP50R",
+      "field_mask": 63,
+      "field_offset": 0
+    },
+    {
+      "rp_number": 51,
+      "register": "RPOR9",
+      "register_addr": 3474,
+      "field_name": "RP51R",
+      "field_mask": 63,
+      "field_offset": 8
+    },
+    {
+      "rp_number": 52,
+      "register": "RPOR10",
+      "register_addr": 3476,
+      "field_name": "RP52R",
+      "field_mask": 63,
+      "field_offset": 0
+    },
+    {
+      "rp_number": 53,
+      "register": "RPOR10",
+      "register_addr": 3476,
+      "field_name": "RP53R",
+      "field_mask": 63,
+      "field_offset": 8
+    },
+    {
+      "rp_number": 54,
+      "register": "RPOR11",
+      "register_addr": 3478,
+      "field_name": "RP54R",
+      "field_mask": 63,
+      "field_offset": 0
+    },
+    {
+      "rp_number": 55,
+      "register": "RPOR11",
+      "register_addr": 3478,
+      "field_name": "RP55R",
+      "field_mask": 63,
+      "field_offset": 8
+    },
+    {
+      "rp_number": 56,
+      "register": "RPOR12",
+      "register_addr": 3480,
+      "field_name": "RP56R",
+      "field_mask": 63,
+      "field_offset": 0
+    },
+    {
+      "rp_number": 57,
+      "register": "RPOR12",
+      "register_addr": 3480,
+      "field_name": "RP57R",
+      "field_mask": 63,
+      "field_offset": 8
+    },
+    {
+      "rp_number": 58,
+      "register": "RPOR13",
+      "register_addr": 3482,
+      "field_name": "RP58R",
+      "field_mask": 63,
+      "field_offset": 0
+    },
+    {
+      "rp_number": 59,
+      "register": "RPOR13",
+      "register_addr": 3482,
+      "field_name": "RP59R",
+      "field_mask": 63,
+      "field_offset": 8
+    },
+    {
+      "rp_number": 60,
+      "register": "RPOR14",
+      "register_addr": 3484,
+      "field_name": "RP60R",
+      "field_mask": 63,
+      "field_offset": 0
+    },
+    {
+      "rp_number": 61,
+      "register": "RPOR14",
+      "register_addr": 3484,
+      "field_name": "RP61R",
+      "field_mask": 63,
+      "field_offset": 8
+    },
+    {
+      "rp_number": 65,
+      "register": "RPOR15",
+      "register_addr": 3486,
+      "field_name": "RP65R",
+      "field_mask": 63,
+      "field_offset": 0
+    },
+    {
+      "rp_number": 72,
+      "register": "RPOR15",
+      "register_addr": 3486,
+      "field_name": "RP72R",
+      "field_mask": 63,
+      "field_offset": 8
+    },
+    {
+      "rp_number": 74,
+      "register": "RPOR16",
+      "register_addr": 3488,
+      "field_name": "RP74R",
+      "field_mask": 63,
+      "field_offset": 0
+    },
+    {
+      "rp_number": 77,
+      "register": "RPOR16",
+      "register_addr": 3488,
+      "field_name": "RP77R",
+      "field_mask": 63,
+      "field_offset": 8
+    },
+    {
+      "rp_number": 176,
+      "register": "RPOR17",
+      "register_addr": 3490,
+      "field_name": "RP176R",
+      "field_mask": 63,
+      "field_offset": 0
+    },
+    {
+      "rp_number": 177,
+      "register": "RPOR17",
+      "register_addr": 3490,
+      "field_name": "RP177R",
+      "field_mask": 63,
+      "field_offset": 8
+    },
+    {
+      "rp_number": 178,
+      "register": "RPOR18",
+      "register_addr": 3492,
+      "field_name": "RP178R",
+      "field_mask": 63,
+      "field_offset": 0
+    },
+    {
+      "rp_number": 179,
+      "register": "RPOR18",
+      "register_addr": 3492,
+      "field_name": "RP179R",
+      "field_mask": 63,
+      "field_offset": 8
+    },
+    {
+      "rp_number": 180,
+      "register": "RPOR19",
+      "register_addr": 3494,
+      "field_name": "RP180R",
+      "field_mask": 63,
+      "field_offset": 0
+    },
+    {
+      "rp_number": 181,
+      "register": "RPOR19",
+      "register_addr": 3494,
+      "field_name": "RP181R",
+      "field_mask": 63,
+      "field_offset": 8
+    }
+  ],
+  "port_registers": {
+    "ANSELA": 3584,
+    "TRISA": 3586,
+    "PORTA": 3588,
+    "LATA": 3590,
+    "ANSELB": 3612,
+    "TRISB": 3614,
+    "PORTB": 3616,
+    "LATB": 3618
+  },
+  "ansel_bits": {
+    "A": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "B": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      7,
+      8,
+      9
+    ]
+  }
+}
