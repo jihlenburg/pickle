@@ -269,8 +269,34 @@ function periphClass(name) {
     if (/^PWM|^OCM/.test(name)) return 'periph-pwm';
     if (/^T\d|^TCKI|^ICM/.test(name)) return 'periph-timer';
     if (/^AN|^ADC/.test(name)) return 'periph-adc';
-    if (/^CMP|^OA/.test(name)) return 'periph-cmp';
+    if (/^CMP/.test(name)) return 'periph-cmp';
+    if (/^OA/.test(name)) return 'periph-opamp';
     return 'periph-other';
+}
+
+/**
+ * Return a granular CSS color class for a function tag.
+ * More specific than periphClass — gives each peripheral type its own color.
+ * @param {string} name - Function name (e.g. "AN0", "CMP1D", "OA2OUT", "RB2")
+ * @returns {string} CSS class name (e.g. "tag-adc", "tag-cmp")
+ */
+function funcTagColorClass(name) {
+    if (/^AN[A-Z]?\d+$|^VREF[+-]?$|^IBIAS/.test(name)) return 'tag-adc';
+    if (/^CMP\d+[A-D]?$/.test(name))                     return 'tag-cmp';
+    if (/^OA\d/.test(name))                                return 'tag-opamp';
+    if (/^DAC/.test(name))                                 return 'tag-dac';
+    if (/^U\d/.test(name))                                 return 'tag-uart';
+    if (/^S[DC][OI]\d|^SS\d|^SCK\d/.test(name))           return 'tag-spi';
+    if (/^A?S[DC][AL]\d/.test(name))                       return 'tag-i2c';
+    if (/^PWM|^OCM|^PCI\d/.test(name))                     return 'tag-pwm';
+    if (/^T\d|^TCKI|^ICM/.test(name))                      return 'tag-timer';
+    if (/^R[A-Z]\d+$/.test(name))                          return 'tag-gpio';
+    if (/^INT\d/.test(name))                                return 'tag-int';
+    if (/^CLC|^SENT|^QE|^HOME|^INDX|^REF[IO]|^OSC|^CLK|^C\d+(TX|RX)$/.test(name)) return 'tag-sys';
+    if (/^PG[DC]\d|^MCLR/.test(name))                      return 'tag-debug';
+    if (/^TD[IO]$|^TMS$|^TCK$/.test(name))                 return 'tag-jtag';
+    if (/^RP\d+$/.test(name))                               return 'tag-pps';
+    return 'tag-other';
 }
 
 /**
@@ -1624,6 +1650,7 @@ function renderDevice() {
         if (pin.is_power) tr.classList.add('power');
         if (isIcspPin(pin)) tr.classList.add('icsp');
         if (isJtagPin(pin)) tr.classList.add('jtag');
+        if (assignments[pin.position]) tr.classList.add('assigned');
 
         // Column: pin number
         const tdNum = document.createElement('td');
@@ -1638,177 +1665,127 @@ function renderDevice() {
         tdName.textContent = portName;
         tr.appendChild(tdName);
 
-        // Column: available functions (as colored tags)
+        // Column: available functions (as clickable colored tags)
         const tdFunc = document.createElement('td');
         const funcDiv = document.createElement('div');
         funcDiv.className = 'pin-functions';
+
+        const isPower = pin.is_power;
+        const isIcsp = isIcspPin(pin);
+        const isJtag = isJtagPin(pin);
+        const currentAssigns = getAssignmentsAt(pin.position);
+        const hasNonFixed = currentAssigns.some(a => !a.fixed);
+
         for (const fn of pin.functions) {
             if (isI2cRoutingFunction(fn) && !isI2cRoutingFunctionActive(fn)) continue;
+
             const span = document.createElement('span');
-            span.className = 'func-tag';
-            if (/^RP\d+$/.test(fn)) span.classList.add('rp');
-            if (/^AN[A-Z]?\d+$/.test(fn)) span.classList.add('analog');
-            if (isIcspFunction(fn)) span.classList.add('icsp');
-            if (isJtagFunction(fn) && isJtagEnabled()) span.classList.add('jtag');
-            span.textContent = fn;
-            const desc = /^RP\d+$/.test(fn)
-                ? `${fn} — enables PPS peripheral routing (UART, SPI, PWM, etc.) on this pin`
-                : getDescription(fn);
-            if (desc) span.title = desc;
+            const colorClass = funcTagColorClass(fn);
+            const isRp = /^RP\d+$/.test(fn);
+
+            span.className = `func-tag ${colorClass}`;
+
+            // Determine clickability: power and active ICSP/JTAG functions are reserved
+            const isReservedIcsp = isIcspFunction(fn);
+            const isReservedJtag = isJtagFunction(fn) && isJtagEnabled();
+
+            if (isPower || isReservedIcsp || isReservedJtag) {
+                span.classList.add('reserved');
+            } else {
+                span.classList.add('clickable');
+                span.dataset.pinPos = pin.position;
+                span.dataset.function = fn;
+                span.addEventListener('click', onFuncTagClick);
+
+                // Highlight selected state
+                if (isRp) {
+                    if (hasNonFixed) span.classList.add('selected');
+                } else if (hasAssignmentFor(pin.position, fn)) {
+                    span.classList.add('selected');
+                }
+            }
+
+            // RP tags display as "PPS" with the actual RP number in tooltip
+            if (isRp) {
+                span.textContent = 'PPS';
+                span.title = `${fn} — click to select a remappable peripheral`;
+            } else {
+                span.textContent = fn;
+                const desc = getDescription(fn);
+                if (desc) span.title = desc;
+            }
+
             funcDiv.appendChild(span);
         }
         tdFunc.appendChild(funcDiv);
         tr.appendChild(tdFunc);
 
-        // Column: assignment dropdown (non-power pins only)
-        const tdAssign = document.createElement('td');
-        if (!pin.is_power) {
-            if (isJtagPin(pin)) {
+        // Column: Remapping (PPS-only dropdown for RP-capable pins)
+        const tdRemap = document.createElement('td');
+        if (!isPower) {
+            if (isJtag) {
                 const reserved = document.createElement('span');
                 reserved.className = 'pin-reserved';
                 reserved.textContent = 'JTAG';
                 reserved.title = `${getJtagFunction(pin) || 'JTAG'} reserved while JTAGEN = ON`;
-                tdAssign.appendChild(reserved);
-            } else {
+                tdRemap.appendChild(reserved);
+            } else if (pin.rp_number !== null) {
                 const periphs = getAvailablePeripherals(pin);
+                const ppsPeriphs = periphs.filter(p => !p.fixed);
 
-                // Separate fixed analog functions (checkboxes) from everything else (dropdown)
-                const analogFixedPeriphs = periphs.filter(p => p.fixed && isAnalogFunction(p.name));
-                const dropdownPeriphs = periphs.filter(p => !(p.fixed && isAnalogFunction(p.name)));
-                const fixedPeriphs = dropdownPeriphs.filter(p => p.fixed);
-                const ppsPeriphs = dropdownPeriphs.filter(p => !p.fixed);
-
-                // Render analog fixed functions as labeled checkbox group
-                if (analogFixedPeriphs.length > 0) {
-                    const hasDigitalAssign = getAssignmentsAt(pin.position)
-                        .some(a => !isAnalogFunction(a.peripheral));
-
-                    const analogBox = document.createElement('div');
-                    analogBox.className = 'pin-analog-checks';
-
-                    const header = document.createElement('span');
-                    header.className = 'pin-analog-header';
-                    header.textContent = 'Analog';
-                    header.title = 'Analog functions can share this pin — check multiple';
-                    analogBox.appendChild(header);
-
-                    for (const ap of analogFixedPeriphs) {
-                        const lbl = document.createElement('label');
-                        lbl.className = `pin-analog-check ${periphClass(ap.name)}`;
-                        const cb = document.createElement('input');
-                        cb.type = 'checkbox';
-                        cb.dataset.pinPos = pin.position;
-                        cb.dataset.signal = ap.name;
-                        cb.dataset.direction = ap.direction;
-                        cb.checked = hasAssignmentFor(pin.position, ap.name);
-                        if (hasDigitalAssign) {
-                            cb.disabled = true;
-                            lbl.title = 'Analog functions unavailable while a digital function is assigned';
-                        } else {
-                            const desc = getDescription(ap.name);
-                            if (desc) lbl.title = desc;
-                        }
-                        cb.addEventListener('change', onPinViewAnalogToggle);
-                        lbl.appendChild(cb);
-                        lbl.appendChild(document.createTextNode(ap.name));
-                        analogBox.appendChild(lbl);
-                    }
-                    tdAssign.appendChild(analogBox);
-                }
-
-                // Render dropdown for non-analog fixed + PPS functions
-                if (dropdownPeriphs.length > 0) {
-                    // Add "Digital" label when analog checkboxes are also present
-                    if (analogFixedPeriphs.length > 0) {
-                        const digHeader = document.createElement('span');
-                        digHeader.className = 'pin-digital-header';
-                        digHeader.textContent = 'Digital';
-                        digHeader.title = 'Digital functions are exclusive — only one can be assigned';
-                        tdAssign.appendChild(digHeader);
-                    }
-
+                if (ppsPeriphs.length > 0) {
                     const select = document.createElement('select');
-                    select.className = 'assign-select';
+                    select.className = 'remap-select';
                     select.dataset.pinPos = pin.position;
-                    select.dataset.rpNum = pin.rp_number ?? '';
-                    select.dataset.fixed = pin.rp_number === null ? '1' : '0';
+                    select.dataset.rpNum = pin.rp_number;
 
                     const optNone = document.createElement('option');
                     optNone.value = '';
-                    optNone.textContent = '\u2014 unassigned \u2014';
+                    optNone.textContent = `\u2014 RP${pin.rp_number} \u2014`;
                     select.appendChild(optNone);
 
-                    // Helper: add optgroups for a set of peripherals
-                    const addOptgroups = (list) => {
-                        const seen = new Set();
-                        for (const p of list) {
-                            if (seen.has(p.group)) continue;
-                            seen.add(p.group);
+                    // Build optgroups by peripheral group
+                    const seen = new Set();
+                    for (const p of ppsPeriphs) {
+                        if (seen.has(p.group)) continue;
+                        seen.add(p.group);
 
-                            const optgroup = document.createElement('optgroup');
-                            optgroup.label = p.group;
-                            const groupPeriphs = list.filter(x => x.group === p.group);
-                            for (const gp of groupPeriphs) {
-                                const opt = document.createElement('option');
-                                let label = gp.name;
-                                if (!gp.fixed) {
-                                    const dirLabel = gp.direction === 'out' ? 'OUT' : 'IN';
-                                    label = `${gp.name} (${dirLabel})`;
-                                } else if (gp.direction === 'io') {
-                                    label = `${gp.name} (IN/OUT)`;
-                                }
-                                opt.value = JSON.stringify({
-                                    name: gp.name, direction: gp.direction,
-                                    ppsval: gp.ppsval, fixed: gp.fixed,
-                                });
-                                opt.textContent = label;
-                                opt.className = periphClass(gp.name);
-                                const optDesc = getDescription(gp.name);
-                                if (optDesc) opt.title = optDesc;
-                                optgroup.appendChild(opt);
-                            }
-                            select.appendChild(optgroup);
+                        const optgroup = document.createElement('optgroup');
+                        optgroup.label = p.group;
+                        const groupItems = ppsPeriphs.filter(x => x.group === p.group);
+                        for (const gp of groupItems) {
+                            const opt = document.createElement('option');
+                            const dirLabel = gp.direction === 'out' ? 'OUT' : 'IN';
+                            opt.value = JSON.stringify({
+                                name: gp.name, direction: gp.direction,
+                                ppsval: gp.ppsval,
+                            });
+                            opt.textContent = `${gp.name} (${dirLabel})`;
+                            opt.className = periphClass(gp.name);
+                            const optDesc = getDescription(gp.name);
+                            if (optDesc) opt.title = optDesc;
+                            optgroup.appendChild(opt);
                         }
-                    };
-
-                    // Fixed functions section (non-analog only)
-                    addOptgroups(fixedPeriphs);
-
-                    // PPS section with divider (or "no PPS" note)
-                    if (pin.rp_number !== null && ppsPeriphs.length > 0) {
-                        const divider = document.createElement('option');
-                        divider.disabled = true;
-                        divider.className = 'assign-divider';
-                        divider.textContent = `\u2500\u2500 Remappable via PPS (RP${pin.rp_number}) \u2500\u2500`;
-                        select.appendChild(divider);
-                        addOptgroups(ppsPeriphs);
-                    } else if (pin.rp_number === null && fixedPeriphs.length > 0) {
-                        const note = document.createElement('option');
-                        note.disabled = true;
-                        note.className = 'assign-divider';
-                        note.textContent = '\u2500\u2500 No PPS (fixed functions only) \u2500\u2500';
-                        select.appendChild(note);
+                        select.appendChild(optgroup);
                     }
 
-                    // Restore previous non-analog assignment if present
-                    const nonAnalogAssign = getAssignmentsAt(pin.position)
-                        .find(a => !isAnalogFunction(a.peripheral));
-                    if (nonAnalogAssign) {
+                    // Restore previous PPS assignment if present
+                    const ppsAssign = currentAssigns.find(a => !a.fixed);
+                    if (ppsAssign) {
                         const val = JSON.stringify({
-                            name: nonAnalogAssign.peripheral,
-                            direction: nonAnalogAssign.direction,
-                            ppsval: nonAnalogAssign.ppsval,
-                            fixed: nonAnalogAssign.fixed || false,
+                            name: ppsAssign.peripheral,
+                            direction: ppsAssign.direction,
+                            ppsval: ppsAssign.ppsval,
                         });
                         select.value = val;
                     }
 
-                    select.addEventListener('change', onAssignChange);
-                    tdAssign.appendChild(select);
+                    select.addEventListener('change', onRemapChange);
+                    tdRemap.appendChild(select);
                 }
             }
         }
-        tr.appendChild(tdAssign);
+        tr.appendChild(tdRemap);
 
         // Column: signal name input (non-power pins only)
         const tdSig = document.createElement('td');
@@ -2157,92 +2134,151 @@ function scrollToPin(pos) {
 }
 
 // =============================================================================
-// Assignment Change Handler
+// Assignment Change Handlers — Clickable Function Tags + PPS Remapping
 // =============================================================================
 
-/** Handle analog function checkbox toggle in the pin view. */
-function onPinViewAnalogToggle(e) {
+/**
+ * Handle clicks on function tags in the pin-view Functions column.
+ * Analog functions toggle (multi-select allowed); digital/GPIO are exclusive;
+ * PPS pseudo-tag focuses the Remapping dropdown.
+ */
+function onFuncTagClick(e) {
+    const tag = e.currentTarget;
+    const pinPos = parseInt(tag.dataset.pinPos, 10);
+    const fnName = tag.dataset.function;
+    const pin = deviceData.pins.find(p => p.position === pinPos);
+    if (!pin) return;
+
+    // Guard: reserved tags are not clickable
+    if (tag.classList.contains('reserved')) return;
+
+    // PPS pseudo-tag: focus the Remapping dropdown instead of toggling
+    if (/^RP\d+$/.test(fnName)) {
+        const row = document.getElementById(`pin-row-${pinPos}`);
+        const select = row?.querySelector('.remap-select');
+        if (select) { select.focus(); select.showPicker?.(); }
+        return;
+    }
+
+    // Power/supply functions are never assignable
+    if (/^V[DS]|^AV[DS]/.test(fnName)) return;
+
     pushUndo();
 
-    const cb = e.target;
-    const pinPos = parseInt(cb.dataset.pinPos, 10);
-    const signalName = cb.dataset.signal;
-    const direction = cb.dataset.direction;
-    const row = document.getElementById(`pin-row-${pinPos}`);
+    const isAnalog = isAnalogFunction(fnName);
+    const alreadyAssigned = hasAssignmentFor(pinPos, fnName);
 
-    if (cb.checked) {
-        // Clear any non-analog (digital/PPS) assignment — they conflict
+    if (alreadyAssigned) {
+        // Toggle off — remove this specific assignment
+        removeAssignment(pinPos, fnName);
+        if (!assignments[pinPos]) delete signalNames[pinPos];
+    } else if (isAnalog) {
+        // Analog toggle on — clear any digital/PPS first, then add
         const existing = getAssignmentsAt(pinPos);
         const digitalAssign = existing.find(a => !isAnalogFunction(a.peripheral));
         if (digitalAssign) {
             removeAssignment(pinPos, digitalAssign.peripheral);
-            // Reset the dropdown to "unassigned"
-            const select = row?.querySelector('.assign-select');
+            // Also reset the PPS Remapping dropdown
+            const row = document.getElementById(`pin-row-${pinPos}`);
+            const select = row?.querySelector('.remap-select');
             if (select) select.value = '';
         }
 
-        const pin = deviceData.pins.find(p => p.position === pinPos);
+        const periphs = getAvailablePeripherals(pin);
+        const pInfo = periphs.find(p => p.name === fnName);
         addAnalogAssignment(pinPos, {
-            peripheral: signalName,
-            direction: direction,
+            peripheral: fnName,
+            direction: pInfo ? pInfo.direction : 'in',
             ppsval: null,
-            rp_number: pin ? pin.rp_number : null,
+            rp_number: pin.rp_number,
             fixed: true,
         });
     } else {
-        removeAssignment(pinPos, signalName);
-        if (!assignments[pinPos]) {
-            delete signalNames[pinPos];
-        }
+        // Digital / fixed non-analog — exclusive, replaces everything
+        const periphs = getAvailablePeripherals(pin);
+        const pInfo = periphs.find(p => p.name === fnName);
+        setAssignment(pinPos, {
+            peripheral: fnName,
+            direction: pInfo ? pInfo.direction : 'io',
+            ppsval: pInfo ? pInfo.ppsval : null,
+            rp_number: pin.rp_number,
+            fixed: pInfo ? pInfo.fixed : true,
+        });
+        // Clear PPS dropdown since a fixed function was chosen
+        const row = document.getElementById(`pin-row-${pinPos}`);
+        const select = row?.querySelector('.remap-select');
+        if (select) select.value = '';
     }
 
+    const row = document.getElementById(`pin-row-${pinPos}`);
+    if (row) {
+        row.classList.toggle('assigned', !!assignments[pinPos]);
+    }
+
+    updateFuncTagStates(pinPos);
     updateSummary();
     checkConflicts();
     renderPackageDiagram();
 }
 
-/** Handle peripheral assignment dropdown changes. Pushes undo state first. */
-function onAssignChange(e) {
+/**
+ * Update the .selected class on all function tags in a pin row
+ * without triggering a full re-render.
+ * @param {number} pinPos - Pin position to update
+ */
+function updateFuncTagStates(pinPos) {
+    const row = document.getElementById(`pin-row-${pinPos}`);
+    if (!row) return;
+
+    const tags = row.querySelectorAll('.func-tag.clickable');
+    const currentAssigns = getAssignmentsAt(pinPos);
+    const hasNonFixed = currentAssigns.some(a => !a.fixed);
+
+    for (const tag of tags) {
+        const fn = tag.dataset.function;
+        if (!fn) continue;
+
+        if (/^RP\d+$/.test(fn)) {
+            // PPS pseudo-tag highlights when a PPS (non-fixed) peripheral is assigned
+            tag.classList.toggle('selected', hasNonFixed);
+        } else {
+            tag.classList.toggle('selected', hasAssignmentFor(pinPos, fn));
+        }
+    }
+}
+
+/**
+ * Handle PPS Remapping dropdown changes. Selecting a PPS peripheral replaces
+ * all existing assignments (digital/analog); clearing preserves analog.
+ */
+function onRemapChange(e) {
     pushUndo();
 
     const select = e.target;
-    const pinPos = parseInt(select.dataset.pinPos);
+    const pinPos = parseInt(select.dataset.pinPos, 10);
     const rpNum = select.dataset.rpNum ? parseInt(select.dataset.rpNum) : null;
     const row = document.getElementById(`pin-row-${pinPos}`);
 
     if (select.value) {
-        const { name, direction, ppsval, fixed } = JSON.parse(select.value);
-        const newAssign = { peripheral: name, direction, ppsval, rp_number: rpNum, fixed: !!fixed };
-        // Dropdown only contains non-analog functions; selecting one replaces everything
-        setAssignment(pinPos, newAssign);
-        row.classList.add('assigned');
+        const { name, direction, ppsval } = JSON.parse(select.value);
+        // PPS assignment replaces everything (analog + digital)
+        setAssignment(pinPos, {
+            peripheral: name, direction, ppsval,
+            rp_number: rpNum, fixed: false,
+        });
+        if (row) row.classList.add('assigned');
     } else {
-        // "Unassigned" only clears the dropdown (non-analog) assignment;
-        // preserve any checked analog functions
-        const analogAssigns = getAssignmentsAt(pinPos).filter(a => isAnalogFunction(a.peripheral));
+        // Clearing the dropdown: remove only the PPS (non-fixed) assignment,
+        // preserve any analog tag selections
+        const analogAssigns = getAssignmentsAt(pinPos).filter(a => isAnalogFunction(a.peripheral) && a.fixed);
         delete assignments[pinPos];
         if (analogAssigns.length > 0) {
             assignments[pinPos] = analogAssigns.length === 1 ? analogAssigns[0] : analogAssigns;
-        } else {
-            row.classList.remove('assigned');
         }
+        if (row) row.classList.toggle('assigned', !!assignments[pinPos]);
     }
 
-    // Uncheck analog checkboxes in this row if a digital function was selected
-    const analogChecks = row.querySelectorAll('.pin-analog-check input[type="checkbox"]');
-    const hasDigital = getAssignmentsAt(pinPos).some(a => !isAnalogFunction(a.peripheral));
-    for (const cb of analogChecks) {
-        if (hasDigital) {
-            cb.checked = false;
-            cb.disabled = true;
-            cb.closest('.pin-analog-check').title = 'Analog functions unavailable while a digital function is assigned';
-        } else {
-            cb.disabled = false;
-            cb.checked = hasAssignmentFor(pinPos, cb.dataset.signal);
-            cb.closest('.pin-analog-check').title = getDescription(cb.dataset.signal) || '';
-        }
-    }
-
+    updateFuncTagStates(pinPos);
     updateSummary();
     checkConflicts();
     renderPackageDiagram();

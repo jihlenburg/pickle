@@ -33,10 +33,17 @@
     --pwm: #f56c6c;
     --timer: #909399;
     --adc: #b37feb;
-    --cmp: #e6a23c;
+    --cmp: #2dd4bf;
+    --opamp: #f472b6;
+    --dac: #a78bfa;
+    --gpio: #64748b;
+    --int: #fbbf24;
+    --sys: #5eead4;
     --other: #00adb5;
     --icsp: #f0c040;
     --jtag: #ff9f43;
+    --selected: rgba(255, 200, 50, 0.18);
+    --selected-border: rgba(255, 200, 50, 0.5);
     --code-bg: #0d1117;
     --code-fg: #c9d1d9;
     --hover-overlay: rgba(255,255,255,0.03);
@@ -46,7 +53,6 @@
     --conflict-border: rgba(233,69,96,0.15);
     --assigned-overlay: rgba(0,173,181,0.2);
     --rp-bg: rgba(0,173,181,0.15);
-    --analog-bg: rgba(179,127,235,0.15);
     --icsp-bg: rgba(240,192,64,0.15);
     --jtag-bg: rgba(255,159,67,0.16);
     --success-bg: rgba(103,194,58,0.15);
@@ -69,10 +75,17 @@
     --pwm: #dc2626;
     --timer: #6b7280;
     --adc: #7c3aed;
-    --cmp: #c2790e;
+    --cmp: #0d9488;
+    --opamp: #db2777;
+    --dac: #6d28d9;
+    --gpio: #475569;
+    --int: #d97706;
+    --sys: #0d9488;
     --other: #0891b2;
     --icsp: #b88a00;
     --jtag: #c96a00;
+    --selected: rgba(180, 140, 0, 0.12);
+    --selected-border: rgba(180, 140, 0, 0.4);
     --code-bg: #f8f9fa;
     --code-fg: #1f2328;
     --hover-overlay: rgba(0,0,0,0.03);
@@ -82,7 +95,6 @@
     --conflict-border: rgba(214,51,108,0.12);
     --assigned-overlay: rgba(8,145,178,0.1);
     --rp-bg: rgba(8,145,178,0.1);
-    --analog-bg: rgba(124,58,237,0.1);
     --icsp-bg: rgba(184,138,0,0.1);
     --jtag-bg: rgba(201,106,0,0.1);
     --success-bg: rgba(61,139,43,0.1);
@@ -274,12 +286,41 @@ header h1 {
     white-space: nowrap;
 }
 
-.func-tag.rp { color: var(--accent2); background: var(--rp-bg); }
-.func-tag.analog { color: var(--adc); background: var(--analog-bg); }
-.func-tag.icsp { color: var(--icsp); background: var(--icsp-bg); }
-.func-tag.jtag { color: var(--jtag); background: var(--jtag-bg); }
+/* Per-type tag colors */
+.func-tag.tag-adc    { color: var(--adc);    background: color-mix(in srgb, var(--adc) 15%, transparent); }
+.func-tag.tag-cmp    { color: var(--cmp);    background: color-mix(in srgb, var(--cmp) 15%, transparent); }
+.func-tag.tag-opamp  { color: var(--opamp);  background: color-mix(in srgb, var(--opamp) 15%, transparent); }
+.func-tag.tag-dac    { color: var(--dac);    background: color-mix(in srgb, var(--dac) 15%, transparent); }
+.func-tag.tag-uart   { color: var(--uart);   background: color-mix(in srgb, var(--uart) 15%, transparent); }
+.func-tag.tag-spi    { color: var(--spi);    background: color-mix(in srgb, var(--spi) 15%, transparent); }
+.func-tag.tag-i2c    { color: var(--i2c);    background: color-mix(in srgb, var(--i2c) 15%, transparent); }
+.func-tag.tag-pwm    { color: var(--pwm);    background: color-mix(in srgb, var(--pwm) 15%, transparent); }
+.func-tag.tag-timer  { color: var(--timer);  background: color-mix(in srgb, var(--timer) 15%, transparent); }
+.func-tag.tag-gpio   { color: var(--gpio);   background: color-mix(in srgb, var(--gpio) 15%, transparent); }
+.func-tag.tag-int    { color: var(--int);    background: color-mix(in srgb, var(--int) 15%, transparent); }
+.func-tag.tag-sys    { color: var(--sys);    background: color-mix(in srgb, var(--sys) 15%, transparent); }
+.func-tag.tag-debug  { color: var(--icsp);   background: var(--icsp-bg); }
+.func-tag.tag-jtag   { color: var(--jtag);   background: var(--jtag-bg); }
+.func-tag.tag-pps    { color: var(--accent2); background: var(--rp-bg); }
+.func-tag.tag-other  { color: var(--text-dim); background: var(--bg-pin); }
 
-.assign-select {
+/* Clickable tag interaction */
+.func-tag.clickable {
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 0.12s, border-color 0.12s;
+}
+.func-tag.clickable:hover { filter: brightness(1.25); }
+.func-tag.reserved { cursor: not-allowed; opacity: 0.65; }
+
+/* Selected (assigned) tag — gold highlight */
+.func-tag.selected {
+    background: var(--selected);
+    border: 1px solid var(--selected-border);
+    font-weight: 600;
+}
+
+.remap-select {
     background: var(--bg);
     color: var(--text);
     border: 1px solid var(--border);
@@ -291,7 +332,7 @@ header h1 {
     min-width: 140px;
 }
 
-.assign-select:focus {
+.remap-select:focus {
     outline: none;
     border-color: var(--accent2);
 }
@@ -308,13 +349,7 @@ header h1 {
     text-align: center;
 }
 
-.assign-select option { background: var(--bg-card); }
-.assign-select option.assign-divider {
-    font-size: 10px;
-    color: var(--text-dim);
-    text-align: center;
-    padding: 4px 0;
-}
+.remap-select option { background: var(--bg-card); }
 
 .signal-input {
     background: var(--bg);
@@ -345,6 +380,7 @@ header h1 {
 .periph-timer { color: var(--timer); }
 .periph-adc { color: var(--adc); }
 .periph-cmp { color: var(--cmp); }
+.periph-opamp { color: var(--opamp); }
 .periph-other { color: var(--other); }
 
 /* Code output */
@@ -1437,7 +1473,7 @@ header h1 {
 
 #part-input,
 #pkg-select,
-.assign-select,
+.remap-select,
 .signal-input,
 .osc-row select,
 .osc-row input,
@@ -1676,7 +1712,7 @@ header h1 {
     border-radius: 4px;
 }
 
-.assign-select {
+.remap-select {
     min-width: 120px;
     padding: 4px 6px;
     font-size: 11px;
@@ -2063,6 +2099,7 @@ header h1 {
 .periph-signal-name.periph-timer { color: var(--timer); }
 .periph-signal-name.periph-adc { color: var(--adc); }
 .periph-signal-name.periph-cmp { color: var(--cmp); }
+.periph-signal-name.periph-opamp { color: var(--opamp); }
 .periph-signal-name.periph-other { color: var(--other); }
 
 .periph-signal-dir {
@@ -2190,63 +2227,6 @@ option.periph-pin-used {
     margin-left: 4px;
     flex-shrink: 0;
     white-space: nowrap;
-}
-
-/* Analog function checkboxes in pin-view assignment column */
-.pin-analog-checks {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 1px 6px;
-    margin-bottom: 3px;
-    padding: 3px 5px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-}
-
-.pin-analog-header,
-.pin-digital-header {
-    font-size: 9px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--text-dim);
-    cursor: default;
-}
-
-.pin-analog-header {
-    margin-right: 2px;
-}
-
-.pin-digital-header {
-    display: block;
-    margin-bottom: 1px;
-}
-
-.pin-analog-check {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    font-size: 11px;
-    cursor: pointer;
-    white-space: nowrap;
-}
-
-.pin-analog-check input[type="checkbox"] {
-    margin: 0;
-    width: 13px;
-    height: 13px;
-    cursor: pointer;
-}
-
-.pin-analog-check input[type="checkbox"]:disabled {
-    cursor: not-allowed;
-    opacity: 0.4;
-}
-
-.pin-analog-check input[type="checkbox"]:disabled + * {
-    opacity: 0.4;
 }
 
 @media (max-width: 1100px) {
