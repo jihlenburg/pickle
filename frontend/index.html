@@ -64,8 +64,12 @@
                         <label class="summary-check"><input type="checkbox" id="pinlist-grid" checked> Grid</label>
                     </div>
                 </div>
+                <div id="view-toggle" class="view-toggle" style="display:none">
+                    <button class="view-toggle-btn active" data-view="pin">Pin View</button>
+                    <button class="view-toggle-btn" data-view="peripheral">Peripheral View</button>
+                </div>
             </div>
-            <div class="panel-left-scroll">
+            <div class="panel-left-scroll" id="pin-view-container">
                 <table class="pin-table" id="pin-table">
                     <thead>
                         <tr>
@@ -78,6 +82,9 @@
                     </thead>
                     <tbody id="pin-tbody"></tbody>
                 </table>
+            </div>
+            <div class="panel-left-scroll" id="periph-view-container" style="display:none">
+                <div id="periph-view"></div>
             </div>
         </div>
 

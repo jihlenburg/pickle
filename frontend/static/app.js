@@ -77,6 +77,7 @@ function resetEditorState() {
     i2cRoutedAssignments = {};
     undoStack = [];
     redoStack = [];
+    periphCardState = {};
 }
 
 /** Snapshot current state onto the undo stack. Clears redo stack. */
@@ -99,7 +100,7 @@ function undo() {
     const state = undoStack.pop();
     assignments = state.assignments;
     signalNames = state.signalNames;
-    renderDevice();
+    if (typeof renderActiveView === 'function') renderActiveView(); else renderDevice();
     checkConflicts();
 }
 
@@ -113,7 +114,7 @@ function redo() {
     const state = redoStack.pop();
     assignments = state.assignments;
     signalNames = state.signalNames;
-    renderDevice();
+    if (typeof renderActiveView === 'function') renderActiveView(); else renderDevice();
     checkConflicts();
 }
 
@@ -223,7 +224,10 @@ async function loadDevice(pkg, options = {}) {
         document.getElementById('fuses-empty').style.display = 'none';
         buildFuseUI(deviceData.fuse_defs);
 
-        renderDevice();
+        // Show the view toggle once a device is loaded
+        document.getElementById('view-toggle').style.display = '';
+
+        if (typeof renderActiveView === 'function') renderActiveView(); else renderDevice();
         setStatus(`${deviceData.part_number} — ${deviceData.selected_package}`);
 
         // Update cached device set if this was a new download
@@ -368,9 +372,60 @@ function fixedFuncGroup(name) {
     if (/^A?SCL\d/.test(name)) return 'I2C';
     if (/^A?SDA\d/.test(name)) return 'I2C';
     if (/^PWM\d/.test(name)) return 'PWM';
-    if (/^R[A-E]\d+$/.test(name)) return 'GPIO';
+    if (/^PCI\d/.test(name)) return 'PWM Fault/PCI';
+    if (/^PWME[A-Z]/.test(name)) return 'PWM Event';
+    if (/^PWMTRG/.test(name)) return 'PWM Trigger';
+    if (/^OCM\d/.test(name)) return 'SCCP/MCCP';
+    if (/^OCF[A-Z]/.test(name)) return 'SCCP/MCCP Fault';
+    if (/^ICM\d/.test(name)) return 'Input Capture';
+    if (/^T\d+CK$/.test(name)) return 'Timer';
+    if (/^TCKI\d/.test(name)) return 'Timer';
+    if (/^QE[AB]\d|^HOME\d|^INDX\d|^QEICCMP/.test(name)) return 'QEI';
+    if (/^INT\d/.test(name)) return 'Interrupt';
+    if (/^CLC\d+OUT/.test(name)) return 'CLC Output';
+    if (/^CLCIN/.test(name)) return 'CLC Input';
+    if (/^SENT/.test(name)) return 'SENT';
+    if (/^C\d+(TX|RX)$/.test(name)) return 'CAN';
+    if (/^U\d+/.test(name)) return 'UART';
+    if (/^S[DC][OI]\d|^SS\d|^SCK\d/.test(name)) return 'SPI';
+    if (/^REF[IO]$/.test(name)) return 'Reference Clock';
+    if (/^ADCTRG/.test(name)) return 'ADC Trigger';
+    if (/^PTGTRG/.test(name)) return 'PTG';
+    if (/^RPV\d/.test(name)) return 'Virtual Pin';
+    if (/^R[A-Z]\d+$/.test(name)) return 'GPIO';
     if (/^RP\d+$/.test(name)) return null;
     return 'Other';
+}
+
+/**
+ * Infer the signal direction for a fixed (non-PPS) function.
+ * @param {string} name - Function name
+ * @returns {'in'|'out'|'io'}
+ */
+function fixedFuncDirection(name) {
+    // Outputs
+    if (/^OA\d+OUT/.test(name)) return 'out';
+    if (/^DAC/.test(name)) return 'out';
+    if (/^CLKO$|^OSCO$/.test(name)) return 'out';
+    if (/^CMP\d+$/.test(name)) return 'out';
+    if (/^CLC\d+OUT/.test(name)) return 'out';
+    if (/^PWME[A-Z]/.test(name)) return 'out';
+    if (/^PWM\d+[HL]$/.test(name)) return 'out';
+    if (/^OCM\d/.test(name)) return 'out';
+    if (/^PTGTRG/.test(name)) return 'out';
+    if (/^QEICCMP/.test(name)) return 'out';
+    if (/^U\d+TX$|^U\d+RTS$|^U\d+DTR$/.test(name)) return 'out';
+    if (/^SDO\d/.test(name)) return 'out';
+    if (/^SCK\d+OUT/.test(name)) return 'out';
+    if (/^SS\d+OUT/.test(name)) return 'out';
+    if (/^C\d+TX$/.test(name)) return 'out';
+    if (/^SENT\d+OUT/.test(name)) return 'out';
+    if (/^REFO$/.test(name)) return 'out';
+    // Bidirectional
+    if (/^R[A-Z]\d+$/.test(name)) return 'io';
+    if (/^A?SCL\d|^A?SDA\d/.test(name)) return 'io';
+    // Everything else defaults to input
+    return 'in';
 }
 
 /**
@@ -387,10 +442,7 @@ function getAvailablePeripherals(pin) {
         if (isI2cRoutingFunction(fn) && !isI2cRoutingFunctionActive(fn)) continue;
         const group = fixedFuncGroup(fn);
         if (!group) continue;
-        let dir = 'in';
-        if (/^OA\d+OUT|^DAC|^CLKO|^OSCO/.test(fn)) dir = 'out';
-        if (/^R[A-E]\d+$/.test(fn)) dir = 'io';
-        if (/^A?SCL\d|^A?SDA\d/.test(fn)) dir = 'io';
+        const dir = fixedFuncDirection(fn);
         periphs.push({
             name: fn,
             direction: dir,
@@ -400,9 +452,14 @@ function getAvailablePeripherals(pin) {
         });
     }
 
-    // PPS remappable peripherals (only for pins with an RP number)
+    // PPS remappable peripherals (only for pins with an RP number).
+    // Skip any PPS peripheral that already exists as a fixed function on this pin —
+    // the fixed entry is preferred because it needs no PPS register write.
     if (pin.rp_number !== null) {
+        const fixedNames = new Set(periphs.map(p => p.name));
+
         for (const inp of deviceData.remappable_inputs) {
+            if (fixedNames.has(inp.name)) continue;
             periphs.push({
                 name: inp.name,
                 direction: 'in',
@@ -413,6 +470,7 @@ function getAvailablePeripherals(pin) {
         }
 
         for (const out of deviceData.remappable_outputs) {
+            if (fixedNames.has(out.name)) continue;
             periphs.push({
                 name: out.name,
                 direction: 'out',
@@ -782,7 +840,9 @@ function applyFuseReservations() {
     } else {
         restoreJtagAssignments();
     }
-    if (deviceData) renderDevice();
+    if (deviceData) {
+        if (typeof renderActiveView === 'function') renderActiveView(); else renderDevice();
+    }
 
     const warnings = updateFuseFieldWarnings();
 
@@ -865,6 +925,503 @@ function checkConflicts() {
     }
 
     return conflictPins;
+}
+
+// =============================================================================
+// Peripheral-Centric View — Data Layer
+// =============================================================================
+
+/** @type {'pin'|'peripheral'} Currently active left-panel view */
+let activeView = 'pin';
+
+/** @type {Map<string, boolean>} Tracks which peripheral cards are expanded */
+let periphCardState = {};
+
+/**
+ * Extract the peripheral instance identity from a signal name.
+ * @param {string} name - Signal name (e.g. "U1TX", "SDI2", "PWM3H")
+ * @returns {{type:string, instance:string, id:string}|null}
+ */
+function extractPeripheralInstance(name) {
+    let m;
+    if ((m = name.match(/^U(\d+)/))) return { type: 'UART', instance: m[1], id: `UART${m[1]}` };
+    if ((m = name.match(/^(?:SDI|SDO|SCK|SS)(\d+)/))) return { type: 'SPI', instance: m[1], id: `SPI${m[1]}` };
+    if ((m = name.match(/^A?(?:SCL|SDA)(\d+)$/))) return { type: 'I2C', instance: m[1], id: `I2C${m[1]}` };
+    if ((m = name.match(/^C(\d+)(?:TX|RX)$/))) return { type: 'CAN', instance: m[1], id: `CAN${m[1]}` };
+    if ((m = name.match(/^SENT(\d+)/))) return { type: 'SENT', instance: m[1], id: `SENT${m[1]}` };
+    if ((m = name.match(/^PWM(\d+)[HL]$/))) return { type: 'PWM', instance: m[1], id: `PWM${m[1]}` };
+    if ((m = name.match(/^(?:QE[AB]|HOME|INDX)(\d+)$/))) return { type: 'QEI', instance: m[1], id: `QEI${m[1]}` };
+    if ((m = name.match(/^QEICCMP(\d+)$/))) return { type: 'QEI', instance: m[1], id: `QEI${m[1]}` };
+    if ((m = name.match(/^T(\d+)CK$/))) return { type: 'Timer', instance: m[1], id: `Timer${m[1]}` };
+    if ((m = name.match(/^TCKI(\d+)$/))) return { type: 'Timer', instance: m[1], id: `Timer${m[1]}` };
+    if ((m = name.match(/^ICM(\d+)$/))) return { type: 'Input Capture', instance: m[1], id: `ICM${m[1]}` };
+    if ((m = name.match(/^OCM(\d+)/))) return { type: 'CCP', instance: m[1], id: `CCP${m[1]}` };
+    if ((m = name.match(/^CMP(\d+)$/))) return { type: 'Comparator', instance: m[1], id: `CMP${m[1]}` };
+    if ((m = name.match(/^CLC(\d+)/))) return { type: 'CLC', instance: m[1], id: `CLC${m[1]}` };
+    if ((m = name.match(/^INT(\d+)$/))) return { type: 'Interrupt', instance: m[1], id: `INT${m[1]}` };
+    if ((m = name.match(/^PCI(\d+)$/))) return { type: 'PWM Fault', instance: m[1], id: `PCI${m[1]}` };
+    if ((m = name.match(/^ADCTRG(\d+)$/))) return { type: 'ADC Trigger', instance: m[1], id: `ADCTRG${m[1]}` };
+    if ((m = name.match(/^PTGTRG(\d+)$/))) return { type: 'PTG', instance: m[1], id: `PTG${m[1]}` };
+    if ((m = name.match(/^OA(\d+)/))) return { type: 'Op-Amp', instance: m[1], id: `OA${m[1]}` };
+    // ADC channels — shared (AN#) grouped together, dedicated (ANA#) as individual cores
+    if ((m = name.match(/^ANA(\d+)$/))) return { type: 'ADC', instance: String(parseInt(m[1]) + 1), id: `ADC${m[1]}`, label: `ADC${m[1]} (dedicated)` };
+    if ((m = name.match(/^AN(\d+)$/))) return { type: 'ADC', instance: '0', id: 'ADC', label: 'ADC (shared)' };
+    // DAC
+    if (/^DAC\d*OUT$/.test(name)) return { type: 'DAC', instance: '0', id: 'DAC' };
+    // Bias current
+    if ((m = name.match(/^IBIAS(\d+)$/))) return { type: 'Bias', instance: '0', id: 'Bias Current' };
+    // Singletons and shared signals — group by periphGroupFine classification
+    if (/^PWME[A-Z]$/.test(name)) return { type: 'PWM Event', instance: '0', id: 'PWM Events' };
+    if (/^PWMTRG/.test(name)) return { type: 'PWM Trigger', instance: '0', id: 'PWM Triggers' };
+    if (/^OCF[A-Z]$/.test(name)) return { type: 'CCP Fault', instance: '0', id: 'CCP Faults' };
+    if (/^CLCIN/.test(name)) return { type: 'CLC Input', instance: '0', id: 'CLC Inputs' };
+    if (/^REF[IO]$/.test(name)) return { type: 'Reference Clock', instance: '0', id: 'Ref Clock' };
+    if (/^RPV\d/.test(name)) return { type: 'Virtual Pin', instance: '0', id: 'Virtual Pins' };
+    return null;
+}
+
+/** Category ordering for peripheral instance groups. */
+const PERIPH_CATEGORIES = [
+    { name: 'Communication', types: ['UART', 'SPI', 'I2C', 'CAN', 'SENT'] },
+    { name: 'Motor Control', types: ['PWM', 'PWM Event', 'PWM Trigger', 'QEI'] },
+    { name: 'Timing', types: ['Timer', 'Input Capture', 'CCP', 'CCP Fault'] },
+    { name: 'Analog', types: ['ADC', 'Comparator', 'ADC Trigger', 'Op-Amp', 'DAC', 'Bias'] },
+    { name: 'Logic', types: ['CLC', 'CLC Input'] },
+    { name: 'System', types: ['Interrupt', 'PWM Fault', 'PTG', 'Reference Clock', 'Virtual Pin'] },
+];
+
+/**
+ * Build an ordered list of peripheral instances from current deviceData.
+ * Combines PPS remappable signals and fixed functions into per-instance groups.
+ * @returns {Array<{id:string, type:string, instance:string, category:string, signals:Array}>}
+ */
+function buildPeripheralInstances() {
+    if (!deviceData) return [];
+
+    const instanceMap = {};  // id -> instance object
+
+    const getOrCreate = (info, category) => {
+        if (!instanceMap[info.id]) {
+            instanceMap[info.id] = {
+                id: info.id,
+                label: info.label || info.id,
+                type: info.type,
+                instance: info.instance,
+                category: category || 'Miscellaneous',
+                signals: [],
+            };
+        }
+        return instanceMap[info.id];
+    };
+
+    const findCategory = (type) => {
+        for (const cat of PERIPH_CATEGORIES) {
+            if (cat.types.includes(type)) return cat.name;
+        }
+        return 'Miscellaneous';
+    };
+
+    // Collect PPS remappable inputs
+    for (const inp of deviceData.remappable_inputs) {
+        const info = extractPeripheralInstance(inp.name);
+        if (!info) continue;
+        const inst = getOrCreate(info, findCategory(info.type));
+        inst.signals.push({
+            name: inp.name,
+            direction: 'in',
+            ppsval: null,
+            fixed: false,
+            fixedPin: null,
+        });
+    }
+
+    // Collect PPS remappable outputs
+    for (const out of deviceData.remappable_outputs) {
+        const info = extractPeripheralInstance(out.name);
+        if (!info) continue;
+        const inst = getOrCreate(info, findCategory(info.type));
+        inst.signals.push({
+            name: out.name,
+            direction: 'out',
+            ppsval: out.ppsval,
+            fixed: false,
+            fixedPin: null,
+        });
+    }
+
+    // Collect fixed functions from pins (I2C SDA/SCL, PWM H/L, comparators, op-amps, etc.)
+    for (const pin of deviceData.pins) {
+        if (pin.is_power) continue;
+        for (const fn of pin.functions) {
+            if (isI2cRoutingFunction(fn) && !isI2cRoutingFunctionActive(fn)) continue;
+            const info = extractPeripheralInstance(fn);
+            if (!info) continue;
+            const inst = getOrCreate(info, findCategory(info.type));
+            // Only add as fixed if not already present as a PPS signal
+            const alreadyPps = inst.signals.some(s => s.name === fn && !s.fixed);
+            if (alreadyPps) continue;
+            // Avoid duplicate fixed entries
+            if (inst.signals.some(s => s.name === fn && s.fixed)) continue;
+            inst.signals.push({
+                name: fn,
+                direction: fixedFuncDirection(fn),
+                ppsval: null,
+                fixed: true,
+                fixedPin: pin.position,
+            });
+        }
+    }
+
+    // Sort signals within each instance: outputs first, then inputs, then by natural name order
+    const naturalCmp = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+    for (const inst of Object.values(instanceMap)) {
+        inst.signals.sort((a, b) => {
+            if (a.direction !== b.direction) {
+                const order = { out: 0, io: 1, in: 2 };
+                return (order[a.direction] ?? 3) - (order[b.direction] ?? 3);
+            }
+            return naturalCmp(a.name, b.name);
+        });
+    }
+
+    // Sort instances by category order, then type, then instance number
+    const catOrder = {};
+    PERIPH_CATEGORIES.forEach((c, i) => { catOrder[c.name] = i; });
+    catOrder['Miscellaneous'] = PERIPH_CATEGORIES.length;
+
+    return Object.values(instanceMap).sort((a, b) => {
+        const co = (catOrder[a.category] ?? 99) - (catOrder[b.category] ?? 99);
+        if (co !== 0) return co;
+        const tc = a.type.localeCompare(b.type);
+        if (tc !== 0) return tc;
+        return parseInt(a.instance) - parseInt(b.instance);
+    });
+}
+
+/**
+ * Build a reverse lookup from assignments: peripheral name -> pin position.
+ * @returns {Object.<string, number>}
+ */
+function buildReverseAssignments() {
+    const reverse = {};
+    for (const [pos, assign] of Object.entries(assignments)) {
+        reverse[assign.peripheral] = parseInt(pos, 10);
+    }
+    return reverse;
+}
+
+/**
+ * Get all RP-capable pins available for a PPS signal assignment.
+ * @param {string} signalName - The peripheral signal (e.g. "U1TX")
+ * @param {string} signalDirection - "in" or "out"
+ * @returns {Array<{pin:Object, label:string, usedBy:string|null}>}
+ */
+function getAvailableRpPins(signalName, signalDirection) {
+    if (!deviceData) return [];
+
+    const results = [];
+    for (const pin of deviceData.pins) {
+        if (pin.rp_number === null || pin.is_power) continue;
+        if (isIcspPin(pin)) continue;
+        if (isJtagPin(pin)) continue;
+
+        const portName = pin.port ? `R${pin.port}${pin.port_bit}` : pin.pad_name;
+        const label = `Pin ${pin.position} — ${portName} (RP${pin.rp_number})`;
+
+        let usedBy = null;
+        const existing = assignments[pin.position];
+        if (existing && existing.peripheral !== signalName) {
+            usedBy = existing.peripheral;
+        }
+
+        results.push({ pin, label, usedBy });
+    }
+
+    return results;
+}
+
+// =============================================================================
+// Peripheral View Rendering
+// =============================================================================
+
+/** Render the full peripheral-centric view into #periph-view. */
+function renderPeripheralView() {
+    const container = document.getElementById('periph-view');
+    container.innerHTML = '';
+
+    if (!deviceData) return;
+
+    // Update summary bar (same data as pin view)
+    const rpPins = deviceData.pins.filter(p => p.rp_number !== null);
+    document.getElementById('sum-pins').textContent = deviceData.pin_count;
+    document.getElementById('sum-rp').textContent = rpPins.length;
+    document.getElementById('sum-pkg').textContent = deviceData.selected_package;
+    document.getElementById('summary').style.display = '';
+
+    renderPackageDiagram();
+
+    const instances = buildPeripheralInstances();
+    const reverse = buildReverseAssignments();
+
+    // Toolbar: expand/collapse all
+    const toolbar = document.createElement('div');
+    toolbar.className = 'periph-toolbar';
+    const expandBtn = document.createElement('button');
+    expandBtn.className = 'periph-toolbar-btn';
+    expandBtn.textContent = 'Expand All';
+    expandBtn.addEventListener('click', () => {
+        container.querySelectorAll('.periph-card').forEach(c => {
+            c.classList.add('expanded');
+            periphCardState[c.dataset.id] = true;
+        });
+    });
+    const collapseBtn = document.createElement('button');
+    collapseBtn.className = 'periph-toolbar-btn';
+    collapseBtn.textContent = 'Collapse All';
+    collapseBtn.addEventListener('click', () => {
+        container.querySelectorAll('.periph-card').forEach(c => {
+            c.classList.remove('expanded');
+            periphCardState[c.dataset.id] = false;
+        });
+    });
+    toolbar.appendChild(expandBtn);
+    toolbar.appendChild(collapseBtn);
+    container.appendChild(toolbar);
+
+    // Group instances by category and render
+    let currentCategory = '';
+    for (const inst of instances) {
+        if (inst.category !== currentCategory) {
+            currentCategory = inst.category;
+            const heading = document.createElement('div');
+            heading.className = 'periph-section-heading';
+            heading.textContent = currentCategory;
+            container.appendChild(heading);
+        }
+        container.appendChild(renderPeriphCard(inst, reverse));
+    }
+
+    updateSummary();
+    checkConflicts();
+}
+
+/**
+ * Render a single peripheral instance card.
+ * @param {Object} inst - Instance from buildPeripheralInstances()
+ * @param {Object} reverse - Reverse assignment map from buildReverseAssignments()
+ * @returns {HTMLElement}
+ */
+function renderPeriphCard(inst, reverse) {
+    const card = document.createElement('div');
+    card.className = 'periph-card';
+    card.dataset.id = inst.id;
+
+    // Count assigned signals
+    const assignedCount = inst.signals.filter(s => reverse[s.name] !== undefined).length;
+    const hasAssignments = assignedCount > 0;
+
+    if (hasAssignments) card.classList.add('has-assignments');
+
+    // Auto-expand: if user has toggled this card before, use that state;
+    // otherwise expand cards that have assignments
+    const remembered = periphCardState[inst.id];
+    const shouldExpand = remembered !== undefined ? remembered : hasAssignments;
+    if (shouldExpand) card.classList.add('expanded');
+
+    // Determine if all signals are fixed
+    const allFixed = inst.signals.every(s => s.fixed);
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'periph-card-header';
+    header.addEventListener('click', () => {
+        card.classList.toggle('expanded');
+        periphCardState[inst.id] = card.classList.contains('expanded');
+    });
+
+    const chevron = document.createElement('span');
+    chevron.className = 'periph-card-chevron';
+    chevron.textContent = '\u25B6';
+    header.appendChild(chevron);
+
+    const title = document.createElement('span');
+    title.className = 'periph-card-title';
+    title.textContent = inst.label;
+    header.appendChild(title);
+
+    if (allFixed) {
+        const fixedTag = document.createElement('span');
+        fixedTag.className = 'periph-card-fixed-tag';
+        fixedTag.textContent = 'fixed';
+        header.appendChild(fixedTag);
+    }
+
+    const badge = document.createElement('span');
+    badge.className = 'periph-card-badge';
+    badge.textContent = `${assignedCount}/${inst.signals.length}`;
+    header.appendChild(badge);
+
+    card.appendChild(header);
+
+    // Body
+    const body = document.createElement('div');
+    body.className = 'periph-card-body';
+
+    const table = document.createElement('table');
+    table.className = 'periph-signal-table';
+
+    const thead = document.createElement('thead');
+    thead.innerHTML = '<tr><th>Signal</th><th>Pin Assignment</th><th>Signal Name</th></tr>';
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    for (const signal of inst.signals) {
+        const tr = document.createElement('tr');
+        tr.className = 'periph-signal-row';
+
+        // Signal name column
+        const tdName = document.createElement('td');
+        const nameSpan = document.createElement('span');
+        nameSpan.className = `periph-signal-name ${periphClass(signal.name)}`;
+        nameSpan.textContent = signal.name;
+        const desc = getDescription(signal.name);
+        if (desc) nameSpan.title = desc;
+        tdName.appendChild(nameSpan);
+
+        const dirSpan = document.createElement('span');
+        dirSpan.className = 'periph-signal-dir';
+        dirSpan.textContent = signal.direction === 'out' ? 'OUT' : signal.direction === 'io' ? 'I/O' : 'IN';
+        tdName.appendChild(dirSpan);
+        tr.appendChild(tdName);
+
+        // Pin assignment column
+        const tdPin = document.createElement('td');
+        const assignedPin = reverse[signal.name];
+
+        if (signal.fixed && signal.fixedPin) {
+            // Fixed function — show pin label with assign toggle
+            const pin = deviceData.pins.find(p => p.position === signal.fixedPin);
+            const portName = pin && pin.port ? `R${pin.port}${pin.port_bit}` : (pin ? pin.pad_name : '?');
+            const pinIsIcsp = pin && isIcspPin(pin);
+            const pinIsJtag = pin && isJtagPin(pin);
+            const pinBlocked = pinIsIcsp || pinIsJtag;
+
+            const wrapper = document.createElement('label');
+            wrapper.className = 'periph-fixed-assign';
+            if (pinBlocked) wrapper.classList.add('blocked');
+
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'periph-fixed-cb';
+            cb.dataset.signal = signal.name;
+            cb.dataset.pinPos = signal.fixedPin;
+            cb.dataset.direction = signal.direction;
+            cb.checked = assignedPin !== undefined;
+            cb.disabled = pinBlocked;
+
+            cb.addEventListener('change', onPeriphFixedToggle);
+            wrapper.appendChild(cb);
+
+            const labelText = document.createElement('span');
+            labelText.className = 'periph-pin-fixed';
+            labelText.textContent = `${portName} (pin ${signal.fixedPin})`;
+            wrapper.appendChild(labelText);
+
+            const fixedBadge = document.createElement('span');
+            fixedBadge.className = 'fixed-badge';
+            fixedBadge.textContent = 'fixed';
+            wrapper.appendChild(fixedBadge);
+
+            if (pinIsIcsp) {
+                const icspBadge = document.createElement('span');
+                icspBadge.className = 'periph-icsp-badge';
+                icspBadge.textContent = 'ICSP';
+                icspBadge.title = 'Reserved for ICSP/debug — not available for assignment';
+                wrapper.appendChild(icspBadge);
+            }
+            if (pinIsJtag) {
+                const jtagBadge = document.createElement('span');
+                jtagBadge.className = 'periph-jtag-badge';
+                jtagBadge.textContent = 'JTAG';
+                jtagBadge.title = 'Reserved for JTAG while JTAGEN = ON';
+                wrapper.appendChild(jtagBadge);
+            }
+
+            tdPin.appendChild(wrapper);
+        } else {
+            // PPS — show pin dropdown
+            const select = document.createElement('select');
+            select.className = 'periph-pin-select';
+            select.dataset.signal = signal.name;
+            select.dataset.direction = signal.direction;
+            select.dataset.ppsval = signal.ppsval ?? '';
+
+            const optNone = document.createElement('option');
+            optNone.value = '';
+            optNone.textContent = '\u2014 unassigned \u2014';
+            select.appendChild(optNone);
+
+            const rpPins = getAvailableRpPins(signal.name, signal.direction);
+
+            // Group by port
+            const portGroups = {};
+            for (const rp of rpPins) {
+                const port = rp.pin.port || '?';
+                if (!portGroups[port]) portGroups[port] = [];
+                portGroups[port].push(rp);
+            }
+
+            for (const [port, pins] of Object.entries(portGroups).sort()) {
+                const optgroup = document.createElement('optgroup');
+                optgroup.label = `Port ${port}`;
+                for (const rp of pins) {
+                    const opt = document.createElement('option');
+                    opt.value = String(rp.pin.position);
+                    let text = rp.label;
+                    if (rp.usedBy) {
+                        text += ` (used: ${rp.usedBy})`;
+                        opt.className = 'periph-pin-used';
+                    }
+                    opt.textContent = text;
+                    if (assignedPin === rp.pin.position) {
+                        opt.selected = true;
+                    }
+                    optgroup.appendChild(opt);
+                }
+                select.appendChild(optgroup);
+            }
+
+            select.addEventListener('change', onPeriphAssignChange);
+            tdPin.appendChild(select);
+        }
+        tr.appendChild(tdPin);
+
+        // Signal name column
+        const tdSig = document.createElement('td');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'periph-signal-input';
+        input.placeholder = 'e.g. UART1_TX';
+        input.dataset.signal = signal.name;
+
+        // If this signal is assigned to a pin, show the signal name from that pin
+        if (assignedPin !== undefined && signalNames[assignedPin]) {
+            input.value = signalNames[assignedPin];
+        }
+
+        input.addEventListener('focus', () => pushUndo());
+        input.addEventListener('input', onPeriphSignalNameChange);
+        tdSig.appendChild(input);
+        tr.appendChild(tdSig);
+
+        tbody.appendChild(tr);
+    }
+
+    table.appendChild(tbody);
+    body.appendChild(table);
+    card.appendChild(body);
+
+    return card;
 }
 
 // =============================================================================
@@ -1024,6 +1581,7 @@ function renderDevice() {
                 } else {
                     delete signalNames[pos];
                 }
+                renderPackageDiagram();
             });
             tdSig.appendChild(input);
         }
@@ -1323,9 +1881,13 @@ function renderQfnDiagram(container) {
  * @param {number} pos - Pin position number
  */
 function scrollToPin(pos) {
+    // If in peripheral view, switch to pin view first
+    if (activeView === 'peripheral') {
+        switchView('pin');
+    }
     const row = document.getElementById(`pin-row-${pos}`);
     if (row) {
-        const container = document.querySelector('.panel-left-scroll');
+        const container = document.getElementById('pin-view-container');
         if (container) {
             const containerRect = container.getBoundingClientRect();
             const rowRect = row.getBoundingClientRect();
@@ -1364,6 +1926,107 @@ function onAssignChange(e) {
     updateSummary();
     checkConflicts();
     renderPackageDiagram();
+}
+
+/** Handle pin dropdown changes in the peripheral view. */
+function onPeriphAssignChange(e) {
+    pushUndo();
+
+    const select = e.target;
+    const signalName = select.dataset.signal;
+    const signalDir = select.dataset.direction;
+    const ppsval = select.dataset.ppsval ? parseInt(select.dataset.ppsval) : null;
+
+    // Remove old assignment for this signal (if any)
+    for (const [pos, assign] of Object.entries(assignments)) {
+        if (assign.peripheral === signalName) {
+            delete assignments[parseInt(pos, 10)];
+            delete signalNames[parseInt(pos, 10)];
+            break;
+        }
+    }
+
+    // Set new assignment if a pin was selected
+    const pinPos = select.value ? parseInt(select.value, 10) : null;
+    if (pinPos !== null) {
+        const pin = deviceData.pins.find(p => p.position === pinPos);
+        if (pin) {
+            assignments[pinPos] = {
+                peripheral: signalName,
+                direction: signalDir,
+                ppsval: ppsval,
+                rp_number: pin.rp_number,
+                fixed: false,
+            };
+        }
+
+        // Transfer signal name from the input field if present
+        const input = document.querySelector(`.periph-signal-input[data-signal="${signalName}"]`);
+        if (input && input.value.trim()) {
+            signalNames[pinPos] = input.value.trim();
+        }
+    }
+
+    updateSummary();
+    checkConflicts();
+    renderPackageDiagram();
+
+    // Re-render to update "used by" labels on other dropdowns
+    renderPeripheralView();
+}
+
+/** Handle signal name changes in the peripheral view. */
+function onPeriphSignalNameChange(e) {
+    const input = e.target;
+    const signalName = input.dataset.signal;
+
+    // Find the pin this signal is assigned to
+    const reverse = buildReverseAssignments();
+    const pinPos = reverse[signalName];
+    if (pinPos !== undefined) {
+        if (input.value.trim()) {
+            signalNames[pinPos] = input.value.trim();
+        } else {
+            delete signalNames[pinPos];
+        }
+    }
+}
+
+/** Handle fixed-function pin toggle (checkbox) in the peripheral view. */
+function onPeriphFixedToggle(e) {
+    pushUndo();
+
+    const cb = e.target;
+    const signalName = cb.dataset.signal;
+    const pinPos = parseInt(cb.dataset.pinPos, 10);
+    const direction = cb.dataset.direction;
+
+    if (cb.checked) {
+        const pin = deviceData.pins.find(p => p.position === pinPos);
+        assignments[pinPos] = {
+            peripheral: signalName,
+            direction: direction,
+            ppsval: null,
+            rp_number: pin ? pin.rp_number : null,
+            fixed: true,
+        };
+
+        // Transfer signal name if present
+        const input = document.querySelector(`.periph-signal-input[data-signal="${signalName}"]`);
+        if (input && input.value.trim()) {
+            signalNames[pinPos] = input.value.trim();
+        }
+    } else {
+        delete assignments[pinPos];
+        delete signalNames[pinPos];
+    }
+
+    updateSummary();
+    checkConflicts();
+    renderPackageDiagram();
+
+    // Re-render to update badge counts
+    renderPeripheralView();
 }
 
 /** Update the "Assigned" count in the summary bar. */
@@ -1684,7 +2347,9 @@ function buildFuseUI(fuseDefs) {
     const icsSelect = getFuseSelect('ICS');
     if (icsSelect) {
         icsSelect.addEventListener('change', () => {
-            if (deviceData) renderDevice();
+            if (deviceData) {
+                if (typeof renderActiveView === 'function') renderActiveView(); else renderDevice();
+            }
         });
     }
 
@@ -1918,6 +2583,41 @@ function switchRightTab(tabName) {
 document.querySelectorAll('.right-tab').forEach(tab => {
     tab.addEventListener('click', () => switchRightTab(tab.dataset.tab));
 });
+
+// Left-panel view switching (Pin / Peripheral)
+function switchView(viewName) {
+    activeView = viewName;
+
+    document.querySelectorAll('.view-toggle-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.view === viewName);
+    });
+
+    const pinContainer = document.getElementById('pin-view-container');
+    const periphContainer = document.getElementById('periph-view-container');
+
+    if (viewName === 'peripheral') {
+        pinContainer.style.display = 'none';
+        periphContainer.style.display = '';
+        renderPeripheralView();
+    } else {
+        periphContainer.style.display = 'none';
+        pinContainer.style.display = '';
+        renderDevice();
+    }
+}
+
+document.querySelectorAll('.view-toggle-btn').forEach(btn => {
+    btn.addEventListener('click', () => switchView(btn.dataset.view));
+});
+
+/** Render the currently active left-panel view. */
+function renderActiveView() {
+    if (activeView === 'peripheral') {
+        renderPeripheralView();
+    } else {
+        renderDevice();
+    }
+}
 
 // Populate device list for combo box autocomplete
 /** @type {Set<string>} Devices available locally (no download needed) */

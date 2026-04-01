@@ -1868,6 +1868,311 @@ header h1 {
 
 /* --- Responsive --- */
 
+/* --- View Toggle (Pin / Peripheral) --- */
+
+.view-toggle {
+    display: flex;
+    gap: 0;
+    margin-bottom: 6px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    width: fit-content;
+}
+
+.view-toggle-btn {
+    background: transparent;
+    color: var(--text-dim);
+    border: none;
+    padding: 5px 14px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.view-toggle-btn:hover {
+    color: var(--text);
+    background: var(--hover-overlay);
+}
+
+.view-toggle-btn.active {
+    background: var(--accent2);
+    color: #fff;
+}
+
+/* --- Peripheral View --- */
+
+#periph-view {
+    padding: 6px 0;
+}
+
+.periph-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-bottom: 6px;
+    padding: 0 4px;
+}
+
+.periph-toolbar-btn {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px 10px;
+    font-size: 10px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.periph-toolbar-btn:hover {
+    color: var(--text);
+    border-color: var(--text-dim);
+}
+
+.periph-section-heading {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    padding: 10px 6px 4px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 4px;
+}
+
+.periph-card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 4px;
+    background: var(--bg-card);
+    overflow: hidden;
+}
+
+.periph-card.has-assignments {
+    border-color: var(--accent2);
+    border-width: 1px;
+}
+
+.periph-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.1s;
+}
+
+.periph-card-header:hover {
+    background: var(--hover-overlay);
+}
+
+.periph-card-chevron {
+    font-size: 10px;
+    color: var(--text-dim);
+    transition: transform 0.15s;
+    width: 12px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.periph-card.expanded .periph-card-chevron {
+    transform: rotate(90deg);
+}
+
+.periph-card-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    flex: 1;
+}
+
+.periph-card-badge {
+    font-size: 10px;
+    color: var(--text-dim);
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+}
+
+.periph-card.has-assignments .periph-card-badge {
+    color: var(--accent2);
+    border-color: var(--accent2);
+    background: rgba(0,173,181,0.1);
+}
+
+.periph-card-fixed-tag {
+    font-size: 9px;
+    color: var(--text-dim);
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+}
+
+.periph-card-body {
+    display: none;
+    padding: 0 10px 8px;
+}
+
+.periph-card.expanded .periph-card-body {
+    display: block;
+}
+
+.periph-signal-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.periph-signal-table th {
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+    text-align: left;
+    padding: 4px 6px;
+    border-bottom: 1px solid var(--border);
+}
+
+.periph-signal-row td {
+    padding: 4px 6px;
+    font-size: 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+
+.periph-signal-name {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.periph-signal-name.periph-uart { color: var(--uart); }
+.periph-signal-name.periph-spi { color: var(--spi); }
+.periph-signal-name.periph-i2c { color: var(--i2c); }
+.periph-signal-name.periph-pwm { color: var(--pwm); }
+.periph-signal-name.periph-timer { color: var(--timer); }
+.periph-signal-name.periph-adc { color: var(--adc); }
+.periph-signal-name.periph-cmp { color: var(--cmp); }
+.periph-signal-name.periph-other { color: var(--other); }
+
+.periph-signal-dir {
+    font-size: 9px;
+    color: var(--text-dim);
+    margin-left: 4px;
+    font-weight: 400;
+}
+
+.periph-pin-select {
+    width: 100%;
+    max-width: 220px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.periph-pin-select:focus {
+    outline: none;
+    border-color: var(--accent2);
+    box-shadow: 0 0 0 2px rgba(0,173,181,0.2);
+}
+
+.periph-pin-fixed {
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 3px 6px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 4px;
+    display: inline-block;
+}
+
+.periph-pin-fixed .fixed-badge {
+    font-size: 9px;
+    color: var(--text-dim);
+    margin-left: 4px;
+    opacity: 0.7;
+}
+
+.periph-signal-input {
+    width: 100%;
+    max-width: 140px;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 11px;
+}
+
+.periph-signal-input:focus {
+    outline: none;
+    border-color: var(--accent2);
+    box-shadow: 0 0 0 2px rgba(0,173,181,0.2);
+}
+
+.periph-signal-input::placeholder {
+    color: var(--text-dim);
+    opacity: 0.5;
+}
+
+.periph-fixed-assign {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.periph-fixed-assign.blocked {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.periph-fixed-cb {
+    accent-color: var(--accent2);
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.periph-fixed-assign.blocked .periph-fixed-cb {
+    cursor: not-allowed;
+}
+
+.periph-icsp-badge {
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--icsp);
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--icsp-bg);
+    border: 1px solid var(--icsp);
+    flex-shrink: 0;
+}
+
+.periph-jtag-badge {
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--jtag);
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--jtag-bg);
+    border: 1px solid var(--jtag);
+    flex-shrink: 0;
+}
+
+option.periph-pin-used {
+    color: var(--text-dim);
+}
+
 @media (max-width: 1100px) {
     .main {
         grid-template-columns: 1fr;
