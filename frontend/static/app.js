@@ -392,8 +392,8 @@ function fixedFuncGroup(name) {
     if (/^ADCTRG/.test(name)) return 'ADC Trigger';
     if (/^PTGTRG/.test(name)) return 'PTG';
     if (/^RPV\d/.test(name)) return 'Virtual Pin';
-    if (/^R[A-Z]\d+$/.test(name)) return 'GPIO';
     if (/^RP\d+$/.test(name)) return null;
+    if (/^R[A-Z]\d+$/.test(name)) return 'GPIO';
     return 'Other';
 }
 
@@ -1479,7 +1479,9 @@ function renderDevice() {
             if (isIcspFunction(fn)) span.classList.add('icsp');
             if (isJtagFunction(fn) && isJtagEnabled()) span.classList.add('jtag');
             span.textContent = fn;
-            const desc = getDescription(fn);
+            const desc = /^RP\d+$/.test(fn)
+                ? `${fn} — enables PPS peripheral routing (UART, SPI, PWM, etc.) on this pin`
+                : getDescription(fn);
             if (desc) span.title = desc;
             funcDiv.appendChild(span);
         }
@@ -1506,39 +1508,63 @@ function renderDevice() {
 
                 const optNone = document.createElement('option');
                 optNone.value = '';
-                optNone.textContent = '— unassigned —';
+                optNone.textContent = '\u2014 unassigned \u2014';
                 select.appendChild(optNone);
 
-                // Group peripherals into optgroups by type
-                const seen = new Set();
-                for (const p of periphs) {
-                    const key = p.group + (p.fixed ? '_fixed' : '_pps');
-                    if (seen.has(key)) continue;
-                    seen.add(key);
+                // Split peripherals into fixed and PPS sections
+                const fixedPeriphs = periphs.filter(p => p.fixed);
+                const ppsPeriphs = periphs.filter(p => !p.fixed);
 
-                    const optgroup = document.createElement('optgroup');
-                    optgroup.label = p.fixed ? `${p.group} (fixed)` : p.group;
-                    const groupPeriphs = periphs.filter(x => x.group === p.group && x.fixed === p.fixed);
-                    for (const gp of groupPeriphs) {
-                        const opt = document.createElement('option');
-                        let label = gp.name;
-                        if (!gp.fixed) {
-                            const dirLabel = gp.direction === 'out' ? 'OUT' : 'IN';
-                            label = `${gp.name} (${dirLabel})`;
-                        } else if (gp.direction === 'io') {
-                            label = `${gp.name} (IN/OUT)`;
+                // Helper: add optgroups for a set of peripherals
+                const addOptgroups = (list) => {
+                    const seen = new Set();
+                    for (const p of list) {
+                        if (seen.has(p.group)) continue;
+                        seen.add(p.group);
+
+                        const optgroup = document.createElement('optgroup');
+                        optgroup.label = p.group;
+                        const groupPeriphs = list.filter(x => x.group === p.group);
+                        for (const gp of groupPeriphs) {
+                            const opt = document.createElement('option');
+                            let label = gp.name;
+                            if (!gp.fixed) {
+                                const dirLabel = gp.direction === 'out' ? 'OUT' : 'IN';
+                                label = `${gp.name} (${dirLabel})`;
+                            } else if (gp.direction === 'io') {
+                                label = `${gp.name} (IN/OUT)`;
+                            }
+                            opt.value = JSON.stringify({
+                                name: gp.name, direction: gp.direction,
+                                ppsval: gp.ppsval, fixed: gp.fixed,
+                            });
+                            opt.textContent = label;
+                            opt.className = periphClass(gp.name);
+                            const optDesc = getDescription(gp.name);
+                            if (optDesc) opt.title = optDesc;
+                            optgroup.appendChild(opt);
                         }
-                        opt.value = JSON.stringify({
-                            name: gp.name, direction: gp.direction,
-                            ppsval: gp.ppsval, fixed: gp.fixed,
-                        });
-                        opt.textContent = label;
-                        opt.className = periphClass(gp.name);
-                        const optDesc = getDescription(gp.name);
-                        if (optDesc) opt.title = optDesc;
-                        optgroup.appendChild(opt);
+                        select.appendChild(optgroup);
                     }
-                    select.appendChild(optgroup);
+                };
+
+                // Fixed functions section
+                addOptgroups(fixedPeriphs);
+
+                // PPS section with divider (or "no PPS" note)
+                if (pin.rp_number !== null && ppsPeriphs.length > 0) {
+                    const divider = document.createElement('option');
+                    divider.disabled = true;
+                    divider.className = 'assign-divider';
+                    divider.textContent = `\u2500\u2500 Remappable via PPS (RP${pin.rp_number}) \u2500\u2500`;
+                    select.appendChild(divider);
+                    addOptgroups(ppsPeriphs);
+                } else if (pin.rp_number === null) {
+                    const note = document.createElement('option');
+                    note.disabled = true;
+                    note.className = 'assign-divider';
+                    note.textContent = '\u2500\u2500 No PPS (fixed functions only) \u2500\u2500';
+                    select.appendChild(note);
                 }
 
                 // Restore previous assignment if present

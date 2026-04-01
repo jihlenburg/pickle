@@ -309,6 +309,12 @@ header h1 {
 }
 
 .assign-select option { background: var(--bg-card); }
+.assign-select option.assign-divider {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-align: center;
+    padding: 4px 0;
+}
 
 .signal-input {
     background: var(--bg);
