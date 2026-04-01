@@ -1,6 +1,6 @@
 # Tauri Commands
 
-pickle exposes 14 IPC commands via `#[tauri::command]` in `src-tauri/src/commands.rs`. The frontend calls them with `window.__TAURI__.core.invoke('command_name', { args })`.
+pickle exposes IPC commands via `#[tauri::command]` in `src-tauri/src/commands.rs`. The frontend calls them with `window.__TAURI__.core.invoke('command_name', { args })`.
 
 ## Device Management
 
@@ -64,6 +64,51 @@ Check current pack index availability and staleness without fetching.
   "is_stale": false
 }
 ```
+
+## Behavior Settings
+
+These commands back the shared `settings.toml` file stored under the platform app data directory.
+
+### `load_app_settings`
+
+Load the current behavior settings, creating the file with defaults if it does not exist yet.
+
+**Parameters:** none
+
+**Response:**
+```json
+{
+  "path": "/Users/me/Library/Application Support/pickle/settings.toml",
+  "settings": {
+    "appearance": { "theme": "dark" },
+    "startup": { "device": "last-used", "package": "" },
+    "last_used": { "part_number": "DSPIC33CK64MP102", "package": "TQFP-28" }
+  }
+}
+```
+
+### `set_theme_mode`
+
+Persist the theme mode used by the frontend toggle.
+
+**Parameters:**
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `theme` | string | yes | One of `"dark"`, `"light"`, or `"system"` |
+
+**Response:** none
+
+### `remember_last_used_device`
+
+Update the `last_used` device/package after a successful load so `startup.device = "last-used"` can reopen it on the next launch.
+
+**Parameters:**
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `partNumber` | string | yes | Canonical part number |
+| `package` | string | no | Last selected package |
+
+**Response:** none
 
 ## Native File Dialogs
 

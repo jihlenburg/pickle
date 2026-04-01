@@ -15,8 +15,18 @@ The name is a pun on **PIC** — Microchip's microcontroller line.
 - PPS (Peripheral Pin Select) register generation with unlock/lock
 - Oscillator PLL configuration with brute-force divider search
 - Configuration fuse pragma generation
-- Optional XC16 compile check and Anthropic API pinout verification
+- Optional XC16 compile check and AI-backed pinout verification
 - Save/load pin assignments, export C files or pin lists
+
+## Settings
+
+pickle stores behavior settings in `settings.toml` under the platform app data directory:
+
+- macOS: `~/Library/Application Support/pickle/settings.toml`
+- Linux: `~/.local/share/pickle/settings.toml`
+- Windows: `%APPDATA%\\pickle\\settings.toml`
+
+The file is created automatically and documents its own behavior. By default the app starts with the `last-used` device if one exists; otherwise it starts blank. The same file also stores the theme mode (`dark`, `light`, or `system`).
 
 ## Quick Start
 
@@ -42,7 +52,7 @@ cd src-tauri && cargo test
 See [`docs/`](docs/) for detailed documentation:
 
 - [Architecture](docs/architecture.md) — project structure, data flow, module overview
-- [Tauri Commands](docs/commands.md) — all 14 IPC commands, including native file dialog flows
+- [Tauri Commands](docs/commands.md) — IPC commands, including native file dialog and settings flows
 - [Code Generation](docs/codegen.md) — how C code is generated, PPS, TRIS, ANSEL, oscillator, fuses
 - [Domain Knowledge](docs/domain.md) — dsPIC33 PPS, ICSP, part numbering, config fuses
 

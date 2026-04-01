@@ -18,6 +18,7 @@ use crate::codegen::oscillator::OscConfig;
 use crate::parser::dfp_manager;
 use crate::parser::pack_index;
 use crate::parser::pinout_verifier;
+use crate::settings;
 
 // ---------------------------------------------------------------------------
 // Response types
@@ -66,6 +67,13 @@ pub struct CompileCheckResponse {
 pub struct ApiKeyStatusResponse {
     pub configured: bool,
     pub hint: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSettingsResponse {
+    pub path: String,
+    pub settings: settings::AppSettings,
 }
 
 #[derive(Serialize)]
@@ -275,6 +283,33 @@ pub fn index_status() -> Result<IndexStatusResponse, String> {
             is_stale: true,
         }),
     }
+}
+
+#[tauri::command]
+pub fn load_app_settings() -> Result<AppSettingsResponse, String> {
+    let settings = settings::load()?;
+    Ok(AppSettingsResponse {
+        path: settings::settings_path().display().to_string(),
+        settings,
+    })
+}
+
+#[tauri::command]
+pub fn set_theme_mode(theme: String) -> Result<(), String> {
+    let mut settings = settings::load()?;
+    settings.appearance.theme = theme;
+    settings::save(&settings.normalized())
+}
+
+#[tauri::command]
+pub fn remember_last_used_device(
+    part_number: String,
+    package: Option<String>,
+) -> Result<(), String> {
+    let mut settings = settings::load()?;
+    settings.last_used.part_number = part_number;
+    settings.last_used.package = package.unwrap_or_default();
+    settings::save(&settings.normalized())
 }
 
 #[tauri::command]
@@ -490,9 +525,9 @@ pub fn generate_code(request: CodegenRequest) -> Result<Value, String> {
             poscmd: o.poscmd,
         });
 
-    let fuse_pragmas = request.fuses.map(|f| {
-        generate_dynamic_fuse_pragmas(&device.fuse_defs, &f.selections)
-    });
+    let fuse_pragmas = request
+        .fuses
+        .map(|f| generate_dynamic_fuse_pragmas(&device.fuse_defs, &f.selections));
 
     let files = generate_c_files(
         &device,
@@ -622,10 +657,7 @@ pub fn compile_check(request: CompileCheckRequest) -> Result<CompileCheckRespons
 /// Returns { path, name, base64, source } or null.
 /// Emits "verify-progress" events so the frontend can show status updates.
 #[tauri::command]
-pub async fn find_datasheet(
-    app: AppHandle,
-    part_number: String,
-) -> Result<Option<Value>, String> {
+pub async fn find_datasheet(app: AppHandle, part_number: String) -> Result<Option<Value>, String> {
     use crate::parser::datasheet_fetcher;
 
     let pn = part_number.clone();
@@ -657,7 +689,10 @@ pub async fn find_datasheet(
 
         // 2. Try to resolve and download from Microchip via proxy
         emit("Resolving datasheet from Microchip...");
-        info!("find_datasheet: resolving {} from Microchip product page...", pn);
+        info!(
+            "find_datasheet: resolving {} from Microchip product page...",
+            pn
+        );
         let ds_ref = match datasheet_fetcher::resolve(&pn) {
             Ok(r) => r,
             Err(e) => {
@@ -671,11 +706,7 @@ pub async fn find_datasheet(
         info!("find_datasheet: downloading PDF from {}", ds_ref.pdf_url);
         match datasheet_fetcher::get_or_download_pdf(&pn, &ds_ref.pdf_url) {
             Ok(bytes) => {
-                let name = format!(
-                    "{}-{}.pdf",
-                    pn.to_uppercase(),
-                    ds_ref.datasheet_revision
-                );
+                let name = format!("{}-{}.pdf", pn.to_uppercase(), ds_ref.datasheet_revision);
                 emit(&format!("Downloaded {}", name));
                 return Ok(Some(serde_json::json!({
                     "name": name,
@@ -685,7 +716,10 @@ pub async fn find_datasheet(
                 })));
             }
             Err(e) => {
-                info!("find_datasheet: PDF download failed, trying text fallback: {}", e);
+                info!(
+                    "find_datasheet: PDF download failed, trying text fallback: {}",
+                    e
+                );
             }
         }
 
@@ -693,11 +727,7 @@ pub async fn find_datasheet(
         emit("Trying text extraction fallback...");
         match datasheet_fetcher::get_or_fetch_text(&pn, &ds_ref.pdf_url) {
             Ok(text) => {
-                let name = format!(
-                    "{}-{}.md",
-                    pn.to_uppercase(),
-                    ds_ref.datasheet_revision
-                );
+                let name = format!("{}-{}.md", pn.to_uppercase(), ds_ref.datasheet_revision);
                 Ok(Some(serde_json::json!({
                     "name": name,
                     "text": text,
@@ -760,10 +790,12 @@ pub async fn verify_pinout(
             "pins": resolved_pins,
         });
 
-        emit(&format!("Sending {:.1} MB PDF to LLM — this takes 30–90s...", size_mb));
+        emit(&format!(
+            "Sending {:.1} MB PDF to LLM — this takes 30–90s...",
+            size_mb
+        ));
         info!("verify_pinout: calling LLM API...");
-        let result =
-            pinout_verifier::verify_pinout(&pdf_bytes, &device_dict, api_key.as_deref())?;
+        let result = pinout_verifier::verify_pinout(&pdf_bytes, &device_dict, api_key.as_deref())?;
         info!(
             "verify_pinout: LLM response received, {} packages found",
             result.packages.len()

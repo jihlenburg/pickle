@@ -5,7 +5,7 @@
  * Manages device data, pin assignments, code generation, and UI state.
  *
  * Architecture:
- *   - State: global variables (deviceData, assignments, signalNames, jtagReservedAssignments)
+ *   - State: global variables (deviceData, assignments, signalNames, fuse-driven stash maps)
  *   - Rendering: imperative DOM manipulation (no framework)
  *   - Backend: Tauri IPC via invoke()
  *   - File I/O: native Tauri dialogs handled by Rust commands
@@ -30,6 +30,9 @@ let signalNames = {};
 /** @type {Object.<number, {peripheral:string, direction:string, ppsval:?number, rp_number:?number, fixed:boolean}>} */
 let jtagReservedAssignments = {};
 
+/** @type {Object.<number, {assignment:{peripheral:string, direction:string, ppsval:?number, rp_number:?number, fixed:boolean}, signalName:string}>} */
+let i2cRoutedAssignments = {};
+
 /** @type {Object.<string, string>} Generated file contents keyed by filename */
 let generatedFiles = {};
 
@@ -44,6 +47,17 @@ let indexCatalogState = {
     ageHours: null,
     isStale: true,
 };
+
+/** @type {{appearance:{theme:string}, startup:{device:string, package:string}, last_used:{part_number:string, package:string}}} */
+let appSettings = defaultAppSettings();
+
+function defaultAppSettings() {
+    return {
+        appearance: { theme: 'dark' },
+        startup: { device: 'last-used', package: '' },
+        last_used: { part_number: '', package: '' },
+    };
+}
 
 // =============================================================================
 // Undo / Redo
@@ -60,6 +74,7 @@ function resetEditorState() {
     assignments = {};
     signalNames = {};
     jtagReservedAssignments = {};
+    i2cRoutedAssignments = {};
     undoStack = [];
     redoStack = [];
 }
@@ -216,6 +231,12 @@ async function loadDevice(pkg, options = {}) {
             cachedDevices.add(part);
             populateDeviceList();
         }
+
+        try {
+            await rememberLastUsedDevice(deviceData.part_number, deviceData.selected_package);
+        } catch (settingsError) {
+            console.warn('Failed to remember last-used device:', settingsError);
+        }
     } catch (e) {
         setStatus('Error: ' + (e.message || e));
     }
@@ -239,6 +260,91 @@ function setStatus(msg) {
 }
 
 // =============================================================================
+// Behavior Settings
+// =============================================================================
+
+/** Normalize theme mode to the values supported by the UI and settings file. */
+function normalizeThemeMode(mode) {
+    if (mode === 'light' || mode === 'system') return mode;
+    return 'dark';
+}
+
+/**
+ * Load the persisted behavior settings. The backend owns file creation and
+ * serialization so the frontend can treat the result as canonical state.
+ */
+async function loadAppSettings() {
+    try {
+        const data = await invoke('load_app_settings');
+        const settings = data?.settings || defaultAppSettings();
+
+        appSettings = {
+            appearance: {
+                theme: normalizeThemeMode(String(settings.appearance?.theme || 'dark').trim().toLowerCase()),
+            },
+            startup: {
+                device: String(settings.startup?.device || 'last-used').trim(),
+                package: String(settings.startup?.package || '').trim(),
+            },
+            last_used: {
+                part_number: String(settings.last_used?.part_number || '').trim().toUpperCase(),
+                package: String(settings.last_used?.package || '').trim(),
+            },
+        };
+    } catch (e) {
+        console.warn('Settings load failed, using defaults:', e);
+        appSettings = defaultAppSettings();
+    }
+
+    return appSettings;
+}
+
+/** Persist the active theme mode to the shared settings file. */
+async function saveThemeMode(mode) {
+    const normalized = normalizeThemeMode(mode);
+    appSettings.appearance.theme = normalized;
+    await invoke('set_theme_mode', { theme: normalized });
+}
+
+/** Remember the most recently loaded device/package for the next app launch. */
+async function rememberLastUsedDevice(partNumber, package) {
+    const part = String(partNumber || '').trim().toUpperCase();
+    const pkg = String(package || '').trim();
+    if (!part) return;
+
+    appSettings.last_used.part_number = part;
+    appSettings.last_used.package = pkg;
+    await invoke('remember_last_used_device', {
+        partNumber: part,
+        package: pkg || null,
+    });
+}
+
+/**
+ * Resolve the device that should be loaded automatically on startup.
+ * Returns null when the configured policy intentionally starts the app blank.
+ */
+function resolveStartupTarget(settings) {
+    const startupDevice = String(settings?.startup?.device || 'last-used').trim();
+    const startupPackage = String(settings?.startup?.package || '').trim();
+    const lastPart = String(settings?.last_used?.part_number || '').trim().toUpperCase();
+    const lastPackage = String(settings?.last_used?.package || '').trim();
+
+    if (!startupDevice || startupDevice.toLowerCase() === 'last-used') {
+        if (!lastPart) return null;
+        return {
+            partNumber: lastPart,
+            package: lastPackage || null,
+        };
+    }
+
+    return {
+        partNumber: startupDevice.toUpperCase(),
+        package: startupPackage || null,
+    };
+}
+
+// =============================================================================
 // Pin Function Classification
 // =============================================================================
 
@@ -259,8 +365,8 @@ function fixedFuncGroup(name) {
     if (/^INT0$/.test(name)) return 'Interrupt';
     if (/^PG[DC]\d/.test(name)) return 'Debug';
     if (/^TD[IO]$|^TMS$|^TCK$/.test(name)) return 'JTAG';
-    if (/^SCL\d/.test(name)) return 'I2C';
-    if (/^SDA\d/.test(name)) return 'I2C';
+    if (/^A?SCL\d/.test(name)) return 'I2C';
+    if (/^A?SDA\d/.test(name)) return 'I2C';
     if (/^PWM\d/.test(name)) return 'PWM';
     if (/^R[A-E]\d+$/.test(name)) return 'GPIO';
     if (/^RP\d+$/.test(name)) return null;
@@ -278,12 +384,13 @@ function getAvailablePeripherals(pin) {
 
     // Fixed (hardwired) functions from the pin's function list
     for (const fn of pin.functions) {
+        if (isI2cRoutingFunction(fn) && !isI2cRoutingFunctionActive(fn)) continue;
         const group = fixedFuncGroup(fn);
         if (!group) continue;
         let dir = 'in';
         if (/^OA\d+OUT|^DAC|^CLKO|^OSCO/.test(fn)) dir = 'out';
         if (/^R[A-E]\d+$/.test(fn)) dir = 'io';
-        if (/^SCL\d|^SDA\d/.test(fn)) dir = 'io';
+        if (/^A?SCL\d|^A?SDA\d/.test(fn)) dir = 'io';
         periphs.push({
             name: fn,
             direction: dir,
@@ -345,6 +452,239 @@ function getIcsPair() {
     if (!el) return 1;
     const match = el.value.match(/\d+/);
     return match ? parseInt(match[0]) : 1;
+}
+
+/** Return true when an I2C alternate pin-routing fuse is enabled for the channel. */
+function isI2cAlternateRoutingEnabled(channel) {
+    const el = getFuseSelect(`ALTI2C${channel}`);
+    return el ? el.value.toUpperCase() === 'ON' : false;
+}
+
+/** Check if a function name is one of the fuse-routed I2C pin aliases. */
+function isI2cRoutingFunction(fn) {
+    return /^(A?SCL[12]|A?SDA[12])$/.test(fn);
+}
+
+/**
+ * Parse an I2C pin-routing function name into channel, role, and routing mode.
+ * @param {string} fn - e.g. "SCL1" or "ASDA2"
+ * @returns {{channel:number, role:string, alternate:boolean}|null}
+ */
+function parseI2cRoutingFunction(fn) {
+    const match = fn.match(/^(A?)(SCL|SDA)([12])$/);
+    if (!match) return null;
+    return {
+        alternate: Boolean(match[1]),
+        role: match[2],
+        channel: parseInt(match[3], 10),
+    };
+}
+
+/** Return whether the given routed I2C function is active for the current fuse state. */
+function isI2cRoutingFunctionActive(fn) {
+    const parsed = parseI2cRoutingFunction(fn);
+    if (!parsed) return true;
+    return parsed.alternate === isI2cAlternateRoutingEnabled(parsed.channel);
+}
+
+/** Build the routed I2C function name for a channel/role pair. */
+function getI2cRoutingFunctionName(channel, role, alternate) {
+    return `${alternate ? 'A' : ''}${role}${channel}`;
+}
+
+/** Find the current package pin that carries a given fixed function. */
+function findPinByFunction(fn) {
+    if (!deviceData) return null;
+    return deviceData.pins.find(pin => pin.functions.includes(fn)) || null;
+}
+
+/**
+ * Return true when a stashed assignment is valid to restore on the given pin.
+ * PPS assignments only require an RP-capable pad; fixed assignments must still
+ * exist on the current pin and, for I2C routing aliases, be active.
+ */
+function canRestoreAssignmentOnPin(pin, assignment) {
+    if (!pin || !assignment) return false;
+    if (!assignment.fixed) return pin.rp_number !== null;
+    if (!pin.functions.includes(assignment.peripheral)) return false;
+    if (isI2cRoutingFunction(assignment.peripheral)) {
+        return isI2cRoutingFunctionActive(assignment.peripheral);
+    }
+    return true;
+}
+
+/** Stash a pin assignment and its signal name so it can be restored later. */
+function stashI2cPinState(pinPos) {
+    if (!assignments[pinPos]) return false;
+    i2cRoutedAssignments[pinPos] = {
+        assignment: structuredClone(assignments[pinPos]),
+        signalName: signalNames[pinPos] || '',
+    };
+    delete assignments[pinPos];
+    delete signalNames[pinPos];
+    return true;
+}
+
+/** Restore any stashed assignments that are valid again for the current routing state. */
+function restoreI2cRoutedAssignments() {
+    if (!deviceData) return 0;
+
+    let restored = 0;
+    for (const [posStr, state] of Object.entries(i2cRoutedAssignments)) {
+        const pos = parseInt(posStr, 10);
+        if (assignments[pos]) continue;
+
+        const pin = deviceData.pins.find(candidate => candidate.position === pos);
+        if (!canRestoreAssignmentOnPin(pin, state.assignment)) continue;
+
+        assignments[pos] = structuredClone(state.assignment);
+        if (state.signalName) {
+            signalNames[pos] = state.signalName;
+        } else {
+            delete signalNames[pos];
+        }
+        delete i2cRoutedAssignments[pos];
+        restored += 1;
+    }
+
+    return restored;
+}
+
+/**
+ * Move an assigned I2C function to the active routed pin, preserving signal names.
+ * Any assignment already living on the destination pin is stashed first.
+ */
+function moveI2cAssignment(sourcePos, targetPin, targetFunction) {
+    const sourceAssignment = assignments[sourcePos];
+    if (!sourceAssignment) return false;
+
+    const sourceSignal = signalNames[sourcePos] || '';
+    const targetPos = targetPin.position;
+
+    if (targetPos !== sourcePos && assignments[targetPos]) {
+        stashI2cPinState(targetPos);
+    }
+
+    assignments[targetPos] = {
+        ...structuredClone(sourceAssignment),
+        peripheral: targetFunction,
+        direction: 'io',
+        ppsval: null,
+        rp_number: targetPin.rp_number,
+        fixed: true,
+    };
+
+    if (sourceSignal) {
+        signalNames[targetPos] = sourceSignal;
+    } else {
+        delete signalNames[targetPos];
+    }
+
+    if (targetPos !== sourcePos) {
+        delete assignments[sourcePos];
+        delete signalNames[sourcePos];
+    }
+
+    return true;
+}
+
+/**
+ * Re-route fixed I2C assignments so they follow ALTI2C1/ALTI2C2 automatically.
+ * When the selected routing lands on pins that are not bonded out on the current
+ * package, the affected assignments are stashed until the route becomes usable.
+ */
+function reconcileI2cRoutingAssignments() {
+    if (!deviceData) {
+        return { moved: 0, cleared: 0, restored: 0, missingChannels: [] };
+    }
+
+    const routePairs = [
+        { channel: 1, role: 'SCL' },
+        { channel: 1, role: 'SDA' },
+        { channel: 2, role: 'SCL' },
+        { channel: 2, role: 'SDA' },
+    ];
+
+    let moved = 0;
+    let cleared = 0;
+    const missingChannels = new Set();
+
+    for (const pair of routePairs) {
+        const defaultFunction = getI2cRoutingFunctionName(pair.channel, pair.role, false);
+        const alternateFunction = getI2cRoutingFunctionName(pair.channel, pair.role, true);
+        const defaultPin = findPinByFunction(defaultFunction);
+        const alternatePin = findPinByFunction(alternateFunction);
+        const useAlternate = isI2cAlternateRoutingEnabled(pair.channel);
+        const activeFunction = useAlternate ? alternateFunction : defaultFunction;
+        const activePin = useAlternate ? alternatePin : defaultPin;
+
+        const sourcePin = [defaultPin, alternatePin].find(pin => {
+            if (!pin) return false;
+            const peripheral = assignments[pin.position]?.peripheral;
+            return peripheral === defaultFunction || peripheral === alternateFunction;
+        });
+
+        if (!sourcePin) continue;
+
+        const sourceAssignment = assignments[sourcePin.position];
+        if (activePin &&
+            sourcePin.position === activePin.position &&
+            sourceAssignment?.peripheral === activeFunction) {
+            continue;
+        }
+
+        if (!activePin) {
+            if (stashI2cPinState(sourcePin.position)) {
+                cleared += 1;
+                missingChannels.add(pair.channel);
+            }
+            continue;
+        }
+
+        if (moveI2cAssignment(sourcePin.position, activePin, activeFunction)) {
+            moved += 1;
+        }
+    }
+
+    return {
+        moved,
+        cleared,
+        restored: restoreI2cRoutedAssignments(),
+        missingChannels: [...missingChannels].sort(),
+    };
+}
+
+/** Describe any ALTI2Cx routing that points to pins unavailable on this package. */
+function getI2cRoutingWarningForChannel(channel) {
+    if (!deviceData || !isI2cAlternateRoutingEnabled(channel)) return '';
+
+    const hasAlternatePins =
+        Boolean(findPinByFunction(`ASCL${channel}`)) &&
+        Boolean(findPinByFunction(`ASDA${channel}`));
+    if (hasAlternatePins) return '';
+
+    return `ASCL${channel}/ASDA${channel} are not exposed on ${deviceData.selected_package}; leave ALTI2C${channel} = OFF for external I2C${channel}.`;
+}
+
+/** Sync package-specific warnings into the ALTI2Cx fuse rows. */
+function updateFuseFieldWarnings() {
+    const warnings = [];
+
+    for (const channel of [1, 2]) {
+        const fieldName = `ALTI2C${channel}`;
+        const warningText = getI2cRoutingWarningForChannel(channel);
+        const row = document.querySelector(`.fuse-row[data-field="${fieldName}"]`);
+        const warningEl = row?.querySelector('.fuse-field-warning');
+
+        if (row) row.classList.toggle('warning', Boolean(warningText));
+        if (warningEl) {
+            warningEl.hidden = !warningText;
+            warningEl.textContent = warningText;
+        }
+        if (warningText) warnings.push(warningText);
+    }
+
+    return warnings;
 }
 
 /** Return true when the JTAGEN fuse currently reserves the dedicated JTAG pads. */
@@ -436,12 +776,23 @@ function restoreJtagAssignments() {
 
 /** Apply fuse-driven pin reservations and re-render the current device view. */
 function applyFuseReservations() {
+    const i2cRouting = reconcileI2cRoutingAssignments();
     if (isJtagEnabled()) {
         releaseReservedJtagAssignments();
     } else {
         restoreJtagAssignments();
     }
     if (deviceData) renderDevice();
+
+    const warnings = updateFuseFieldWarnings();
+
+    if (i2cRouting.moved || i2cRouting.cleared || i2cRouting.restored) {
+        setStatus(
+            warnings.length > 0
+                ? 'I2C routing updated; see ALTI2C warnings'
+                : 'I2C pins reallocated for the current ALTI2C fuse settings'
+        );
+    }
 }
 
 /**
@@ -563,6 +914,7 @@ function renderDevice() {
         const funcDiv = document.createElement('div');
         funcDiv.className = 'pin-functions';
         for (const fn of pin.functions) {
+            if (isI2cRoutingFunction(fn) && !isI2cRoutingFunctionActive(fn)) continue;
             const span = document.createElement('span');
             span.className = 'func-tag';
             if (/^RP\d+$/.test(fn)) span.classList.add('rp');
@@ -1278,6 +1630,7 @@ function buildFuseUI(fuseDefs) {
         for (const field of visibleFields) {
             const row = document.createElement('div');
             row.className = 'fuse-row';
+            row.dataset.field = field.cname;
 
             const labelWrap = document.createElement('div');
             labelWrap.className = 'fuse-label-wrap';
@@ -1290,6 +1643,12 @@ function buildFuseUI(fuseDefs) {
                 desc.className = 'fuse-field-desc';
                 desc.textContent = field.desc;
                 labelWrap.appendChild(desc);
+            }
+            if (/^ALTI2C[12]$/.test(field.cname)) {
+                const warning = document.createElement('span');
+                warning.className = 'fuse-field-warning';
+                warning.hidden = true;
+                labelWrap.appendChild(warning);
             }
             row.appendChild(labelWrap);
 
@@ -1329,11 +1688,14 @@ function buildFuseUI(fuseDefs) {
         });
     }
 
-    const jtagSelect = getFuseSelect('JTAGEN');
-    if (jtagSelect) {
-        jtagSelect.addEventListener('change', applyFuseReservations);
+    for (const field of ['JTAGEN', 'ALTI2C1', 'ALTI2C2']) {
+        const select = getFuseSelect(field);
+        if (select) {
+            select.addEventListener('change', applyFuseReservations);
+        }
     }
 
+    updateFuseFieldWarnings();
     document.getElementById('fuse-config').style.display = '';
 }
 
@@ -1397,9 +1759,12 @@ async function saveConfig() {
         package: deviceData.selected_package,
         assignments: assignments,
         signal_names: signalNames,
-        // Preserve auto-cleared JTAG assignments so toggling JTAGEN back off after
-        // a reload can still restore the user's previous pin choices.
-        reserved_assignments: { jtag: jtagReservedAssignments },
+        // Preserve fuse-driven temporary state so toggling routing/debug fuses
+        // after a reload can still restore the user's previous pin choices.
+        reserved_assignments: {
+            jtag: jtagReservedAssignments,
+            i2c: i2cRoutedAssignments,
+        },
         oscillator: getOscConfig(),
         fuses: getFuseConfig(),
     };
@@ -1459,6 +1824,7 @@ async function loadConfigText(text, sourcePath) {
         assignments = normalizePositionMap(config.assignments);
         signalNames = normalizePositionMap(config.signal_names);
         jtagReservedAssignments = normalizePositionMap(config.reserved_assignments?.jtag);
+        i2cRoutedAssignments = normalizePositionMap(config.reserved_assignments?.i2c);
 
         await loadDevice(config.package || null, { preserveState: true });
         applyOscillatorConfig(config.oscillator);
@@ -1635,8 +2001,6 @@ async function refreshIndex() {
     }
 }
 
-populateDeviceList();
-
 // =============================================================================
 // Theme Toggle
 // =============================================================================
@@ -1656,33 +2020,39 @@ function themeLabel(mode) {
     return 'System';
 }
 
-/** Initialize theme from localStorage and wire toggle button. */
+/** Initialize theme from the shared settings file and wire toggle button. */
 function setupTheme() {
-    const saved = localStorage.getItem('pickle-theme') || 'dark';
-    document.documentElement.setAttribute('data-theme', resolveTheme(saved));
     const btn = document.getElementById('theme-toggle');
-    btn.textContent = themeLabel(saved);
-
     const cycle = { dark: 'light', light: 'system', system: 'dark' };
-    let current = saved;
+    let current = normalizeThemeMode(appSettings.appearance.theme);
 
-    btn.addEventListener('click', () => {
+    const applyThemeMode = (mode) => {
+        document.documentElement.setAttribute('data-theme', resolveTheme(mode));
+        btn.textContent = themeLabel(mode);
+    };
+
+    applyThemeMode(current);
+
+    btn.addEventListener('click', async () => {
         current = cycle[current] || 'dark';
-        document.documentElement.setAttribute('data-theme', resolveTheme(current));
-        localStorage.setItem('pickle-theme', current);
-        btn.textContent = themeLabel(current);
+        applyThemeMode(current);
+        try {
+            await saveThemeMode(current);
+        } catch (e) {
+            console.warn('Failed to save theme mode:', e);
+        }
     });
 
     // When in system mode, follow OS changes in real time.
     window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
-        if (localStorage.getItem('pickle-theme') === 'system') {
-            document.documentElement.setAttribute('data-theme', resolveTheme('system'));
+        if (current === 'system') {
+            applyThemeMode('system');
         }
     });
 }
 
 // =============================================================================
-// Pinout Verification (Anthropic API)
+// Pinout Verification
 // =============================================================================
 
 /** @type {Object|null} Last verification result */
@@ -2115,12 +2485,21 @@ document.addEventListener('mouseout', (e) => {
     tipEl.classList.remove('visible');
 });
 
-// Initialize UI and auto-load default device
-setupTheme();
-checkCompiler();
-checkApiKey();
-setupOscUI();
-setupFuseUI();
-if (document.getElementById('part-input').value) {
-    loadDevice();
+// Initialize UI and load the configured startup device if one is available.
+async function initializeApp() {
+    await loadAppSettings();
+    setupTheme();
+    checkCompiler();
+    checkApiKey();
+    setupOscUI();
+    setupFuseUI();
+    populateDeviceList();
+
+    const startupTarget = resolveStartupTarget(appSettings);
+    if (!startupTarget) return;
+
+    document.getElementById('part-input').value = startupTarget.partNumber;
+    await loadDevice(startupTarget.package || undefined, { preserveState: false });
 }
+
+initializeApp();
