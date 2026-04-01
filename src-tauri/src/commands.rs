@@ -9,10 +9,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use log::{error, info};
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::codegen::fuses::FuseConfig;
+use crate::codegen::fuses::generate_dynamic_fuse_pragmas;
 use crate::codegen::generate::{generate_c_files, PinAssignment, PinConfig};
 use crate::codegen::oscillator::OscConfig;
 use crate::parser::dfp_manager;
@@ -129,37 +129,12 @@ fn default_poscmd() -> String {
     "EC".to_string()
 }
 
+/// Dynamic fuse selections: `{ register_cname: { field_cname: value_cname } }`.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FuseRequest {
-    #[serde(default = "default_ics")]
-    pub ics: u32,
-    #[serde(default = "default_off")]
-    pub jtagen: String,
-    #[serde(default = "default_off")]
-    pub fwdten: String,
-    #[serde(default = "default_wdtps")]
-    pub wdtps: String,
-    #[serde(default = "default_on")]
-    pub boren: String,
-    #[serde(default = "default_borv")]
-    pub borv: String,
-}
-
-fn default_ics() -> u32 {
-    1
-}
-fn default_off() -> String {
-    "OFF".to_string()
-}
-fn default_on() -> String {
-    "ON".to_string()
-}
-fn default_wdtps() -> String {
-    "PS1024".to_string()
-}
-fn default_borv() -> String {
-    "BOR_HIGH".to_string()
+    #[serde(default)]
+    pub selections: HashMap<String, HashMap<String, String>>,
 }
 
 #[derive(Deserialize)]
@@ -347,6 +322,7 @@ pub fn load_device(part_number: String, package: Option<String>) -> Result<Value
         "pps_input_mappings": device.pps_input_mappings,
         "pps_output_mappings": device.pps_output_mappings,
         "port_registers": device.port_registers,
+        "fuse_defs": device.fuse_defs,
     }))
 }
 
@@ -514,13 +490,8 @@ pub fn generate_code(request: CodegenRequest) -> Result<Value, String> {
             poscmd: o.poscmd,
         });
 
-    let fuse = request.fuses.map(|f| FuseConfig {
-        ics: f.ics,
-        jtagen: f.jtagen,
-        fwdten: f.fwdten,
-        wdtps: f.wdtps,
-        boren: f.boren,
-        borv: f.borv,
+    let fuse_pragmas = request.fuses.map(|f| {
+        generate_dynamic_fuse_pragmas(&device.fuse_defs, &f.selections)
     });
 
     let files = generate_c_files(
@@ -529,7 +500,7 @@ pub fn generate_code(request: CodegenRequest) -> Result<Value, String> {
         Some(pkg_name),
         Some(&sig_names),
         osc.as_ref(),
-        fuse.as_ref(),
+        fuse_pragmas.as_deref(),
     );
 
     Ok(serde_json::json!({ "files": files }))
@@ -647,39 +618,162 @@ pub fn compile_check(request: CompileCheckRequest) -> Result<CompileCheckRespons
     }
 }
 
+/// Try to find a datasheet: local cache → ~/Downloads → auto-resolve from Microchip.
+/// Returns { path, name, base64, source } or null.
+/// Emits "verify-progress" events so the frontend can show status updates.
 #[tauri::command]
-pub fn verify_pinout(
+pub async fn find_datasheet(
+    app: AppHandle,
+    part_number: String,
+) -> Result<Option<Value>, String> {
+    use crate::parser::datasheet_fetcher;
+
+    let pn = part_number.clone();
+    let app2 = app.clone();
+
+    // Run blocking I/O on a dedicated thread so the UI stays responsive
+    tokio::task::spawn_blocking(move || {
+        let emit = |msg: &str| {
+            let _ = app2.emit("verify-progress", msg);
+        };
+
+        // 1. Check local files first (cached PDFs, ~/Downloads)
+        emit("Checking local files...");
+        if let Some(path) = dfp_manager::find_local_datasheet(&pn) {
+            let bytes =
+                fs::read(&path).map_err(|e| format!("Cannot read {}: {e}", path.display()))?;
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "datasheet.pdf".to_string());
+            emit(&format!("Found local: {}", name));
+            return Ok(Some(serde_json::json!({
+                "path": path.display().to_string(),
+                "name": name,
+                "base64": base64::engine::general_purpose::STANDARD.encode(&bytes),
+                "source": "local",
+            })));
+        }
+
+        // 2. Try to resolve and download from Microchip via proxy
+        emit("Resolving datasheet from Microchip...");
+        info!("find_datasheet: resolving {} from Microchip product page...", pn);
+        let ds_ref = match datasheet_fetcher::resolve(&pn) {
+            Ok(r) => r,
+            Err(e) => {
+                info!("find_datasheet: resolve failed for {}: {}", pn, e);
+                return Ok(None);
+            }
+        };
+
+        // 3. Try direct PDF download
+        emit(&format!("Downloading {}...", ds_ref.datasheet_revision));
+        info!("find_datasheet: downloading PDF from {}", ds_ref.pdf_url);
+        match datasheet_fetcher::get_or_download_pdf(&pn, &ds_ref.pdf_url) {
+            Ok(bytes) => {
+                let name = format!(
+                    "{}-{}.pdf",
+                    pn.to_uppercase(),
+                    ds_ref.datasheet_revision
+                );
+                emit(&format!("Downloaded {}", name));
+                return Ok(Some(serde_json::json!({
+                    "name": name,
+                    "base64": base64::engine::general_purpose::STANDARD.encode(&bytes),
+                    "source": "downloaded",
+                    "revision": ds_ref.datasheet_revision,
+                })));
+            }
+            Err(e) => {
+                info!("find_datasheet: PDF download failed, trying text fallback: {}", e);
+            }
+        }
+
+        // 4. Text fallback — fetch proxy-extracted text
+        emit("Trying text extraction fallback...");
+        match datasheet_fetcher::get_or_fetch_text(&pn, &ds_ref.pdf_url) {
+            Ok(text) => {
+                let name = format!(
+                    "{}-{}.md",
+                    pn.to_uppercase(),
+                    ds_ref.datasheet_revision
+                );
+                Ok(Some(serde_json::json!({
+                    "name": name,
+                    "text": text,
+                    "source": "text_proxy",
+                    "revision": ds_ref.datasheet_revision,
+                    "pdf_url": ds_ref.pdf_url,
+                })))
+            }
+            Err(e) => {
+                info!("find_datasheet: text fallback also failed: {}", e);
+                Ok(None)
+            }
+        }
+    })
+    .await
+    .map_err(|e| format!("Task join error: {e}"))?
+}
+
+#[tauri::command]
+pub async fn verify_pinout(
+    app: AppHandle,
     pdf_base64: String,
     part_number: String,
     package: Option<String>,
     api_key: Option<String>,
 ) -> Result<Value, String> {
-    use base64::Engine;
+    let app2 = app.clone();
 
-    let pdf_bytes = base64::engine::general_purpose::STANDARD
-        .decode(&pdf_base64)
-        .map_err(|e| format!("Invalid base64: {e}"))?;
+    tokio::task::spawn_blocking(move || {
+        let emit = |msg: &str| {
+            let _ = app2.emit("verify-progress", msg);
+        };
 
-    let device = dfp_manager::load_device(&part_number)
-        .ok_or_else(|| format!("Device {} not found", part_number))?;
+        emit("Decoding PDF...");
+        info!("verify_pinout: decoding PDF for {}", part_number);
+        let pdf_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&pdf_base64)
+            .map_err(|e| format!("Invalid base64: {e}"))?;
+        let size_mb = pdf_bytes.len() as f64 / 1_048_576.0;
+        info!("verify_pinout: PDF size = {:.1} MB", size_mb);
 
-    let pkg_name = package.as_deref().unwrap_or(&device.default_pinout);
-    let resolved_pins = device.resolve_pins(Some(pkg_name));
-    let pinout = device.get_pinout(Some(pkg_name));
+        // Cache the datasheet for future lookups
+        dfp_manager::cache_datasheet(&part_number, &pdf_bytes);
 
-    let device_dict = serde_json::json!({
-        "part_number": device.part_number,
-        "selected_package": pkg_name,
-        "packages": device.pinouts.iter().map(|(name, po)| {
-            (name.clone(), serde_json::json!({"pin_count": po.pin_count, "source": po.source}))
-        }).collect::<HashMap<String, Value>>(),
-        "pin_count": pinout.pin_count,
-        "pins": resolved_pins,
-    });
+        emit("Loading device data...");
+        let device = dfp_manager::load_device(&part_number)
+            .ok_or_else(|| format!("Device {} not found", part_number))?;
 
-    let result = pinout_verifier::verify_pinout(&pdf_bytes, &device_dict, api_key.as_deref())?;
+        let pkg_name = package.as_deref().unwrap_or(&device.default_pinout);
+        let resolved_pins = device.resolve_pins(Some(pkg_name));
+        let pinout = device.get_pinout(Some(pkg_name));
 
-    serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
+        let device_dict = serde_json::json!({
+            "part_number": device.part_number,
+            "selected_package": pkg_name,
+            "packages": device.pinouts.iter().map(|(name, po)| {
+                (name.clone(), serde_json::json!({"pin_count": po.pin_count, "source": po.source}))
+            }).collect::<HashMap<String, Value>>(),
+            "pin_count": pinout.pin_count,
+            "pins": resolved_pins,
+        });
+
+        emit(&format!("Sending {:.1} MB PDF to LLM — this takes 30–90s...", size_mb));
+        info!("verify_pinout: calling LLM API...");
+        let result =
+            pinout_verifier::verify_pinout(&pdf_bytes, &device_dict, api_key.as_deref())?;
+        info!(
+            "verify_pinout: LLM response received, {} packages found",
+            result.packages.len()
+        );
+
+        emit("Processing results...");
+        serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {e}"))?
 }
 
 #[tauri::command]

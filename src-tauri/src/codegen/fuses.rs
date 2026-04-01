@@ -1,7 +1,10 @@
-//! Configuration fuse generation for dsPIC33CK devices.
-//! Generates #pragma config lines for FICD, FWDT, and FBORPOR registers.
+//! Configuration fuse generation for dsPIC33 and PIC24 devices.
+//! Supports both legacy hardcoded fuse generation and dynamic generation
+//! driven by DCR definitions parsed from EDC files.
 
+use crate::parser::edc_parser::DcrRegister;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FuseConfig {
@@ -125,6 +128,70 @@ pub fn generate_fuse_pragmas(fuse: &FuseConfig) -> String {
         "#pragma config BORV = {}{}/* Brown-out voltage: {} */",
         fuse.borv, borv_pad, borv_label
     ));
+
+    lines.join("\n")
+}
+
+/// Generate `#pragma config` lines from device-specific DCR definitions and
+/// a user selections map of `{ register_cname: { field_cname: value_cname } }`.
+/// Fields not present in `selections` fall back to their register default value.
+pub fn generate_dynamic_fuse_pragmas(
+    fuse_defs: &[DcrRegister],
+    selections: &HashMap<String, HashMap<String, String>>,
+) -> String {
+    let mut lines: Vec<String> = Vec::new();
+
+    for reg in fuse_defs {
+        // Skip registers with no visible fields
+        let visible_fields: Vec<_> = reg.fields.iter().filter(|f| !f.hidden).collect();
+        if visible_fields.is_empty() {
+            continue;
+        }
+
+        if !lines.is_empty() {
+            lines.push(String::new());
+        }
+        lines.push(format!("/* {} \u{2014} {} */", reg.cname, reg.desc));
+
+        let reg_selections = selections.get(&reg.cname);
+
+        for field in &visible_fields {
+            // Determine the selected value: explicit selection, or register default
+            let selected = reg_selections
+                .and_then(|rs| rs.get(&field.cname))
+                .cloned()
+                .unwrap_or_else(|| {
+                    // Fall back to the value matching the register default
+                    let default_bits = reg.default_value & field.mask;
+                    field
+                        .values
+                        .iter()
+                        .find(|v| v.value == default_bits)
+                        .map(|v| v.cname.clone())
+                        .unwrap_or_else(|| {
+                            // Last resort: use the first value
+                            field
+                                .values
+                                .first()
+                                .map(|v| v.cname.clone())
+                                .unwrap_or_default()
+                        })
+                });
+
+            // Find the description for the selected value
+            let desc = field
+                .values
+                .iter()
+                .find(|v| v.cname == selected)
+                .map(|v| v.desc.as_str())
+                .unwrap_or(&field.desc);
+
+            lines.push(format!(
+                "#pragma config {} = {}    /* {} */",
+                field.cname, selected, desc
+            ));
+        }
+    }
 
     lines.join("\n")
 }

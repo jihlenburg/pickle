@@ -48,6 +48,8 @@ pub struct PLLResult {
     pub error_ppm: i64,
 }
 
+/// Search the legal dsPIC33 PLL divider space and return the closest match to
+/// the requested FOSC, rejecting combinations that violate FPFD/VCO limits.
 pub fn calculate_pll(fplli_hz: u64, target_fosc_hz: u64) -> Option<PLLResult> {
     let mut best: Option<PLLResult> = None;
 
@@ -63,12 +65,12 @@ pub fn calculate_pll(fplli_hz: u64, target_fosc_hz: u64) -> Option<PLLResult> {
                 let m_exact = (target_fosc_hz as f64) * (n1 as f64) * (n2 as f64) * (n3 as f64)
                     / (fplli_hz as f64);
                 let m = m_exact.round() as u64;
-                if m < PLL_M_MIN || m > PLL_M_MAX {
+                if !(PLL_M_MIN..=PLL_M_MAX).contains(&m) {
                     continue;
                 }
 
                 let fvco = fplli_hz * m / n1;
-                if fvco < VCO_MIN_HZ || fvco > VCO_MAX_HZ {
+                if !(VCO_MIN_HZ..=VCO_MAX_HZ).contains(&fvco) {
                     continue;
                 }
 

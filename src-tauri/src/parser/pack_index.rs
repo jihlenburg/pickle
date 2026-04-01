@@ -79,7 +79,7 @@ impl PackIndex {
 
 fn fetch_index_xml() -> Result<Vec<u8>, String> {
     let client = reqwest::blocking::Client::builder()
-        .user_agent("config-pic/0.6 (pin configurator)")
+        .user_agent("pickle/0.1 (pin configurator)")
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| format!("HTTP client error: {e}"))?;
@@ -243,7 +243,7 @@ pub fn download_atpack(url: &str, filename: &str) -> Result<PathBuf, String> {
     eprintln!("Downloading {}...", filename);
 
     let client = reqwest::blocking::Client::builder()
-        .user_agent("config-pic/0.6 (pin configurator)")
+        .user_agent("pickle/0.1 (pin configurator)")
         .timeout(std::time::Duration::from_secs(120))
         .build()
         .map_err(|e| format!("HTTP client error: {e}"))?;

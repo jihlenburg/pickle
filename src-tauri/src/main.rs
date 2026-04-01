@@ -144,6 +144,7 @@ fn main() {
             commands::generate_code,
             commands::compiler_info,
             commands::compile_check,
+            commands::find_datasheet,
             commands::verify_pinout,
             commands::apply_overlay,
             commands::api_key_status,

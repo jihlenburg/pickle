@@ -1,9 +1,9 @@
 //! End-to-end integration test: load device fixture -> assign pins -> generate code -> verify output.
 
-use pickle_lib::codegen::fuses::FuseConfig;
+use pickle_lib::codegen::fuses::generate_dynamic_fuse_pragmas;
 use pickle_lib::codegen::generate::{generate_c_files, PinAssignment, PinConfig};
 use pickle_lib::codegen::oscillator::OscConfig;
-use pickle_lib::parser::edc_parser::DeviceData;
+use pickle_lib::parser::edc_parser::{DeviceData, DcrRegister, DcrField, DcrFieldValue};
 use std::collections::HashMap;
 
 fn load_fixture() -> DeviceData {
@@ -132,7 +132,46 @@ fn test_generate_code_with_oscillator_and_fuses() {
         poscmd: "EC".to_string(),
     };
 
-    let fuse = FuseConfig::default();
+    // Construct minimal fuse definitions for the test (fixture JSON lacks fuse_defs)
+    let test_fuse_defs = vec![
+        DcrRegister {
+            cname: "FICD".into(), desc: "ICD Configuration".into(),
+            addr: 0xAF28, default_value: 0xFF,
+            fields: vec![
+                DcrField {
+                    cname: "ICS".into(), desc: "ICD Channel".into(),
+                    mask: 0x3, width: 2, hidden: false,
+                    values: vec![
+                        DcrFieldValue { cname: "PGD1".into(), desc: "PGC1/PGD1".into(), value: 3 },
+                        DcrFieldValue { cname: "PGD2".into(), desc: "PGC2/PGD2".into(), value: 2 },
+                    ],
+                },
+                DcrField {
+                    cname: "JTAGEN".into(), desc: "JTAG Enable".into(),
+                    mask: 0x1, width: 1, hidden: false,
+                    values: vec![
+                        DcrFieldValue { cname: "OFF".into(), desc: "Disabled".into(), value: 0 },
+                        DcrFieldValue { cname: "ON".into(), desc: "Enabled".into(), value: 1 },
+                    ],
+                },
+            ],
+        },
+        DcrRegister {
+            cname: "FWDT".into(), desc: "Watchdog Timer".into(),
+            addr: 0xAF20, default_value: 0xFF,
+            fields: vec![
+                DcrField {
+                    cname: "FWDTEN".into(), desc: "WDT Enable".into(),
+                    mask: 0x1, width: 1, hidden: false,
+                    values: vec![
+                        DcrFieldValue { cname: "OFF".into(), desc: "Disabled".into(), value: 0 },
+                        DcrFieldValue { cname: "ON".into(), desc: "Enabled".into(), value: 1 },
+                    ],
+                },
+            ],
+        },
+    ];
+    let fuse_pragmas = generate_dynamic_fuse_pragmas(&test_fuse_defs, &HashMap::new());
 
     let sig_names: HashMap<u32, String> = HashMap::new();
     let files = generate_c_files(
@@ -141,7 +180,7 @@ fn test_generate_code_with_oscillator_and_fuses() {
         None,
         Some(&sig_names),
         Some(&osc),
-        Some(&fuse),
+        Some(fuse_pragmas.as_str()),
     );
 
     let c_code = &files["pin_config.c"];

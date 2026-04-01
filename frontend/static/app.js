@@ -1,11 +1,11 @@
 /**
- * config-pic — Pin Configurator Frontend
+ * pickle — Pin Configurator Frontend
  *
  * Single-page application for dsPIC33 pin multiplexing configuration.
  * Manages device data, pin assignments, code generation, and UI state.
  *
  * Architecture:
- *   - State: global variables (deviceData, assignments, signalNames)
+ *   - State: global variables (deviceData, assignments, signalNames, jtagReservedAssignments)
  *   - Rendering: imperative DOM manipulation (no framework)
  *   - Backend: Tauri IPC via invoke()
  *   - File I/O: native Tauri dialogs handled by Rust commands
@@ -26,6 +26,9 @@ let assignments = {};
 
 /** @type {Object.<number, string>} Pin position -> user-defined signal name */
 let signalNames = {};
+
+/** @type {Object.<number, {peripheral:string, direction:string, ppsval:?number, rp_number:?number, fixed:boolean}>} */
+let jtagReservedAssignments = {};
 
 /** @type {Object.<string, string>} Generated file contents keyed by filename */
 let generatedFiles = {};
@@ -51,6 +54,15 @@ let undoStack = [];
 /** @type {Array<{assignments:Object, signalNames:Object}>} */
 let redoStack = [];
 const MAX_UNDO = 50;
+
+/** Reset per-device editor state when loading a different part. */
+function resetEditorState() {
+    assignments = {};
+    signalNames = {};
+    jtagReservedAssignments = {};
+    undoStack = [];
+    redoStack = [];
+}
 
 /** Snapshot current state onto the undo stack. Clears redo stack. */
 function pushUndo() {
@@ -150,12 +162,14 @@ function periphGroup(name) {
 /**
  * Load device data from the backend and render the UI.
  * @param {string} [pkg] - Optional package name. If omitted, loads default package.
- *                          When switching packages (pkg provided), assignments are preserved.
+ * @param {{preserveState?: boolean}} [options] - Preserve assignments/signal names when true.
+ *                                                Used for package switches and config restore.
  */
-async function loadDevice(pkg) {
+async function loadDevice(pkg, options = {}) {
     const part = document.getElementById('part-input').value.trim().toUpperCase();
     if (!part) return;
 
+    const preserveState = options.preserveState ?? Boolean(pkg);
     const isCached = cachedDevices.has(part);
     setStatus(isCached ? 'Loading...' : 'Downloading DFP pack...');
 
@@ -182,18 +196,17 @@ async function loadDevice(pkg) {
         // Show verify button when device is loaded
         document.getElementById('verify-btn').style.display = '';
 
-        // Clear assignments only when switching parts, not packages
-        if (!pkg) {
-            assignments = {};
-            undoStack = [];
-            redoStack = [];
+        // Reset editor state only when switching to a different part or starting fresh.
+        if (!preserveState) {
+            resetEditorState();
         }
 
         // Show configuration panels
         document.getElementById('save-btn').style.display = '';
         document.getElementById('load-btn-file').style.display = '';
         document.getElementById('osc-config').style.display = '';
-        document.getElementById('fuse-config').style.display = '';
+        document.getElementById('fuses-empty').style.display = 'none';
+        buildFuseUI(deviceData.fuse_defs);
 
         renderDevice();
         setStatus(`${deviceData.part_number} — ${deviceData.selected_package}`);
@@ -208,7 +221,7 @@ async function loadDevice(pkg) {
     }
 }
 
-/** Update the status bar text in the header. */
+/** Update the bottom status bar text. */
 function setStatus(msg) {
     const el = document.getElementById('status');
     if (!el) return;
@@ -323,9 +336,21 @@ function getAvailablePeripherals(pin) {
  * Return the currently selected ICSP pair number from the fuse UI (1, 2, or 3).
  * @returns {number}
  */
+function getFuseSelect(fieldName) {
+    return document.querySelector(`#fuse-fields select[data-field="${fieldName}"]`);
+}
+
 function getIcsPair() {
-    const el = document.getElementById('fuse-ics');
-    return el ? parseInt(el.value) : 1;
+    const el = getFuseSelect('ICS');
+    if (!el) return 1;
+    const match = el.value.match(/\d+/);
+    return match ? parseInt(match[0]) : 1;
+}
+
+/** Return true when the JTAGEN fuse currently reserves the dedicated JTAG pads. */
+function isJtagEnabled() {
+    const el = getFuseSelect('JTAGEN');
+    return el ? el.value.toUpperCase() === 'ON' : false;
 }
 
 /**
@@ -353,6 +378,72 @@ function isIcspFunction(fn) {
         new RegExp(`^PGC${pair}$|^PGD${pair}$|^PGEC${pair}$|^PGED${pair}$`).test(fn);
 }
 
+/** Check if a function belongs to the fixed JTAG interface. */
+function isJtagFunction(fn) {
+    return /^(TCK|TMS|TDI|TDO)$/.test(fn);
+}
+
+/** Return the JTAG role carried by this pin, if any. */
+function getJtagFunction(pin) {
+    return pin.functions.find(isJtagFunction) || null;
+}
+
+/** Check if a pin is currently reserved by the JTAG module. */
+function isJtagPin(pin) {
+    return isJtagEnabled() && Boolean(getJtagFunction(pin));
+}
+
+/**
+ * Drop user assignments from pins that are currently reserved by JTAG.
+ * This keeps code generation from emitting GPIO/PPS setup for pins the debug
+ * module owns while JTAGEN is enabled.
+ * @returns {number} Number of assignments removed
+ */
+function releaseReservedJtagAssignments() {
+    if (!deviceData || !isJtagEnabled()) return 0;
+
+    let cleared = 0;
+    for (const pin of deviceData.pins) {
+        if (!isJtagPin(pin)) continue;
+        if (assignments[pin.position]) {
+            jtagReservedAssignments[pin.position] = structuredClone(assignments[pin.position]);
+            delete assignments[pin.position];
+            cleared += 1;
+        }
+    }
+    return cleared;
+}
+
+/**
+ * Restore assignments that were auto-cleared when JTAG took ownership of its pins.
+ * Runs only when JTAGEN is OFF again.
+ * @returns {number} Number of assignments restored
+ */
+function restoreJtagAssignments() {
+    if (!deviceData || isJtagEnabled()) return 0;
+
+    let restored = 0;
+    for (const [posStr, assignment] of Object.entries(jtagReservedAssignments)) {
+        const pos = parseInt(posStr, 10);
+        if (!assignments[pos]) {
+            assignments[pos] = structuredClone(assignment);
+            restored += 1;
+        }
+    }
+    jtagReservedAssignments = {};
+    return restored;
+}
+
+/** Apply fuse-driven pin reservations and re-render the current device view. */
+function applyFuseReservations() {
+    if (isJtagEnabled()) {
+        releaseReservedJtagAssignments();
+    } else {
+        restoreJtagAssignments();
+    }
+    if (deviceData) renderDevice();
+}
+
 /**
  * Refresh ICSP gold highlighting on pin table rows, function tags,
  * and package diagram pins to match the current ICS fuse pair.
@@ -361,18 +452,22 @@ function refreshIcspHighlight() {
     if (!deviceData) return;
     for (const pin of deviceData.pins) {
         const isIcsp = isIcspPin(pin);
+        const isJtag = isJtagPin(pin);
 
         // Pin table row
         const row = document.getElementById(`pin-row-${pin.position}`);
         if (row) row.classList.toggle('icsp', isIcsp);
+        if (row) row.classList.toggle('jtag', isJtag);
 
         // Package diagram pin
         const pkgPin = document.getElementById(`pkg-pin-${pin.position}`);
         if (pkgPin) pkgPin.classList.toggle('icsp', isIcsp);
+        if (pkgPin) pkgPin.classList.toggle('jtag', isJtag);
     }
     // Function tags — check each individually
     document.querySelectorAll('.func-tag').forEach(span => {
         span.classList.toggle('icsp', isIcspFunction(span.textContent));
+        span.classList.toggle('jtag', isJtagFunction(span.textContent) && isJtagEnabled());
     });
 }
 
@@ -430,6 +525,8 @@ function renderDevice() {
     const tbody = document.getElementById('pin-tbody');
     tbody.innerHTML = '';
 
+    releaseReservedJtagAssignments();
+
     const rpPins = deviceData.pins.filter(p => p.rp_number !== null);
 
     // Update summary bar
@@ -446,6 +543,7 @@ function renderDevice() {
         tr.id = `pin-row-${pin.position}`;
         if (pin.is_power) tr.classList.add('power');
         if (isIcspPin(pin)) tr.classList.add('icsp');
+        if (isJtagPin(pin)) tr.classList.add('jtag');
 
         // Column: pin number
         const tdNum = document.createElement('td');
@@ -470,6 +568,7 @@ function renderDevice() {
             if (/^RP\d+$/.test(fn)) span.classList.add('rp');
             if (/^AN[A-Z]?\d+$/.test(fn)) span.classList.add('analog');
             if (isIcspFunction(fn)) span.classList.add('icsp');
+            if (isJtagFunction(fn) && isJtagEnabled()) span.classList.add('jtag');
             span.textContent = fn;
             const desc = getDescription(fn);
             if (desc) span.title = desc;
@@ -481,63 +580,71 @@ function renderDevice() {
         // Column: assignment dropdown (non-power pins only)
         const tdAssign = document.createElement('td');
         if (!pin.is_power) {
-            const periphs = getAvailablePeripherals(pin);
+            if (isJtagPin(pin)) {
+                const reserved = document.createElement('span');
+                reserved.className = 'pin-reserved';
+                reserved.textContent = 'JTAG';
+                reserved.title = `${getJtagFunction(pin) || 'JTAG'} reserved while JTAGEN = ON`;
+                tdAssign.appendChild(reserved);
+            } else {
+                const periphs = getAvailablePeripherals(pin);
 
-            const select = document.createElement('select');
-            select.className = 'assign-select';
-            select.dataset.pinPos = pin.position;
-            select.dataset.rpNum = pin.rp_number ?? '';
-            select.dataset.fixed = pin.rp_number === null ? '1' : '0';
+                const select = document.createElement('select');
+                select.className = 'assign-select';
+                select.dataset.pinPos = pin.position;
+                select.dataset.rpNum = pin.rp_number ?? '';
+                select.dataset.fixed = pin.rp_number === null ? '1' : '0';
 
-            const optNone = document.createElement('option');
-            optNone.value = '';
-            optNone.textContent = '— unassigned —';
-            select.appendChild(optNone);
+                const optNone = document.createElement('option');
+                optNone.value = '';
+                optNone.textContent = '— unassigned —';
+                select.appendChild(optNone);
 
-            // Group peripherals into optgroups by type
-            const seen = new Set();
-            for (const p of periphs) {
-                const key = p.group + (p.fixed ? '_fixed' : '_pps');
-                if (seen.has(key)) continue;
-                seen.add(key);
+                // Group peripherals into optgroups by type
+                const seen = new Set();
+                for (const p of periphs) {
+                    const key = p.group + (p.fixed ? '_fixed' : '_pps');
+                    if (seen.has(key)) continue;
+                    seen.add(key);
 
-                const optgroup = document.createElement('optgroup');
-                optgroup.label = p.fixed ? `${p.group} (fixed)` : p.group;
-                const groupPeriphs = periphs.filter(x => x.group === p.group && x.fixed === p.fixed);
-                for (const gp of groupPeriphs) {
-                    const opt = document.createElement('option');
-                    let label = gp.name;
-                    if (!gp.fixed) {
-                        const dirLabel = gp.direction === 'out' ? 'OUT' : 'IN';
-                        label = `${gp.name} (${dirLabel})`;
-                    } else if (gp.direction === 'io') {
-                        label = `${gp.name} (IN/OUT)`;
+                    const optgroup = document.createElement('optgroup');
+                    optgroup.label = p.fixed ? `${p.group} (fixed)` : p.group;
+                    const groupPeriphs = periphs.filter(x => x.group === p.group && x.fixed === p.fixed);
+                    for (const gp of groupPeriphs) {
+                        const opt = document.createElement('option');
+                        let label = gp.name;
+                        if (!gp.fixed) {
+                            const dirLabel = gp.direction === 'out' ? 'OUT' : 'IN';
+                            label = `${gp.name} (${dirLabel})`;
+                        } else if (gp.direction === 'io') {
+                            label = `${gp.name} (IN/OUT)`;
+                        }
+                        opt.value = JSON.stringify({
+                            name: gp.name, direction: gp.direction,
+                            ppsval: gp.ppsval, fixed: gp.fixed,
+                        });
+                        opt.textContent = label;
+                        opt.className = periphClass(gp.name);
+                        const optDesc = getDescription(gp.name);
+                        if (optDesc) opt.title = optDesc;
+                        optgroup.appendChild(opt);
                     }
-                    opt.value = JSON.stringify({
-                        name: gp.name, direction: gp.direction,
-                        ppsval: gp.ppsval, fixed: gp.fixed,
-                    });
-                    opt.textContent = label;
-                    opt.className = periphClass(gp.name);
-                    const optDesc = getDescription(gp.name);
-                    if (optDesc) opt.title = optDesc;
-                    optgroup.appendChild(opt);
+                    select.appendChild(optgroup);
                 }
-                select.appendChild(optgroup);
-            }
 
-            // Restore previous assignment if present
-            if (assignments[pin.position]) {
-                const a = assignments[pin.position];
-                const val = JSON.stringify({
-                    name: a.peripheral, direction: a.direction,
-                    ppsval: a.ppsval, fixed: a.fixed || false,
-                });
-                select.value = val;
-            }
+                // Restore previous assignment if present
+                if (assignments[pin.position]) {
+                    const a = assignments[pin.position];
+                    const val = JSON.stringify({
+                        name: a.peripheral, direction: a.direction,
+                        ppsval: a.ppsval, fixed: a.fixed || false,
+                    });
+                    select.value = val;
+                }
 
-            select.addEventListener('change', onAssignChange);
-            tdAssign.appendChild(select);
+                select.addEventListener('change', onAssignChange);
+                tdAssign.appendChild(select);
+            }
         }
         tr.appendChild(tdAssign);
 
@@ -551,6 +658,10 @@ function renderDevice() {
             input.dataset.pinPos = pin.position;
             if (signalNames[pin.position]) {
                 input.value = signalNames[pin.position];
+            }
+            if (isJtagPin(pin)) {
+                input.disabled = true;
+                input.title = 'Signal names are disabled while the pin is reserved by JTAG';
             }
             // Push undo snapshot when field gains focus (before user types)
             input.addEventListener('focus', () => pushUndo());
@@ -579,13 +690,17 @@ function renderDevice() {
 
 /**
  * Get the display label for a pin in the package diagram.
- * Shows signal name or peripheral if assigned, otherwise port name.
+ * Shows signal name or peripheral if assigned, otherwise a reserved JTAG role
+ * or the default port/pad name.
  */
 function pinLabel(pin) {
     const assign = assignments[pin.position];
     if (assign) {
         const sig = signalNames[pin.position];
         return sig || assign.peripheral;
+    }
+    if (isJtagPin(pin)) {
+        return getJtagFunction(pin) || 'JTAG';
     }
     return pin.port ? `R${pin.port}${pin.port_bit}` : pin.pad_name || pin.functions[0];
 }
@@ -607,6 +722,15 @@ function renderPackageDiagram() {
     }
 }
 
+// Re-evaluate diagram orientation when window resizes
+window.addEventListener('resize', (() => {
+    let timer;
+    return () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => { if (deviceData) renderPackageDiagram(); }, 200);
+    };
+})());
+
 /**
  * Create a single pin element for the package diagram.
  * @param {Object} pin - Pin data object
@@ -620,27 +744,35 @@ function makePinEl(pin, side) {
     el.onclick = () => scrollToPin(pin.position);
     if (pin.is_power) el.classList.add('power');
     if (isIcspPin(pin)) el.classList.add('icsp');
+    if (isJtagPin(pin)) el.classList.add('jtag');
     if (assignments[pin.position]) el.classList.add('assigned');
 
-    const lbl = document.createElement('span');
-    lbl.className = 'pkg-pin-label';
     const name = pinLabel(pin);
+    el.title = `${pin.position}: ${name}`;
 
     if (side === 'left') {
+        const lbl = document.createElement('span');
+        lbl.className = 'pkg-pin-label';
         lbl.textContent = `${pin.position} ${name}`;
         el.appendChild(lbl);
     } else if (side === 'right') {
+        const lbl = document.createElement('span');
+        lbl.className = 'pkg-pin-label';
         lbl.textContent = `${name} ${pin.position}`;
         el.appendChild(lbl);
     } else if (side === 'top') {
-        lbl.textContent = `${name}`;
         const num = document.createElement('span');
         num.className = 'pkg-pin-num';
         num.textContent = pin.position;
+        const lbl = document.createElement('span');
+        lbl.className = 'pkg-pin-label';
+        lbl.textContent = name;
         el.appendChild(num);
         el.appendChild(lbl);
     } else {
-        lbl.textContent = `${name}`;
+        const lbl = document.createElement('span');
+        lbl.className = 'pkg-pin-label';
+        lbl.textContent = name;
         const num = document.createElement('span');
         num.className = 'pkg-pin-num';
         num.textContent = pin.position;
@@ -650,45 +782,118 @@ function makePinEl(pin, side) {
     return el;
 }
 
-/** Render a DIP/SSOP-style package diagram (two rows of pins facing each other). */
+/** Render a DIP/SSOP-style package diagram (two rows of pins facing each other).
+ *  Automatically flips to a horizontal (90° rotated) layout when the vertical
+ *  diagram would exceed 30% of the available panel height. */
 function renderDipDiagram(container) {
     const pins = deviceData.pins;
     const half = Math.ceil(pins.length / 2);
+
+    // ~18px per pin row + ~40px overhead — flip when vertical would exceed 50% of panel
+    const estimatedHeight = half * 18 + 40;
+    const panel = container.closest('.panel-left');
+    const availableHeight = panel ? panel.clientHeight : window.innerHeight;
+
+    if (estimatedHeight > availableHeight * 0.5) {
+        renderDipDiagramHorizontal(container, pins, half);
+    } else {
+        renderDipDiagramVertical(container, pins, half);
+    }
+}
+
+/** Standard vertical DIP layout — pins on left/right, outside the chip body. */
+function renderDipDiagramVertical(container, pins, half) {
     const leftPins = pins.slice(0, half);
     const rightPins = pins.slice(half).reverse();
 
     const diagram = document.createElement('div');
     diagram.className = 'pkg-diagram';
 
-    const chip = document.createElement('div');
-    chip.className = 'chip-body chip-dip';
+    const wrapper = document.createElement('div');
+    wrapper.className = 'chip-dip-vt';
+
+    // Left pin column
+    const leftCol = document.createElement('div');
+    leftCol.className = 'chip-dip-vt-pins chip-dip-vt-left';
+    leftPins.forEach(pin => leftCol.appendChild(makePinEl(pin, 'left')));
+    wrapper.appendChild(leftCol);
+
+    // Chip body with labels
+    const body = document.createElement('div');
+    body.className = 'chip-dip-vt-body';
 
     const notch = document.createElement('div');
     notch.className = 'notch';
-    chip.appendChild(notch);
+    body.appendChild(notch);
 
     const label = document.createElement('div');
     label.className = 'chip-label';
-    label.textContent = `${deviceData.part_number}`;
-    chip.appendChild(label);
+    label.textContent = deviceData.part_number;
+    body.appendChild(label);
 
     const sublabel = document.createElement('div');
     sublabel.className = 'chip-sublabel';
     sublabel.textContent = deviceData.selected_package;
-    chip.appendChild(sublabel);
+    body.appendChild(sublabel);
 
-    const maxRows = Math.max(leftPins.length, rightPins.length);
-    for (let i = 0; i < maxRows; i++) {
-        const row = document.createElement('div');
-        row.className = 'pin-row-diagram';
-        if (leftPins[i]) row.appendChild(makePinEl(leftPins[i], 'left'));
-        else row.appendChild(document.createElement('div'));
-        if (rightPins[i]) row.appendChild(makePinEl(rightPins[i], 'right'));
-        else row.appendChild(document.createElement('div'));
-        chip.appendChild(row);
-    }
+    wrapper.appendChild(body);
 
-    diagram.appendChild(chip);
+    // Right pin column
+    const rightCol = document.createElement('div');
+    rightCol.className = 'chip-dip-vt-pins chip-dip-vt-right';
+    rightPins.forEach(pin => rightCol.appendChild(makePinEl(pin, 'right')));
+    wrapper.appendChild(rightCol);
+
+    diagram.appendChild(wrapper);
+    container.appendChild(diagram);
+}
+
+/** Horizontal DIP layout — chip rotated 90° clockwise.
+ *  Top row (left→right): pin 14..1, bottom row (left→right): pin 15..28.
+ *  Notch on the right (was at top in vertical). Pin 1 is top-right. */
+function renderDipDiagramHorizontal(container, pins, half) {
+    const topPins = pins.slice(0, half).reverse();
+    const bottomPins = pins.slice(half);
+
+    const diagram = document.createElement('div');
+    diagram.className = 'pkg-diagram';
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'chip-dip-hz';
+
+    // Top pin row
+    const topRow = document.createElement('div');
+    topRow.className = 'chip-dip-hz-pins chip-dip-hz-top';
+    topPins.forEach(pin => topRow.appendChild(makePinEl(pin, 'top')));
+    wrapper.appendChild(topRow);
+
+    // Chip body with labels
+    const body = document.createElement('div');
+    body.className = 'chip-dip-hz-body';
+
+    const notch = document.createElement('div');
+    notch.className = 'chip-dip-hz-notch';
+    body.appendChild(notch);
+
+    const label = document.createElement('div');
+    label.className = 'chip-label';
+    label.textContent = deviceData.part_number;
+    body.appendChild(label);
+
+    const sublabel = document.createElement('div');
+    sublabel.className = 'chip-sublabel';
+    sublabel.textContent = deviceData.selected_package;
+    body.appendChild(sublabel);
+
+    wrapper.appendChild(body);
+
+    // Bottom pin row
+    const bottomRow = document.createElement('div');
+    bottomRow.className = 'chip-dip-hz-pins chip-dip-hz-bottom';
+    bottomPins.forEach(pin => bottomRow.appendChild(makePinEl(pin, 'bottom')));
+    wrapper.appendChild(bottomRow);
+
+    diagram.appendChild(wrapper);
     container.appendChild(diagram);
 }
 
@@ -706,10 +911,15 @@ function renderQfnDiagram(container) {
     const wrapper = document.createElement('div');
     wrapper.className = 'pkg-diagram';
 
+    // Compute a square body: fixed size, rows and columns sized to match
+    const bodySize = Math.max(side * 26, 160);
+    const rowH = Math.floor(bodySize / leftPins.length);
+    const colW = Math.floor(bodySize / bottomPins.length);
+
     const grid = document.createElement('div');
     grid.className = 'qfn-grid';
-    grid.style.gridTemplateColumns = `auto repeat(${bottomPins.length}, 1fr) auto`;
-    grid.style.gridTemplateRows = `auto repeat(${leftPins.length}, 1fr) auto`;
+    grid.style.gridTemplateColumns = `auto repeat(${bottomPins.length}, ${colW}px) auto`;
+    grid.style.gridTemplateRows = `auto repeat(${leftPins.length}, ${rowH}px) auto`;
 
     // Pin 1 marker (top-left corner)
     const marker = document.createElement('div');
@@ -734,6 +944,8 @@ function renderQfnDiagram(container) {
             body.className = 'qfn-body';
             body.style.gridColumn = `2 / ${bottomPins.length + 2}`;
             body.style.gridRow = `2 / ${leftPins.length + 2}`;
+            body.style.width = `${bodySize}px`;
+            body.style.height = `${bodySize}px`;
             body.innerHTML = `<div class="chip-label">${deviceData.part_number}</div>
                               <div class="chip-sublabel">${deviceData.selected_package}</div>`;
             grid.appendChild(body);
@@ -830,8 +1042,8 @@ async function generateCode() {
     if (!deviceData) return;
 
     const assignmentList = Object.entries(assignments).map(([pos, a]) => ({
-        pin_position: parseInt(pos),
-        rp_number: a.rp_number,
+        pinPosition: parseInt(pos),
+        rpNumber: a.rp_number,
         peripheral: a.peripheral,
         direction: a.direction,
         ppsval: a.ppsval,
@@ -846,11 +1058,11 @@ async function generateCode() {
 
     try {
         const payload = {
-            part_number: deviceData.part_number,
+            partNumber: deviceData.part_number,
             package: deviceData.selected_package,
             assignments: assignmentList,
-            signal_names: signalNames,
-            digital_pins: [],
+            signalNames: signalNames,
+            digitalPins: [],
             oscillator: getOscConfig(),
             fuses: getFuseConfig(),
         };
@@ -968,7 +1180,7 @@ async function exportPinList() {
     }
 
     lines.push('');
-    lines.push(`Generated by config-pic`);
+    lines.push(`Generated by pickle`);
 
     const text = lines.join('\n');
     try {
@@ -1027,8 +1239,8 @@ function getOscConfig() {
     if (!source) return null;
     return {
         source: source,
-        target_fosc_mhz: parseFloat(document.getElementById('osc-target').value) || 0,
-        crystal_mhz: parseFloat(document.getElementById('osc-crystal').value) || 0,
+        targetFoscMhz: parseFloat(document.getElementById('osc-target').value) || 0,
+        crystalMhz: parseFloat(document.getElementById('osc-crystal').value) || 0,
         poscmd: document.getElementById('osc-poscmd').value,
     };
 }
@@ -1037,38 +1249,140 @@ function getOscConfig() {
 // Configuration Fuse UI
 // =============================================================================
 
-/** Set up fuse configuration UI — conditionally show/hide dependent fields. */
-function setupFuseUI() {
-    // Show WDT prescaler only when watchdog is not OFF
-    const fwdten = document.getElementById('fuse-fwdten');
-    const wdtpsRow = document.getElementById('fuse-wdtps').closest('.fuse-row');
-    fwdten.addEventListener('change', () => {
-        wdtpsRow.style.display = fwdten.value === 'OFF' ? 'none' : '';
-    });
-    wdtpsRow.style.display = fwdten.value === 'OFF' ? 'none' : '';
-
-    // Show BOR voltage only when brown-out reset is enabled
-    const boren = document.getElementById('fuse-boren');
-    const borvRow = document.getElementById('fuse-borv').closest('.fuse-row');
-    boren.addEventListener('change', () => {
-        borvRow.style.display = boren.value === 'OFF' ? 'none' : '';
-    });
-
-    // Update ICSP highlighting when debug pair changes
-    const ics = document.getElementById('fuse-ics');
-    ics.addEventListener('change', () => refreshIcspHighlight());
-}
+/** Legacy setupFuseUI — no longer needed, fuse UI is built dynamically by buildFuseUI(). */
+function setupFuseUI() {}
 
 /** Read current fuse UI values into a config object for the backend. */
+/** Build the fuse configuration UI dynamically from device DCR definitions.
+ *  Each register gets a heading; each non-hidden field gets a select with tooltips.
+ *  Pre-selects the default value based on the register's default bitmask. */
+function buildFuseUI(fuseDefs) {
+    const container = document.getElementById('fuse-fields');
+    container.innerHTML = '';
+
+    if (!fuseDefs || fuseDefs.length === 0) {
+        document.getElementById('fuse-config').style.display = 'none';
+        return;
+    }
+
+    for (const reg of fuseDefs) {
+        const visibleFields = reg.fields.filter(f => !f.hidden);
+        if (visibleFields.length === 0) continue;
+
+        const heading = document.createElement('div');
+        heading.className = 'fuse-register-heading';
+        heading.textContent = reg.cname;
+        heading.dataset.tip = reg.desc || reg.cname;
+        container.appendChild(heading);
+
+        for (const field of visibleFields) {
+            const row = document.createElement('div');
+            row.className = 'fuse-row';
+
+            const labelWrap = document.createElement('div');
+            labelWrap.className = 'fuse-label-wrap';
+            const label = document.createElement('label');
+            label.textContent = field.cname;
+            label.dataset.tip = field.desc || field.cname;
+            labelWrap.appendChild(label);
+            if (field.desc) {
+                const desc = document.createElement('span');
+                desc.className = 'fuse-field-desc';
+                desc.textContent = field.desc;
+                labelWrap.appendChild(desc);
+            }
+            row.appendChild(labelWrap);
+
+            const select = document.createElement('select');
+            select.dataset.register = reg.cname;
+            select.dataset.field = field.cname;
+
+            const defaultBits = reg.default_value & field.mask;
+
+            for (const val of field.values) {
+                const opt = document.createElement('option');
+                opt.value = val.cname;
+                opt.textContent = val.cname;
+                opt.title = val.desc;
+                if (val.value === defaultBits) {
+                    opt.selected = true;
+                    select.dataset.tip = val.desc;
+                }
+                select.appendChild(opt);
+            }
+
+            select.addEventListener('change', () => {
+                const sel = select.options[select.selectedIndex];
+                select.dataset.tip = sel?.title || '';
+            });
+
+            row.appendChild(select);
+            container.appendChild(row);
+        }
+    }
+
+    // Re-attach fuse listeners that affect pin reservation/highlighting.
+    const icsSelect = getFuseSelect('ICS');
+    if (icsSelect) {
+        icsSelect.addEventListener('change', () => {
+            if (deviceData) renderDevice();
+        });
+    }
+
+    const jtagSelect = getFuseSelect('JTAGEN');
+    if (jtagSelect) {
+        jtagSelect.addEventListener('change', applyFuseReservations);
+    }
+
+    document.getElementById('fuse-config').style.display = '';
+}
+
+/** Collect dynamic fuse selections as { selections: { REG: { FIELD: VALUE } } }. */
 function getFuseConfig() {
-    return {
-        ics: parseInt(document.getElementById('fuse-ics').value),
-        jtagen: document.getElementById('fuse-jtagen').value,
-        fwdten: document.getElementById('fuse-fwdten').value,
-        wdtps: document.getElementById('fuse-wdtps').value,
-        boren: document.getElementById('fuse-boren').value,
-        borv: document.getElementById('fuse-borv').value,
-    };
+    const selections = {};
+    for (const sel of document.querySelectorAll('#fuse-fields select')) {
+        const reg = sel.dataset.register;
+        const field = sel.dataset.field;
+        if (!reg || !field) continue;
+        if (!selections[reg]) selections[reg] = {};
+        selections[reg][field] = sel.value;
+    }
+    return { selections };
+}
+
+/** Convert JSON object keys back into numeric pin positions for in-memory state. */
+function normalizePositionMap(source) {
+    const normalized = {};
+    for (const [k, v] of Object.entries(source || {})) {
+        normalized[parseInt(k, 10)] = v;
+    }
+    return normalized;
+}
+
+/** Restore oscillator controls from a saved configuration after the device UI is ready. */
+function applyOscillatorConfig(oscillator) {
+    if (!oscillator) return;
+    document.getElementById('osc-source').value = oscillator.source || '';
+    document.getElementById('osc-target').value = oscillator.target_fosc_mhz || 200;
+    document.getElementById('osc-crystal').value = oscillator.crystal_mhz || 8;
+    document.getElementById('osc-poscmd').value = oscillator.poscmd || 'EC';
+    document.getElementById('osc-source').dispatchEvent(new Event('change'));
+}
+
+/** Re-apply saved fuse selections once buildFuseUI() has created the per-device selects. */
+function applyFuseSelections(selections) {
+    if (!selections) return;
+
+    for (const [reg, fields] of Object.entries(selections)) {
+        for (const [field, value] of Object.entries(fields)) {
+            const sel = document.querySelector(
+                `#fuse-fields select[data-register="${reg}"][data-field="${field}"]`
+            );
+            if (!sel) continue;
+            sel.value = value;
+            sel.dispatchEvent(new Event('change'));
+        }
+    }
 }
 
 // =============================================================================
@@ -1083,6 +1397,9 @@ async function saveConfig() {
         package: deviceData.selected_package,
         assignments: assignments,
         signal_names: signalNames,
+        // Preserve auto-cleared JTAG assignments so toggling JTAGEN back off after
+        // a reload can still restore the user's previous pin choices.
+        reserved_assignments: { jtag: jtagReservedAssignments },
         oscillator: getOscConfig(),
         fuses: getFuseConfig(),
     };
@@ -1137,45 +1454,15 @@ async function loadConfigText(text, sourcePath) {
 
         document.getElementById('part-input').value = config.part_number;
 
-        // Restore assignments and signal names before loading device
-        assignments = config.assignments || {};
-        signalNames = config.signal_names || {};
+        // Seed state before rendering so the freshly loaded device paints the saved config
+        // during the first render instead of flashing an empty assignment table.
+        assignments = normalizePositionMap(config.assignments);
+        signalNames = normalizePositionMap(config.signal_names);
+        jtagReservedAssignments = normalizePositionMap(config.reserved_assignments?.jtag);
 
-        // Convert string keys (from JSON) back to integer keys
-        const intAssign = {};
-        for (const [k, v] of Object.entries(assignments)) {
-            intAssign[parseInt(k)] = v;
-        }
-        assignments = intAssign;
-
-        const intSig = {};
-        for (const [k, v] of Object.entries(signalNames)) {
-            intSig[parseInt(k)] = v;
-        }
-        signalNames = intSig;
-
-        // Restore oscillator settings
-        if (config.oscillator) {
-            document.getElementById('osc-source').value = config.oscillator.source || '';
-            document.getElementById('osc-target').value = config.oscillator.target_fosc_mhz || 200;
-            document.getElementById('osc-crystal').value = config.oscillator.crystal_mhz || 8;
-            document.getElementById('osc-poscmd').value = config.oscillator.poscmd || 'EC';
-            document.getElementById('osc-source').dispatchEvent(new Event('change'));
-        }
-
-        // Restore fuse settings
-        if (config.fuses) {
-            document.getElementById('fuse-ics').value = config.fuses.ics || 1;
-            document.getElementById('fuse-jtagen').value = config.fuses.jtagen || 'OFF';
-            document.getElementById('fuse-fwdten').value = config.fuses.fwdten || 'OFF';
-            document.getElementById('fuse-wdtps').value = config.fuses.wdtps || 'PS1024';
-            document.getElementById('fuse-boren').value = config.fuses.boren || 'ON';
-            document.getElementById('fuse-borv').value = config.fuses.borv || 'BOR_HIGH';
-            document.getElementById('fuse-fwdten').dispatchEvent(new Event('change'));
-            document.getElementById('fuse-boren').dispatchEvent(new Event('change'));
-        }
-
-        await loadDevice(config.package || null);
+        await loadDevice(config.package || null, { preserveState: true });
+        applyOscillatorConfig(config.oscillator);
+        applyFuseSelections(config.fuses?.selections);
         const sourceName = sourcePath ? ` from ${sourcePath.split(/[\\/]/).pop()}` : '';
         setStatus(`Loaded config${sourceName}: ${config.part_number} — ${config.package || 'default'}`);
     } catch (e) {
@@ -1256,6 +1543,15 @@ document.getElementById('pkg-select').addEventListener('change', (e) => {
 for (const btn of document.querySelectorAll('.code-tab')) {
     btn.addEventListener('click', () => showTab(btn.dataset.file));
 }
+
+// Right-panel tab switching (Code / Verification)
+function switchRightTab(tabName) {
+    document.querySelectorAll('.right-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
+    document.querySelectorAll('.right-tab-content').forEach(c => c.classList.toggle('active', c.dataset.tab === tabName));
+}
+document.querySelectorAll('.right-tab').forEach(tab => {
+    tab.addEventListener('click', () => switchRightTab(tab.dataset.tab));
+});
 
 // Populate device list for combo box autocomplete
 /** @type {Set<string>} Devices available locally (no download needed) */
@@ -1362,7 +1658,7 @@ function themeLabel(mode) {
 
 /** Initialize theme from localStorage and wire toggle button. */
 function setupTheme() {
-    const saved = localStorage.getItem('config-pic-theme') || 'dark';
+    const saved = localStorage.getItem('pickle-theme') || 'dark';
     document.documentElement.setAttribute('data-theme', resolveTheme(saved));
     const btn = document.getElementById('theme-toggle');
     btn.textContent = themeLabel(saved);
@@ -1373,13 +1669,13 @@ function setupTheme() {
     btn.addEventListener('click', () => {
         current = cycle[current] || 'dark';
         document.documentElement.setAttribute('data-theme', resolveTheme(current));
-        localStorage.setItem('config-pic-theme', current);
+        localStorage.setItem('pickle-theme', current);
         btn.textContent = themeLabel(current);
     });
 
     // When in system mode, follow OS changes in real time.
     window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
-        if (localStorage.getItem('config-pic-theme') === 'system') {
+        if (localStorage.getItem('pickle-theme') === 'system') {
             document.documentElement.setAttribute('data-theme', resolveTheme('system'));
         }
     });
@@ -1406,44 +1702,118 @@ async function checkApiKey() {
     } catch { return false; }
 }
 
-/** Trigger pinout verification with a PDF upload. */
+/** Trigger pinout verification — auto-finds datasheet, falls back to file dialog. */
 async function verifyPinout() {
     if (!deviceData) {
         setStatus('Load a device first');
         return;
     }
 
-    // Check API key
     await checkApiKey();
 
+    const output = document.getElementById('verify-output');
+
+    // Switch to the Verification tab
+    switchRightTab('verify');
+
+    // Listen for progress events from Rust
+    let unlisten = null;
+    let elapsed = 0;
+    let timerInterval = null;
+    const showProgress = (msg) => {
+        output.innerHTML = `
+            <div class="verify-progress">
+                <div class="verify-spinner"></div>
+                <div class="verify-progress-text">${escapeHtml(msg)}</div>
+                <div class="verify-progress-time">${elapsed}s</div>
+            </div>`;
+    };
+
     try {
-        const file = await invoke('open_binary_file_dialog', {
-            request: {
-                title: 'Select Datasheet PDF',
-                filters: [{ name: 'PDF', extensions: ['pdf'] }],
-            },
-        });
-        if (!file) return;
+        if (window.__TAURI__?.event?.listen) {
+            unlisten = await window.__TAURI__.event.listen('verify-progress', (event) => {
+                showProgress(event.payload);
+            });
+        }
 
-        const panel = document.getElementById('verify-panel');
-        const output = document.getElementById('verify-output');
-        panel.style.display = '';
-        output.innerHTML = `<div class="verify-loading">Analyzing ${escapeHtml(file.name)} with Anthropic... this may take 30–60 seconds.</div>`;
-        setStatus(`Verifying pinout from ${file.name}...`);
+        // Start elapsed timer
+        elapsed = 0;
+        showProgress('Looking for datasheet...');
+        timerInterval = setInterval(() => {
+            elapsed++;
+            const textEl = output.querySelector('.verify-progress-time');
+            if (textEl) textEl.textContent = `${elapsed}s`;
+        }, 1000);
 
-        const storedKey = localStorage.getItem('config-pic-api-key');
+        let pdfBase64 = null;
+        let pdfName = null;
+
+        // Try to find/download the datasheet automatically
+        setStatus('Looking for datasheet...');
+        const found = await invoke('find_datasheet', { partNumber: deviceData.part_number });
+
+        if (found && found.base64) {
+            pdfBase64 = found.base64;
+            pdfName = found.name;
+            const src = found.source === 'downloaded' ? 'downloaded' : 'cached';
+            setStatus(`Found datasheet (${src}): ${found.name}`);
+        } else if (found && found.text) {
+            pdfBase64 = null;
+            pdfName = found.name;
+            setStatus(`Using text extraction: ${found.name}`);
+        } else {
+            // Nothing found automatically — prompt user
+            if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+            setStatus('No datasheet found — please select one');
+            const file = await invoke('open_binary_file_dialog', {
+                request: {
+                    title: 'Select Datasheet PDF',
+                    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+                },
+            });
+            if (!file) {
+                switchRightTab('code');
+                if (unlisten) unlisten();
+                return;
+            }
+            pdfBase64 = file.base64;
+            pdfName = file.name;
+            // Restart timer for the LLM phase
+            elapsed = 0;
+            timerInterval = setInterval(() => {
+                elapsed++;
+                const textEl = output.querySelector('.verify-progress-time');
+                if (textEl) textEl.textContent = `${elapsed}s`;
+            }, 1000);
+        }
+
+        if (!pdfBase64) {
+            setStatus('Could not obtain datasheet PDF');
+            switchRightTab('code');
+            if (unlisten) unlisten();
+            if (timerInterval) clearInterval(timerInterval);
+            return;
+        }
+
+        showProgress(`Analyzing ${pdfName}...`);
+        setStatus(`Verifying pinout from ${pdfName}...`);
+
+        const storedKey = localStorage.getItem('pickle-api-key');
         const data = await invoke('verify_pinout', {
-            pdfBase64: file.base64,
+            pdfBase64,
             partNumber: deviceData.part_number,
             package: deviceData.selected_package || null,
             apiKey: storedKey || null,
         });
         verifyResult = data;
         renderVerifyResult(verifyResult);
-        setStatus('Verification complete');
+        setStatus(`Verification complete (${elapsed}s)`);
     } catch (e) {
-        document.getElementById('verify-output').innerHTML = `<div class="verify-error">Error: ${e.message || e}</div>`;
+        output.innerHTML = `<div class="verify-error">Error: ${escapeHtml(String(e.message || e))}</div>`;
         setStatus('Verification error');
+    } finally {
+        if (unlisten) unlisten();
+        if (timerInterval) clearInterval(timerInterval);
     }
 }
 
@@ -1464,28 +1834,55 @@ function renderVerifyResult(result) {
         html += '</div>';
     }
 
-    // Package tabs
-    const pkgNames = Object.keys(result.packages);
-    html += '<div class="verify-pkg-tabs">';
-    pkgNames.forEach((name, i) => {
+    // Determine which packages match the currently loaded one for comparison
+    const loadedPkg = deviceData ? (deviceData.selected_package || '') : '';
+    const currentPins = {};
+    if (deviceData && deviceData.pins) {
+        deviceData.pins.forEach(p => { currentPins[p.position] = p; });
+    }
+
+    // Filter out packages whose pin count doesn't match the device — the datasheet
+    // may cover multiple family members with different pin counts.
+    const devicePinCount = deviceData ? deviceData.pin_count : 0;
+    const pkgNames = Object.keys(result.packages).filter(name => {
         const pkg = result.packages[name];
+        return !devicePinCount || pkg.pin_count === devicePinCount;
+    });
+
+    if (pkgNames.length === 0) {
+        output.innerHTML = '<div class="verify-error">No matching packages found for this device\'s pin count.</div>';
+        return;
+    }
+
+    // Auto-select the loaded package if present
+    const defaultTab = pkgNames.find(n => n.toUpperCase() === loadedPkg.toUpperCase()) || pkgNames[0];
+
+    html += '<div class="verify-pkg-tabs">';
+    pkgNames.forEach((name) => {
+        const pkg = result.packages[name];
+        const isLoaded = name.toUpperCase() === loadedPkg.toUpperCase();
         const corrCount = (pkg.corrections || []).length;
-        const scoreClass = pkg.match_score >= 0.95 ? 'score-good' : pkg.match_score >= 0.8 ? 'score-warn' : 'score-bad';
+        const scoreClass = isLoaded
+            ? (pkg.match_score >= 0.95 ? 'score-good' : pkg.match_score >= 0.8 ? 'score-warn' : 'score-bad')
+            : '';
+        const scoreText = isLoaded ? ` <span class="verify-score ${scoreClass}">${Math.round(pkg.match_score * 100)}%</span>` : '';
         const badge = corrCount > 0 ? ` <span class="verify-corr-badge">${corrCount}</span>` : '';
-        html += `<button class="verify-pkg-tab${i === 0 ? ' active' : ''}" data-pkg="${name}">`;
+        const active = name === defaultTab ? ' active' : '';
+        html += `<button class="verify-pkg-tab${active}" data-pkg="${name}">`;
         html += `${escapeHtml(name)} (${pkg.pin_count}p)`;
-        html += ` <span class="verify-score ${scoreClass}">${Math.round(pkg.match_score * 100)}%</span>`;
-        html += `${badge}</button>`;
+        html += `${scoreText}${badge}</button>`;
     });
     html += '</div>';
 
     // Package details (one div per package)
-    pkgNames.forEach((name, i) => {
+    pkgNames.forEach((name) => {
         const pkg = result.packages[name];
-        html += `<div class="verify-pkg-detail${i === 0 ? '' : ' hidden'}" data-pkg="${name}">`;
+        const isLoaded = name.toUpperCase() === loadedPkg.toUpperCase();
+        const hidden = name === defaultTab ? '' : ' hidden';
+        html += `<div class="verify-pkg-detail${hidden}" data-pkg="${name}">`;
 
-        // Corrections section
-        if (pkg.corrections && pkg.corrections.length > 0) {
+        // Corrections section (only meaningful for the loaded package)
+        if (isLoaded && pkg.corrections && pkg.corrections.length > 0) {
             html += '<div class="verify-corrections">';
             html += `<h4>Corrections (${pkg.corrections.length})</h4>`;
             pkg.corrections.forEach(c => {
@@ -1500,46 +1897,81 @@ function renderVerifyResult(result) {
                 html += `<span class="verify-corr-type">${typeLabel}</span> `;
                 html += `Pin ${c.pin_position}: `;
                 if (c.current_pad) html += `<span class="verify-old">${escapeHtml(c.current_pad)}</span>`;
-                if (c.current_pad && c.datasheet_pad) html += ' → ';
+                if (c.current_pad && c.datasheet_pad) html += ' \u2192 ';
                 if (c.datasheet_pad) html += `<span class="verify-new">${escapeHtml(c.datasheet_pad)}</span>`;
                 if (c.note) html += ` <span class="verify-corr-note">${escapeHtml(c.note)}</span>`;
                 html += `</div>`;
             });
             html += '</div>';
-        } else {
-            html += '<div class="verify-match">All pins match current data.</div>';
         }
 
-        // Full pin table
-        html += '<table class="verify-table"><thead><tr>';
-        html += '<th>Pin</th><th>Datasheet</th><th>Current</th><th>Status</th>';
-        html += '</tr></thead><tbody>';
-
-        const currentPins = {};
-        if (deviceData && deviceData.pins) {
-            deviceData.pins.forEach(p => { currentPins[p.position] = p; });
-        }
-
+        // Build the pin table and compute match stats
         const sortedPositions = Object.keys(pkg.pins).map(Number).sort((a, b) => a - b);
+        let matchCount = 0;
+        let totalCompared = 0;
+        let tableRows = '';
+
         for (const pos of sortedPositions) {
             const dsPad = pkg.pins[pos];
-            const cur = currentPins[pos];
-            const curPad = cur ? (cur.pad_name || cur.pad) : '—';
-            const match = cur && normalizePad(dsPad) === normalizePad(curPad);
-            const statusClass = match ? 'verify-ok' : cur ? 'verify-diff' : 'verify-new';
-            const statusText = match ? '✓' : cur ? '≠' : 'NEW';
 
-            html += `<tr class="${statusClass}">`;
-            html += `<td>${pos}</td>`;
-            html += `<td>${escapeHtml(dsPad)}</td>`;
-            html += `<td>${escapeHtml(curPad)}</td>`;
-            html += `<td>${statusText}</td>`;
-            html += `</tr>`;
+            if (isLoaded) {
+                // Compare against currently loaded pin data
+                const cur = currentPins[pos];
+                const curPad = cur ? (cur.pad_name || cur.pad) : '\u2014';
+                const match = cur && normalizePad(dsPad) === normalizePad(curPad);
+                if (cur) totalCompared++;
+                if (match) matchCount++;
+                const statusClass = match ? 'verify-ok' : cur ? 'verify-diff' : 'verify-new';
+                const statusText = match ? '\u2713' : cur ? '\u2260' : 'NEW';
+
+                tableRows += `<tr class="${statusClass}">`;
+                tableRows += `<td>${pos}</td>`;
+                tableRows += `<td>${escapeHtml(dsPad)}</td>`;
+                tableRows += `<td>${escapeHtml(curPad)}</td>`;
+                tableRows += `<td class="status-icon">${statusText}</td>`;
+                tableRows += `</tr>`;
+            } else {
+                // Different package — just show the datasheet pinout, no comparison
+                tableRows += `<tr class="verify-ok">`;
+                tableRows += `<td>${pos}</td>`;
+                tableRows += `<td colspan="2">${escapeHtml(dsPad)}</td>`;
+                tableRows += `<td></td>`;
+                tableRows += `</tr>`;
+            }
         }
-        html += '</tbody></table>';
 
-        // Apply button for this package
-        html += `<button class="verify-apply-btn" data-pkg="${name}">Apply "${escapeHtml(name)}" as Overlay</button>`;
+        // Summary line
+        if (isLoaded) {
+            if (totalCompared > 0 && matchCount === totalCompared) {
+                html += `<div class="verify-match">All ${totalCompared} pins match the loaded EDC data.</div>`;
+            } else if (totalCompared > 0) {
+                const diffCount = totalCompared - matchCount;
+                html += `<div class="verify-summary">${matchCount}/${totalCompared} pins match \u2014 ${diffCount} difference${diffCount > 1 ? 's' : ''} found.</div>`;
+            }
+        } else {
+            html += `<div class="verify-summary verify-new-pkg">New package \u2014 not in current EDC data. Apply as overlay to use it.</div>`;
+        }
+
+        // Pin table
+        html += '<div class="verify-table-wrap">';
+        html += '<table class="verify-table"><thead><tr>';
+        if (isLoaded) {
+            html += '<th>Pin</th><th>Datasheet</th><th>EDC Parser</th><th class="status-icon"></th>';
+        } else {
+            html += '<th>Pin</th><th colspan="2">Datasheet</th><th></th>';
+        }
+        html += '</tr></thead><tbody>';
+        html += tableRows;
+        html += '</tbody></table></div>';
+
+        // Apply button — show as already applied if the package exists in current device data
+        const alreadyApplied = deviceData && deviceData.packages &&
+            Object.keys(deviceData.packages).some(k => k.toUpperCase() === name.toUpperCase());
+        if (alreadyApplied) {
+            html += `<button class="verify-apply-btn applied" data-pkg="${name}" disabled>\u2713 ${escapeHtml(name)} applied</button>`;
+        } else {
+            html += `<button class="verify-apply-btn" data-pkg="${name}">Apply "${escapeHtml(name)}" as Overlay</button>`;
+        }
         html += '</div>';
     });
 
@@ -1579,7 +2011,7 @@ async function applyVerifiedOverlay(pkgName) {
 
     const pkg = verifyResult.packages[pkgName];
     const payload = {
-        part_number: verifyResult.part_number,
+        partNumber: verifyResult.part_number,
         packages: {
             [pkgName]: {
                 pin_count: pkg.pin_count,
@@ -1589,10 +2021,17 @@ async function applyVerifiedOverlay(pkgName) {
         }
     };
 
+    const btn = document.querySelector(`.verify-apply-btn[data-pkg="${pkgName}"]`);
     try {
         const data = await invoke('apply_overlay', { request: payload });
         if (data.success) {
             setStatus(`Overlay saved for ${pkgName}. Reloading...`);
+            // Mark button as applied
+            if (btn) {
+                btn.disabled = true;
+                btn.classList.add('applied');
+                btn.textContent = `\u2713 ${pkgName} applied`;
+            }
             // Reload device to pick up new overlay
             await loadDevice(pkgName);
         } else {
@@ -1631,6 +2070,50 @@ if (window.__TAURI__?.event?.listen) {
         }
     });
 }
+
+// =============================================================================
+// Floating Tooltip System
+// =============================================================================
+
+/** Shared tooltip element, appended to body so it escapes overflow containers. */
+const tipEl = document.createElement('div');
+tipEl.className = 'app-tooltip';
+document.body.appendChild(tipEl);
+
+let tipTimer = null;
+
+document.addEventListener('mouseover', (e) => {
+    const target = e.target.closest('[data-tip]');
+    if (!target || !target.dataset.tip) return;
+
+    clearTimeout(tipTimer);
+    tipTimer = setTimeout(() => {
+        tipEl.textContent = target.dataset.tip;
+        tipEl.classList.add('visible');
+
+        const rect = target.getBoundingClientRect();
+        // Position above the element, left-aligned
+        let top = rect.top - tipEl.offsetHeight - 4;
+        let left = rect.left;
+
+        // If clipped at top, show below instead
+        if (top < 4) top = rect.bottom + 4;
+        // Keep within viewport horizontally
+        const maxLeft = window.innerWidth - tipEl.offsetWidth - 4;
+        if (left > maxLeft) left = maxLeft;
+        if (left < 4) left = 4;
+
+        tipEl.style.top = top + 'px';
+        tipEl.style.left = left + 'px';
+    }, 350);
+});
+
+document.addEventListener('mouseout', (e) => {
+    const target = e.target.closest('[data-tip]');
+    if (!target) return;
+    clearTimeout(tipTimer);
+    tipEl.classList.remove('visible');
+});
 
 // Initialize UI and auto-load default device
 setupTheme();

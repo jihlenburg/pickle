@@ -1,5 +1,5 @@
 /*
- * config-pic — Pin Configurator Stylesheet
+ * pickle — Pin Configurator Stylesheet
  *
  * Supports dark and light themes via [data-theme] on <html>.
  * Layout: two-panel grid (pin table left, code output right).
@@ -10,6 +10,7 @@
  *   --accent2 : secondary actions, assigned pins, focus states
  *   --uart/spi/i2c/pwm/etc: peripheral type color coding
  *   --icsp    : ICSP/debug pin highlighting
+ *   --jtag    : JTAG pin highlighting
  *   --code-bg : code output background
  *   --code-fg : code output text
  */
@@ -35,6 +36,7 @@
     --cmp: #e6a23c;
     --other: #00adb5;
     --icsp: #f0c040;
+    --jtag: #ff9f43;
     --code-bg: #0d1117;
     --code-fg: #c9d1d9;
     --hover-overlay: rgba(255,255,255,0.03);
@@ -46,6 +48,7 @@
     --rp-bg: rgba(0,173,181,0.15);
     --analog-bg: rgba(179,127,235,0.15);
     --icsp-bg: rgba(240,192,64,0.15);
+    --jtag-bg: rgba(255,159,67,0.16);
     --success-bg: rgba(103,194,58,0.15);
 }
 
@@ -69,6 +72,7 @@
     --cmp: #c2790e;
     --other: #0891b2;
     --icsp: #b88a00;
+    --jtag: #c96a00;
     --code-bg: #f8f9fa;
     --code-fg: #1f2328;
     --hover-overlay: rgba(0,0,0,0.03);
@@ -80,6 +84,7 @@
     --rp-bg: rgba(8,145,178,0.1);
     --analog-bg: rgba(124,58,237,0.1);
     --icsp-bg: rgba(184,138,0,0.1);
+    --jtag-bg: rgba(201,106,0,0.1);
     --success-bg: rgba(61,139,43,0.1);
 }
 
@@ -169,11 +174,7 @@ header h1 {
     border-color: var(--accent2);
 }
 
-#status {
-    color: var(--text-dim);
-    font-size: 12px;
-    margin-left: auto;
-}
+
 
 .main {
     display: grid;
@@ -243,6 +244,7 @@ header h1 {
 .pin-row:hover { background: var(--hover-overlay); }
 .pin-row.power { opacity: 0.5; }
 .pin-row.icsp { border-left: 3px solid var(--icsp); }
+.pin-row.jtag { border-right: 3px solid var(--jtag); }
 .pin-row.assigned { background: var(--bg-pin-assigned); }
 
 .pin-num {
@@ -275,6 +277,7 @@ header h1 {
 .func-tag.rp { color: var(--accent2); background: var(--rp-bg); }
 .func-tag.analog { color: var(--adc); background: var(--analog-bg); }
 .func-tag.icsp { color: var(--icsp); background: var(--icsp-bg); }
+.func-tag.jtag { color: var(--jtag); background: var(--jtag-bg); }
 
 .assign-select {
     background: var(--bg);
@@ -291,6 +294,18 @@ header h1 {
 .assign-select:focus {
     outline: none;
     border-color: var(--accent2);
+}
+
+.pin-reserved {
+    display: inline-block;
+    width: 100%;
+    padding: 4px 6px;
+    border-radius: 3px;
+    background: var(--jtag-bg);
+    color: var(--jtag);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
 }
 
 .assign-select option { background: var(--bg-card); }
@@ -516,8 +531,15 @@ header h1 {
     opacity: 1 !important;
 }
 
+.pkg-pin.jtag {
+    color: var(--jtag);
+    opacity: 1 !important;
+}
+
 .pkg-pin.icsp .pkg-pin-label { font-weight: 600; }
 .pkg-pin.icsp .pkg-pin-num { color: var(--icsp); }
+.pkg-pin.jtag .pkg-pin-label { font-weight: 600; }
+.pkg-pin.jtag .pkg-pin-num { color: var(--jtag); }
 
 .pkg-pin.assigned .pkg-pin-label { font-weight: 700; }
 .pkg-pin.assigned .pkg-pin-num { color: var(--accent2); }
@@ -537,17 +559,43 @@ header h1 {
 .pkg-pin-label { font-size: 10px; }
 .pkg-pin-num { font-size: 9px; color: var(--text-dim); }
 
-/* DIP/SSOP layout */
-.chip-dip {
+/* DIP/SSOP vertical layout — pins outside the chip body */
+.chip-dip-vt {
+    display: inline-flex;
+    align-items: stretch;
+}
+
+.chip-dip-vt-pins {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-around;
+    gap: 0;
+    padding: 12px 0;
+}
+
+.chip-dip-vt-left .pkg-pin {
+    justify-content: flex-end;
+}
+
+.chip-dip-vt-right .pkg-pin {
+    justify-content: flex-start;
+}
+
+.chip-dip-vt-body {
     background: var(--bg-card);
     border: 2px solid var(--border);
     border-radius: 4px;
     padding: 8px 10px;
     position: relative;
-    min-width: 200px;
+    min-width: 80px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
 }
 
-.chip-dip .notch {
+.chip-dip-vt-body .notch {
     position: absolute;
     top: -2px;
     left: 50%;
@@ -560,11 +608,63 @@ header h1 {
     border-top: none;
 }
 
-.pin-row-diagram {
+/* DIP/SSOP horizontal (rotated 90°) layout — pins on top/bottom */
+.chip-dip-hz {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.chip-dip-hz-pins {
     display: flex;
-    justify-content: space-between;
+    justify-content: space-around;
+    gap: 0;
+    padding: 0 12px;
+}
+
+.chip-dip-hz-top .pkg-pin,
+.chip-dip-hz-bottom .pkg-pin {
+    flex-direction: column;
     align-items: center;
-    padding: 1px 0;
+    padding: 1px 3px;
+}
+
+.chip-dip-hz-top .pkg-pin-label,
+.chip-dip-hz-bottom .pkg-pin-label {
+    writing-mode: vertical-lr;
+    text-orientation: mixed;
+    font-size: 9px;
+    white-space: nowrap;
+}
+
+.chip-dip-hz-top .pkg-pin {
+    flex-direction: column-reverse;
+}
+
+.chip-dip-hz-body {
+    background: var(--bg-card);
+    border: 2px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    position: relative;
+    min-height: 52px;
+}
+
+.chip-dip-hz-notch {
+    position: absolute;
+    right: -2px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 10px;
+    height: 20px;
+    border-radius: 10px 0 0 10px;
+    background: var(--bg);
+    border: 2px solid var(--border);
+    border-right: none;
 }
 
 /* QFN/QFP layout */
@@ -583,9 +683,6 @@ header h1 {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 12px;
-    min-width: 120px;
-    min-height: 120px;
 }
 
 .qfn-corner { width: 20px; height: 20px; }
@@ -600,7 +697,8 @@ header h1 {
 /* Top/bottom pins in QFN: vertical text */
 .pkg-pin-top, .pkg-pin-bottom {
     flex-direction: column;
-    padding: 2px 1px;
+    padding: 2px 0;
+    align-items: center;
 }
 
 .pkg-pin-top .pkg-pin-label,
@@ -608,6 +706,12 @@ header h1 {
     writing-mode: vertical-lr;
     text-orientation: mixed;
     font-size: 9px;
+    white-space: nowrap;
+}
+
+.pkg-pin-top .pkg-pin-num,
+.pkg-pin-bottom .pkg-pin-num {
+    font-size: 8px;
 }
 
 .pkg-pin-top { flex-direction: column-reverse; }
@@ -649,10 +753,16 @@ header h1 {
     background: var(--bg);
     color: var(--text);
     border: 1px solid var(--border);
-    padding: 4px 8px;
-    border-radius: 3px;
+    padding: 5px 10px;
+    border-radius: 6px;
     font-family: inherit;
     font-size: 12px;
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+}
+
+.osc-row select:hover, .osc-row input:hover {
+    border-color: var(--text-dim);
 }
 
 .osc-row select:focus, .osc-row input:focus {
@@ -668,7 +778,7 @@ header h1 {
     white-space: nowrap;
 }
 
-/* Fuse config — reuse osc-config pattern */
+/* Fuse config */
 .fuse-config {
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -687,30 +797,60 @@ header h1 {
 .fuse-row {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-bottom: 8px;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    transition: background 0.1s ease;
+}
+
+.fuse-row:hover {
+    background: rgba(255,255,255,0.03);
+}
+
+.fuse-label-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    flex-shrink: 0;
+    min-width: 0;
 }
 
 .fuse-row label {
     font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+    cursor: default;
+}
+
+.fuse-field-desc {
+    font-size: 10px;
     color: var(--text-dim);
-    min-width: 140px;
-    flex-shrink: 0;
+    line-height: 1.2;
 }
 
 .fuse-row select {
     background: var(--bg);
     color: var(--text);
     border: 1px solid var(--border);
-    padding: 4px 8px;
-    border-radius: 3px;
+    padding: 5px 10px;
+    border-radius: 6px;
     font-family: inherit;
     font-size: 12px;
+    min-width: 120px;
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+}
+
+.fuse-row select:hover {
+    border-color: var(--text-dim);
 }
 
 .fuse-row select:focus {
     outline: none;
     border-color: var(--accent2);
+    box-shadow: 0 0 0 2px rgba(var(--accent2-rgb, 100,149,237), 0.15);
 }
 
 /* Pin conflict highlighting */
@@ -810,17 +950,103 @@ header h1 {
     color: var(--bg);
 }
 
+/* =============================================================================
+   Right-panel tabs (Code / Verification)
+   ============================================================================= */
+
+.right-tabs {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 10px;
+    border-bottom: 2px solid var(--border);
+    padding-bottom: 0;
+}
+.right-tab {
+    background: transparent;
+    color: var(--text-dim);
+    border: none;
+    padding: 6px 16px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+.right-tab:hover {
+    color: var(--text);
+}
+.right-tab.active {
+    color: var(--accent2);
+    border-bottom-color: var(--accent2);
+}
+.right-tab-content {
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.fuses-tab-content {
+    gap: 12px;
+    padding-bottom: 12px;
+}
+.right-tab-content.active {
+    display: flex;
+}
+
+/* --- Verify panel --- */
 .verify-panel {
-    margin-top: 16px;
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 12px;
+    border-radius: 8px;
+    padding: 16px;
     background: var(--bg-card);
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
 }
 .verify-panel h2 {
-    margin: 0 0 10px 0;
-    font-size: 1rem;
+    margin: 0 0 12px 0;
+    font-size: 0.9rem;
+    font-weight: 600;
     color: var(--accent2);
+    letter-spacing: 0.01em;
+}
+.verify-empty {
+    color: var(--text-dim);
+    font-size: 0.82rem;
+    padding: 40px 20px;
+    text-align: center;
+    line-height: 1.6;
+}
+
+/* Progress spinner */
+.verify-progress {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: 40px 20px;
+}
+.verify-spinner {
+    width: 24px;
+    height: 24px;
+    border: 2.5px solid var(--border);
+    border-top-color: var(--accent2);
+    border-radius: 50%;
+    animation: verify-spin 0.8s linear infinite;
+}
+@keyframes verify-spin { to { transform: rotate(360deg); } }
+.verify-progress-text {
+    color: var(--text);
+    font-size: 0.82rem;
+}
+.verify-progress-time {
+    color: var(--text-dim);
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
 }
 
 .verify-loading {
@@ -831,145 +1057,215 @@ header h1 {
 }
 .verify-error {
     color: var(--accent);
-    padding: 10px;
-}
-.verify-notes {
-    margin-bottom: 10px;
-}
-.verify-note {
-    font-size: 0.85rem;
-    color: var(--text-dim);
-    padding: 4px 0;
-    border-bottom: 1px solid var(--border);
+    padding: 12px;
+    font-size: 0.82rem;
 }
 
-/* Package tabs */
+/* Notes: compact collapsible-feeling block */
+.verify-notes {
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    background: color-mix(in srgb, var(--bg-pin) 40%, transparent);
+    border-radius: 6px;
+    border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+.verify-note {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    padding: 3px 0;
+    line-height: 1.5;
+}
+
+/* Package tabs — pill style */
 .verify-pkg-tabs {
     display: flex;
-    gap: 4px;
-    margin-bottom: 10px;
+    gap: 6px;
+    margin-bottom: 14px;
     flex-wrap: wrap;
 }
 .verify-pkg-tab {
     background: transparent;
     color: var(--text-dim);
     border: 1px solid var(--border);
-    padding: 4px 10px;
-    border-radius: 4px 4px 0 0;
+    padding: 5px 12px;
+    border-radius: 14px;
     cursor: pointer;
-    font-size: 0.8rem;
+    font-size: 0.75rem;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+.verify-pkg-tab:hover {
+    border-color: var(--accent2);
+    color: var(--text);
 }
 .verify-pkg-tab.active {
-    color: var(--text);
-    border-bottom-color: var(--bg-card);
-    background: var(--bg-card);
+    color: #fff;
+    background: var(--accent2);
+    border-color: var(--accent2);
 }
 .verify-score {
-    font-size: 0.75rem;
-    font-weight: bold;
+    font-size: 0.68rem;
+    font-weight: 700;
     margin-left: 4px;
 }
 .score-good { color: #67c23a; }
 .score-warn { color: #e6a23c; }
 .score-bad { color: var(--accent); }
+.verify-pkg-tab.active .score-good,
+.verify-pkg-tab.active .score-warn,
+.verify-pkg-tab.active .score-bad { color: inherit; }
 
 .verify-corr-badge {
     background: var(--accent);
     color: #fff;
-    font-size: 0.7rem;
+    font-size: 0.6rem;
     padding: 1px 5px;
-    border-radius: 8px;
-    margin-left: 4px;
+    border-radius: 6px;
+    margin-left: 3px;
+    font-weight: 700;
+    vertical-align: 1px;
+}
+.verify-pkg-tab.active .verify-corr-badge {
+    background: rgba(255,255,255,0.25);
 }
 
 .verify-pkg-detail.hidden { display: none; }
 
-/* Corrections list */
+/* Corrections */
 .verify-corrections {
     margin-bottom: 12px;
-    padding: 8px;
+    padding: 10px 12px;
     background: var(--conflict-bg);
     border: 1px solid var(--conflict-border);
-    border-radius: 4px;
+    border-radius: 6px;
 }
 .verify-corrections h4 {
     margin: 0 0 6px 0;
     color: var(--accent);
-    font-size: 0.85rem;
+    font-size: 0.78rem;
+    font-weight: 600;
 }
 .verify-corr-item {
-    font-size: 0.8rem;
-    padding: 3px 0;
-    border-bottom: 1px solid var(--border);
+    font-size: 0.78rem;
+    padding: 5px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 30%, transparent);
+    line-height: 1.5;
 }
 .verify-corr-item:last-child { border-bottom: none; }
 .verify-corr-type {
     display: inline-block;
     background: var(--accent);
     color: #fff;
-    font-size: 0.7rem;
-    padding: 1px 5px;
+    font-size: 0.6rem;
+    padding: 2px 6px;
     border-radius: 3px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    vertical-align: middle;
     text-transform: uppercase;
+    margin-right: 4px;
 }
-.verify-old {
-    color: var(--accent);
-    text-decoration: line-through;
-}
-.verify-new {
-    color: #67c23a;
-    font-weight: bold;
-}
-.verify-corr-note {
-    color: var(--text-dim);
-    font-style: italic;
-}
+.verify-old { color: var(--accent); text-decoration: line-through; }
+.verify-new { color: #67c23a; font-weight: 600; }
+.verify-corr-note { color: var(--text-dim); font-style: italic; font-size: 0.75rem; }
 
+/* Summary banners */
+.verify-match,
+.verify-summary {
+    padding: 8px 12px;
+    font-size: 0.78rem;
+    border-radius: 6px;
+    margin-bottom: 10px;
+    line-height: 1.45;
+}
 .verify-match {
     color: #67c23a;
-    padding: 8px;
-    font-size: 0.85rem;
+    background: var(--success-bg);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.verify-match::before {
+    content: "\2713";
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    background: rgba(103,194,58,0.2);
+    border-radius: 50%;
+    font-size: 0.65rem;
+    font-weight: bold;
+    flex-shrink: 0;
+}
+.verify-summary {
+    color: var(--text);
+    background: var(--conflict-bg);
+    border: 1px solid var(--conflict-border);
+}
+.verify-summary.verify-new-pkg {
+    color: var(--accent2);
+    background: var(--rp-bg);
+    border-color: color-mix(in srgb, var(--accent2) 20%, transparent);
 }
 
-/* Verify pin table */
+/* Pin comparison table */
+.verify-table-wrap {
+    max-height: 340px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 12px;
+}
 .verify-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.8rem;
-    margin-bottom: 10px;
+    font-size: 0.75rem;
 }
 .verify-table th {
     background: var(--bg-pin);
     color: var(--text-dim);
-    padding: 4px 8px;
+    padding: 5px 10px;
     text-align: left;
     font-weight: 600;
-    font-size: 0.75rem;
+    font-size: 0.68rem;
     text-transform: uppercase;
+    letter-spacing: 0.04em;
+    position: sticky;
+    top: 0;
+    z-index: 1;
 }
 .verify-table td {
-    padding: 3px 8px;
-    border-bottom: 1px solid var(--border);
+    padding: 3px 10px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
 }
+.verify-table tbody tr:hover td { background: var(--hover-overlay); }
 .verify-table tr.verify-ok td { color: var(--text); }
 .verify-table tr.verify-diff td { background: var(--conflict-bg); }
-.verify-table tr.verify-diff td:nth-child(2) { color: #67c23a; font-weight: bold; }
+.verify-table tr.verify-diff td:nth-child(2) { color: #67c23a; font-weight: 600; }
 .verify-table tr.verify-diff td:nth-child(3) { color: var(--accent); text-decoration: line-through; }
 .verify-table tr.verify-new td { background: var(--success-bg); }
+.verify-table .status-icon { text-align: center; width: 36px; }
 
 .verify-apply-btn {
     background: var(--accent2);
-    color: var(--bg);
+    color: #fff;
     border: none;
     padding: 6px 16px;
-    border-radius: 4px;
+    border-radius: 6px;
     cursor: pointer;
-    font-size: 0.85rem;
-    margin-top: 8px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    transition: opacity 0.15s ease;
 }
-.verify-apply-btn:hover {
-    opacity: 0.85;
+.verify-apply-btn:hover { opacity: 0.85; }
+.verify-apply-btn.applied {
+    background: rgba(103,194,58,0.15);
+    color: #67c23a;
+    cursor: default;
+    opacity: 0.9;
 }
+.verify-apply-btn.applied:hover { opacity: 0.9; }
 
 /* =============================================================================
    Desktop Theme & Layout
@@ -1042,8 +1338,8 @@ select {
 .pkg-pin,
 .chip-label,
 .chip-sublabel,
-.status-pill,
-.index-badge {
+.index-badge,
+.status-bar {
     font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
 }
 
@@ -1219,34 +1515,6 @@ header h1 {
     white-space: nowrap;
 }
 
-.status-pill {
-    min-width: 0;
-    max-width: 220px;
-    padding: 6px 10px;
-    border-radius: 999px;
-    border: 1px solid var(--chip-border);
-    background: var(--chip-bg);
-    color: var(--text);
-    font-size: 11px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.status-pill[data-tone="busy"] {
-    color: var(--accent2);
-    border-color: color-mix(in srgb, var(--accent2) 45%, transparent);
-}
-
-.status-pill[data-tone="success"] {
-    color: var(--spi);
-    border-color: color-mix(in srgb, var(--spi) 40%, transparent);
-}
-
-.status-pill[data-tone="error"] {
-    color: var(--accent);
-    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-}
 
 .index-badge {
     padding: 6px 10px;
@@ -1281,7 +1549,7 @@ header h1 {
     grid-template-columns: minmax(480px, 1.04fr) minmax(400px, 0.96fr);
     gap: 8px;
     padding: 8px;
-    height: calc(100vh - 50px);
+    height: calc(100vh - 74px);
 }
 
 .panel {
@@ -1315,8 +1583,8 @@ header h1 {
     margin-bottom: 8px;
 }
 
-.chip-dip {
-    min-width: 188px;
+.chip-dip-vt-body {
+    min-width: 80px;
     padding: 6px 10px;
 }
 
@@ -1423,19 +1691,63 @@ header h1 {
 .osc-config,
 .fuse-config {
     margin-bottom: 0;
-    padding: 10px 12px;
+    padding: 14px 16px;
+}
+
+.fuse-config {
+    max-height: none;
+    overflow-y: visible;
 }
 
 .osc-config h2,
 .fuse-config h2 {
-    font-size: 12px;
-    margin-bottom: 6px;
+    font-size: 13px;
+    margin-bottom: 8px;
+    letter-spacing: 0.02em;
+}
+
+/* Floating tooltip — positioned via JS, attached to <body> to avoid overflow clipping */
+.app-tooltip {
+    position: fixed;
+    z-index: 9999;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 400;
+    max-width: 300px;
+    color: var(--text);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+}
+
+.app-tooltip.visible {
+    opacity: 1;
+}
+
+.fuse-register-heading {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent2);
+    margin-top: 14px;
+    margin-bottom: 2px;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+.fuse-register-heading:first-child {
+    margin-top: 0;
 }
 
 .osc-row,
 .fuse-row {
-    min-height: 28px;
-    margin-bottom: 4px;
+    min-height: 30px;
+    margin-bottom: 2px;
 }
 
 .osc-row label,
@@ -1446,7 +1758,7 @@ header h1 {
 .osc-row select,
 .osc-row input,
 .fuse-row select {
-    padding: 4px 6px;
+    padding: 5px 8px;
     border-radius: 6px;
     font-size: 11px;
 }
@@ -1513,13 +1825,42 @@ header h1 {
     border-radius: 8px;
 }
 
+/* --- Bottom status bar --- */
+
+.status-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    background: color-mix(in srgb, var(--surface-strong) 92%, transparent);
+    backdrop-filter: blur(14px);
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-dim);
+}
+
+.status-bar #status {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.status-bar #status[data-tone="busy"] { color: var(--accent2); }
+.status-bar #status[data-tone="success"] { color: var(--spi); }
+.status-bar #status[data-tone="error"] { color: var(--accent); }
+
 /* --- Responsive --- */
 
 @media (max-width: 1100px) {
     .main {
         grid-template-columns: 1fr;
         height: auto;
-        min-height: calc(100vh - 50px);
+        min-height: calc(100vh - 74px);
     }
 
     .config-grid {

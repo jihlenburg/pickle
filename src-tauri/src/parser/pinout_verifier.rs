@@ -1,5 +1,6 @@
 //! Pinout Verifier: cross-check parsed EDC pinout data against the device datasheet
-//! using the Anthropic API.
+//! using an LLM API (Anthropic or OpenAI). Provider is auto-selected based on which
+//! API key is available, with OpenAI preferred when both are present.
 
 use base64::Engine;
 use regex::Regex;
@@ -9,15 +10,25 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::parser::dfp_manager::pinouts_dir;
+use crate::parser::dfp_manager::{dfp_cache_dir, pinouts_dir};
 
-const API_URL: &str = "https://api.anthropic.com/v1/messages";
-const API_VERSION: &str = "2023-06-01";
-const MODEL: &str = "anthropic-sonnet-4-6";
+const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_API_VERSION: &str = "2023-06-01";
+const ANTHROPIC_MODEL: &str = "anthropic-sonnet-4-6";
+
+const OPENAI_API_URL: &str = "https://api.openai.com/v1/responses";
+const OPENAI_MODEL: &str = "gpt-5.4";
+
 const MAX_TOKENS: u32 = 16384;
 
-pub fn get_api_key() -> Option<String> {
-    if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+#[derive(Debug, Clone, Copy)]
+enum Provider {
+    Anthropic,
+    OpenAI,
+}
+
+fn get_env_key(var_name: &str) -> Option<String> {
+    if let Ok(key) = std::env::var(var_name) {
         if !key.is_empty() {
             return Some(key);
         }
@@ -29,7 +40,7 @@ pub fn get_api_key() -> Option<String> {
             if let Ok(text) = fs::read_to_string(&env_path) {
                 for line in text.lines() {
                     let line = line.trim();
-                    if let Some(rest) = line.strip_prefix("ANTHROPIC_API_KEY=") {
+                    if let Some(rest) = line.strip_prefix(&format!("{}=", var_name)) {
                         let key = rest.trim();
                         if !key.is_empty() {
                             return Some(key.to_string());
@@ -41,6 +52,36 @@ pub fn get_api_key() -> Option<String> {
     }
 
     None
+}
+
+pub fn get_api_key() -> Option<String> {
+    // Return whichever key we have (OpenAI or Anthropic)
+    get_env_key("OPENAI_API_KEY").or_else(|| get_env_key("ANTHROPIC_API_KEY"))
+}
+
+/// Determine which provider to use and return (Provider, api_key).
+fn resolve_provider(override_key: Option<&str>) -> Result<(Provider, String), String> {
+    // If caller provided a key, detect provider by prefix
+    if let Some(k) = override_key {
+        if !k.is_empty() {
+            let provider = if k.starts_with("sk-proj-") || k.starts_with("sk-org-") {
+                Provider::OpenAI
+            } else {
+                Provider::Anthropic
+            };
+            return Ok((provider, k.to_string()));
+        }
+    }
+
+    // Try OpenAI first, then Anthropic
+    if let Some(key) = get_env_key("OPENAI_API_KEY") {
+        return Ok((Provider::OpenAI, key));
+    }
+    if let Some(key) = get_env_key("ANTHROPIC_API_KEY") {
+        return Ok((Provider::Anthropic, key));
+    }
+
+    Err("No API key configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY in .env".to_string())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,7 +142,16 @@ impl VerifyResult {
 
 const VERIFY_PROMPT: &str = r#"You are analyzing a Microchip dsPIC33/PIC24 datasheet PDF to extract and verify pin mapping data.
 
+## Where to Look
+
+In Microchip datasheets, the pinout diagrams and pin tables are located between the
+"Pin Diagrams" bookmark/section and the "Table of Contents" (or first functional chapter).
+Focus ONLY on this section — ignore all other content in the datasheet.
+
 ## Task
+
+This datasheet may cover multiple devices in the same family with different pin counts.
+Extract ALL package pinout tables you find — the results will be cached and filtered per-device later.
 
 1. Find ALL package pinout tables in this datasheet (e.g., SPDIP, SOIC, SSOP, QFN, TQFP, UQFN, etc.)
 2. For each package, extract the COMPLETE pin-to-pad mapping (every pin number → pad name)
@@ -171,6 +221,11 @@ fn build_current_data_summary(device_data: &Value) -> String {
             .and_then(|v| v.as_str())
             .unwrap_or("default")
     ));
+    let pin_count = device_data
+        .get("pin_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    lines.push(format!("Device pin count: {}", pin_count));
 
     if let Some(pins) = device_data.get("pins").and_then(|v| v.as_array()) {
         lines.push(format!("\nCurrent pin mapping ({} pins):", pins.len()));
@@ -204,11 +259,19 @@ fn build_current_data_summary(device_data: &Value) -> String {
     lines.join("\n")
 }
 
+/// The VERIFY_PROMPT instructs the LLM to focus on the "Pin Diagrams" section,
+/// so we send the full PDF — no client-side page extraction needed.
+/// GPT-5.4 and Anthropic both handle large PDFs within their context limits.
+fn prepare_pdf(pdf_bytes: &[u8]) -> Vec<u8> {
+    pdf_bytes.to_vec()
+}
+
 fn call_anthropic_api(pdf_bytes: &[u8], prompt: &str, api_key: &str) -> Result<String, String> {
-    let pdf_b64 = base64::engine::general_purpose::STANDARD.encode(pdf_bytes);
+    let trimmed = prepare_pdf(pdf_bytes);
+    let pdf_b64 = base64::engine::general_purpose::STANDARD.encode(&trimmed);
 
     let payload = serde_json::json!({
-        "model": MODEL,
+        "model": ANTHROPIC_MODEL,
         "max_tokens": MAX_TOKENS,
         "messages": [{
             "role": "user",
@@ -235,9 +298,9 @@ fn call_anthropic_api(pdf_bytes: &[u8], prompt: &str, api_key: &str) -> Result<S
         .map_err(|e| format!("HTTP client error: {e}"))?;
 
     let resp = client
-        .post(API_URL)
+        .post(ANTHROPIC_API_URL)
         .header("x-api-key", api_key)
-        .header("anthropic-version", API_VERSION)
+        .header("anthropic-version", ANTHROPIC_API_VERSION)
         .header("content-type", "application/json")
         .body(serde_json::to_vec(&payload).unwrap())
         .send()
@@ -265,10 +328,102 @@ fn call_anthropic_api(pdf_bytes: &[u8], prompt: &str, api_key: &str) -> Result<S
     Ok(text_parts.join("\n"))
 }
 
+fn call_openai_api(pdf_bytes: &[u8], prompt: &str, api_key: &str) -> Result<String, String> {
+    let trimmed = prepare_pdf(pdf_bytes);
+    let pdf_b64 = base64::engine::general_purpose::STANDARD.encode(&trimmed);
+    let file_data = format!("data:application/pdf;base64,{}", pdf_b64);
+
+    // OpenAI Responses API with inline file input and high reasoning effort
+    // for complex pinout extraction from datasheet PDFs.
+    let payload = serde_json::json!({
+        "model": OPENAI_MODEL,
+        "instructions": "You are analyzing a Microchip dsPIC33/PIC24 datasheet to extract and verify pin mapping data. Return only valid JSON.",
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_file",
+                        "filename": "datasheet.pdf",
+                        "file_data": file_data,
+                    },
+                    {
+                        "type": "input_text",
+                        "text": prompt
+                    }
+                ]
+            }
+        ],
+        "reasoning": { "effort": "high" }
+    });
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(600))
+        .build()
+        .map_err(|e| format!("HTTP client error: {e}"))?;
+
+    let resp = client
+        .post(OPENAI_API_URL)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("content-type", "application/json")
+        .body(serde_json::to_vec(&payload).unwrap())
+        .send()
+        .map_err(|e| format!("API request error: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        return Err(format!("OpenAI API error {}: {}", status, body));
+    }
+
+    let result: Value = resp.json().map_err(|e| format!("JSON parse error: {e}"))?;
+
+    // Responses API: output[] contains "reasoning" and "message" items.
+    // We only want text from "message" items → content[].output_text.text
+    let mut text_parts: Vec<String> = Vec::new();
+    if let Some(output) = result.get("output").and_then(|v| v.as_array()) {
+        for item in output {
+            if item.get("type").and_then(|v| v.as_str()) != Some("message") {
+                continue;
+            }
+            if let Some(content) = item.get("content").and_then(|v| v.as_array()) {
+                for block in content {
+                    if block.get("type").and_then(|v| v.as_str()) == Some("output_text") {
+                        if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                            text_parts.push(text.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if text_parts.is_empty() {
+        return Err(format!("No text in OpenAI response: {}", result));
+    }
+
+    Ok(text_parts.join("\n"))
+}
+
+/// Dispatch to the appropriate API based on provider.
+fn call_llm_api(
+    provider: Provider,
+    pdf_bytes: &[u8],
+    prompt: &str,
+    api_key: &str,
+) -> Result<String, String> {
+    match provider {
+        Provider::Anthropic => call_anthropic_api(pdf_bytes, prompt, api_key),
+        Provider::OpenAI => call_openai_api(pdf_bytes, prompt, api_key),
+    }
+}
+
+/// Collapse package-specific rail aliases like `VDD_2` back to the canonical
+/// pad name so overlay/datasheet comparisons ignore duplicated suffixes.
 fn normalize_pad(name: &str) -> String {
     let re = Regex::new(r"_\d+$").unwrap();
-    re.replace(&name.to_uppercase().trim().to_string(), "")
-        .to_string()
+    let upper = name.to_uppercase();
+    re.replace(upper.trim(), "").to_string()
 }
 
 fn parse_anthropic_response(raw: &str, device_data: &Value) -> VerifyResult {
@@ -448,23 +603,91 @@ fn parse_anthropic_response(raw: &str, device_data: &Value) -> VerifyResult {
     result
 }
 
+// ---------------------------------------------------------------------------
+// Verification result cache — keyed by PDF content hash so the same datasheet
+// (which may cover a whole device family) reuses results across devices.
+// ---------------------------------------------------------------------------
+
+fn verify_cache_dir() -> PathBuf {
+    let d = dfp_cache_dir().join("verify_cache");
+    let _ = fs::create_dir_all(&d);
+    d
+}
+
+/// Simple hash of PDF bytes for cache key (first 8 bytes of a basic hash).
+fn pdf_cache_key(pdf_bytes: &[u8]) -> String {
+    // Use a simple FNV-style hash — no crypto needed, just deduplication.
+    let mut h: u64 = 0xcbf29ce484222325;
+    for &b in pdf_bytes.iter().take(65536) {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    // Also mix in the length for uniqueness
+    h ^= pdf_bytes.len() as u64;
+    h = h.wrapping_mul(0x100000001b3);
+    format!("{:016x}", h)
+}
+
+fn load_cached_verify(pdf_bytes: &[u8]) -> Option<Value> {
+    let key = pdf_cache_key(pdf_bytes);
+    let path = verify_cache_dir().join(format!("{}.json", key));
+    let text = fs::read_to_string(&path).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+fn save_cached_verify(pdf_bytes: &[u8], raw_json: &Value) {
+    let key = pdf_cache_key(pdf_bytes);
+    let path = verify_cache_dir().join(format!("{}.json", key));
+    if let Ok(text) = serde_json::to_string_pretty(raw_json) {
+        let _ = fs::write(&path, text);
+    }
+}
+
 pub fn verify_pinout(
     pdf_bytes: &[u8],
     device_data: &Value,
     api_key: Option<&str>,
 ) -> Result<VerifyResult, String> {
-    let key = match api_key {
-        Some(k) if !k.is_empty() => k.to_string(),
-        _ => get_api_key().ok_or_else(|| {
-            "No Anthropic API key configured. Set ANTHROPIC_API_KEY in .env or provide via settings."
-                .to_string()
-        })?,
-    };
+    // Check cache first — the same datasheet PDF produces the same packages
+    // regardless of which family device we're comparing against.
+    if let Some(cached_json) = load_cached_verify(pdf_bytes) {
+        log::info!("verify_pinout: using cached LLM result");
+        return Ok(parse_anthropic_response(
+            &serde_json::to_string(&cached_json).unwrap_or_default(),
+            device_data,
+        ));
+    }
+
+    let (provider, key) = resolve_provider(api_key)?;
 
     let current_summary = build_current_data_summary(device_data);
     let prompt = VERIFY_PROMPT.replace("{current_data}", &current_summary);
 
-    let raw_response = call_anthropic_api(pdf_bytes, &prompt, &key)?;
+    let raw_response = call_llm_api(provider, pdf_bytes, &prompt, &key)?;
+
+    // Cache the raw JSON response for future reuse
+    if let Ok(parsed) = serde_json::from_str::<Value>(&raw_response) {
+        save_cached_verify(pdf_bytes, &parsed);
+    } else {
+        // Try stripping markdown fencing before caching
+        let cleaned = raw_response.trim();
+        if cleaned.starts_with("```") {
+            let lines: Vec<&str> = cleaned.lines().collect();
+            let start = lines
+                .iter()
+                .position(|l| l.trim().starts_with('{'))
+                .unwrap_or(1);
+            let end = lines
+                .iter()
+                .rposition(|l| l.trim().starts_with('}'))
+                .unwrap_or(lines.len() - 1);
+            let json_str = lines[start..=end].join("\n");
+            if let Ok(parsed) = serde_json::from_str::<Value>(&json_str) {
+                save_cached_verify(pdf_bytes, &parsed);
+            }
+        }
+    }
+
     Ok(parse_anthropic_response(&raw_response, device_data))
 }
 

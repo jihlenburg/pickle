@@ -1,9 +1,11 @@
 //! Parser for Microchip EDC (.PIC) XML files from Device Family Packs.
-//! Extracts pin multiplexing, PPS register mappings, and peripheral data.
+//! Extracts pin multiplexing, PPS register mappings, peripheral data, and
+//! device configuration register (DCR/fuse) definitions.
 //!
-//! Parsing is split into two logical passes:
+//! Parsing is split into three logical passes:
 //! 1. walk `PinList` to recover package/pad/function data
 //! 2. walk `SFRDataSector` to recover register addresses and PPS bitfields
+//! 3. walk `WORMHoleSector` to recover DCR fuse definitions
 //!
 //! Keeping those passes separate mirrors the EDC layout and keeps the cached JSON
 //! stable for both frontend rendering and code generation.
@@ -71,6 +73,35 @@ pub struct PPSOutputMapping {
     pub field_offset: u32,
 }
 
+/// A single allowed value for a DCR field, parsed from `DCRFieldSemantic`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DcrFieldValue {
+    pub cname: String,
+    pub desc: String,
+    pub value: u32,
+}
+
+/// A bit-field within a configuration register, parsed from `DCRFieldDef`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DcrField {
+    pub cname: String,
+    pub desc: String,
+    pub mask: u32,
+    pub width: u32,
+    pub hidden: bool,
+    pub values: Vec<DcrFieldValue>,
+}
+
+/// A device configuration register definition, parsed from `DCRDef`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DcrRegister {
+    pub cname: String,
+    pub desc: String,
+    pub addr: u32,
+    pub default_value: u32,
+    pub fields: Vec<DcrField>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResolvedPin {
     pub position: u32,
@@ -97,6 +128,8 @@ pub struct DeviceData {
     pub port_registers: HashMap<String, u32>,
     #[serde(default)]
     pub ansel_bits: HashMap<String, Vec<u32>>,
+    #[serde(default)]
+    pub fuse_defs: Vec<DcrRegister>,
 }
 
 impl DeviceData {
@@ -218,6 +251,22 @@ fn parse_int(s: &str) -> u32 {
     }
 }
 
+/// Extract the numeric value from a DCRFieldSemantic `when` expression.
+/// Typical format: `(field & 0x3) == 0x3` → returns 3.
+fn parse_when_value(when: &str) -> u32 {
+    let re = Regex::new(r"==\s*0x([0-9a-fA-F]+)").unwrap();
+    if let Some(caps) = re.captures(when) {
+        u32::from_str_radix(caps.get(1).unwrap().as_str(), 16).unwrap_or(0)
+    } else {
+        let re_dec = Regex::new(r"==\s*(\d+)").unwrap();
+        re_dec
+            .captures(when)
+            .and_then(|c| c.get(1))
+            .and_then(|m| m.as_str().parse().ok())
+            .unwrap_or(0)
+    }
+}
+
 fn extract_port_info(name: &str) -> (Option<String>, Option<u32>) {
     let re = Regex::new(r"^R([A-Z])(\d+)$").unwrap();
     if let Some(caps) = re.captures(name) {
@@ -279,6 +328,10 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
         }
 
         let mut pin_position: u32 = 0;
+        // These name patterns are stable across all pins in the package, so keep
+        // the regex compilation outside the hot inner loop.
+        let re_an = Regex::new(r"^AN\d+$").unwrap();
+        let re_ana = Regex::new(r"^ANA\d+$").unwrap();
 
         for child in pinlist.children().filter(|n| n.is_element()) {
             let tag = child.tag_name().name();
@@ -301,9 +354,6 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
                 let mut port_bit: Option<u32> = None;
                 let mut analog = Vec::new();
                 let mut is_power = false;
-
-                let re_an = Regex::new(r"^AN\d+$").unwrap();
-                let re_ana = Regex::new(r"^ANA\d+$").unwrap();
 
                 for name in &func_names {
                     if matches!(name.as_str(), "VDD" | "VSS" | "AVDD" | "AVSS" | "MCLR") {
@@ -452,43 +502,137 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
                             parse_int(get_edc_attr(&mode_child, "nzwidth").unwrap_or("0"));
                     }
                 }
-            } else if cname.starts_with("RPOR") && !cname.starts_with("RPOR0") || cname == "RPOR0" {
-                // Match RPOR0, RPOR1, ... but not RPOR-something-else
-                if cname.starts_with("RPOR") {
-                    let suffix = &cname[4..];
-                    if suffix.chars().all(|c| c.is_ascii_digit()) {
-                        let mut bit_offset: u32 = 0;
-                        for mode_child in sfr.descendants().filter(|n| n.is_element()) {
-                            let mtag = mode_child.tag_name().name();
-                            if mtag == "AdjustPoint" {
-                                // RPOR field offsets use the same running bit-offset model as
-                                // RPINR parsing above.
-                                bit_offset +=
-                                    parse_int(get_edc_attr(&mode_child, "offset").unwrap_or("0"));
-                            } else if mtag == "SFRFieldDef" {
-                                let field_name =
-                                    get_edc_attr(&mode_child, "cname").unwrap_or("").to_string();
-                                let mask =
-                                    parse_int(get_edc_attr(&mode_child, "mask").unwrap_or("0"));
-                                let rp_num = re_rp_field
-                                    .captures(&field_name)
-                                    .and_then(|c| c.get(1))
-                                    .and_then(|m| m.as_str().parse().ok())
-                                    .unwrap_or(0);
-                                pps_output_mappings.push(PPSOutputMapping {
-                                    rp_number: rp_num,
-                                    register: cname.to_string(),
-                                    register_addr: addr,
-                                    field_name,
-                                    field_mask: mask,
-                                    field_offset: bit_offset,
-                                });
-                                bit_offset +=
-                                    parse_int(get_edc_attr(&mode_child, "nzwidth").unwrap_or("0"));
-                            }
+            } else if let Some(suffix) = cname.strip_prefix("RPOR") {
+                // Match RPOR0, RPOR1, ... but not RPOR-something-else.
+                if suffix.chars().all(|c| c.is_ascii_digit()) {
+                    let mut bit_offset: u32 = 0;
+                    for mode_child in sfr.descendants().filter(|n| n.is_element()) {
+                        let mtag = mode_child.tag_name().name();
+                        if mtag == "AdjustPoint" {
+                            // RPOR field offsets use the same running bit-offset model as
+                            // RPINR parsing above.
+                            bit_offset +=
+                                parse_int(get_edc_attr(&mode_child, "offset").unwrap_or("0"));
+                        } else if mtag == "SFRFieldDef" {
+                            let field_name =
+                                get_edc_attr(&mode_child, "cname").unwrap_or("").to_string();
+                            let mask = parse_int(get_edc_attr(&mode_child, "mask").unwrap_or("0"));
+                            let rp_num = re_rp_field
+                                .captures(&field_name)
+                                .and_then(|c| c.get(1))
+                                .and_then(|m| m.as_str().parse().ok())
+                                .unwrap_or(0);
+                            pps_output_mappings.push(PPSOutputMapping {
+                                rp_number: rp_num,
+                                register: cname.to_string(),
+                                register_addr: addr,
+                                field_name,
+                                field_mask: mask,
+                                field_offset: bit_offset,
+                            });
+                            bit_offset +=
+                                parse_int(get_edc_attr(&mode_child, "nzwidth").unwrap_or("0"));
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // Third pass: parse DCR (Device Configuration Register) definitions from
+    // `WORMHoleSector` to discover fuse registers, fields, and valid values.
+    let mut fuse_defs: Vec<DcrRegister> = Vec::new();
+
+    for sector in root.descendants().filter(|n| {
+        n.tag_name().name() == "WORMHoleSector"
+            && get_edc_attr(n, "regionid")
+                .map(|id| id.contains("cfgmem") || id.contains("config"))
+                .unwrap_or(false)
+    }) {
+        for dcr_def in sector
+            .children()
+            .filter(|n| n.is_element() && n.tag_name().name() == "DCRDef")
+        {
+            let cname = get_edc_attr(&dcr_def, "cname").unwrap_or("").to_string();
+            let desc = get_edc_attr(&dcr_def, "desc").unwrap_or("").to_string();
+            let addr = parse_int(get_edc_attr(&dcr_def, "_addr").unwrap_or("0"));
+            let default_value = parse_int(get_edc_attr(&dcr_def, "default").unwrap_or("0"));
+            let reg_hidden = get_edc_attr(&dcr_def, "ishidden")
+                .map(|v| v == "true")
+                .unwrap_or(false);
+
+            if cname.is_empty() || reg_hidden {
+                continue;
+            }
+
+            let mut fields: Vec<DcrField> = Vec::new();
+
+            // Find the first DCRMode (standard operating mode DS.0)
+            let dcr_mode = dcr_def
+                .descendants()
+                .find(|n| n.is_element() && n.tag_name().name() == "DCRMode");
+
+            if let Some(mode) = dcr_mode {
+                for child in mode.children().filter(|n| n.is_element()) {
+                    if child.tag_name().name() != "DCRFieldDef" {
+                        continue;
+                    }
+
+                    let field_cname = get_edc_attr(&child, "cname").unwrap_or("").to_string();
+                    let field_desc = get_edc_attr(&child, "desc").unwrap_or("").to_string();
+                    let field_mask = parse_int(get_edc_attr(&child, "mask").unwrap_or("0"));
+                    let field_width = parse_int(get_edc_attr(&child, "nzwidth").unwrap_or("0"));
+                    let hidden = get_edc_attr(&child, "ishidden")
+                        .map(|v| v == "true")
+                        .unwrap_or(false);
+
+                    if field_cname.is_empty() || field_mask == 0 {
+                        continue;
+                    }
+
+                    let mut values: Vec<DcrFieldValue> = Vec::new();
+                    for sem in child
+                        .children()
+                        .filter(|n| n.is_element() && n.tag_name().name() == "DCRFieldSemantic")
+                    {
+                        let val_cname = get_edc_attr(&sem, "cname").unwrap_or("").to_string();
+                        let val_desc = get_edc_attr(&sem, "desc").unwrap_or("").to_string();
+                        let when = get_edc_attr(&sem, "when").unwrap_or("");
+                        let value = parse_when_value(when);
+
+                        if !val_cname.is_empty() {
+                            values.push(DcrFieldValue {
+                                cname: val_cname,
+                                desc: val_desc,
+                                value,
+                            });
+                        }
+                    }
+
+                    // Skip range-only fields (e.g. DMT interval/count) that have
+                    // no enumerated values — they can't be presented as a dropdown.
+                    if !values.is_empty() {
+                        fields.push(DcrField {
+                            cname: field_cname,
+                            desc: field_desc,
+                            mask: field_mask,
+                            width: field_width,
+                            hidden,
+                            values,
+                        });
+                    }
+                }
+            }
+
+            // Only include registers that have at least one selectable field.
+            if !fields.is_empty() {
+                fuse_defs.push(DcrRegister {
+                    cname,
+                    desc,
+                    addr,
+                    default_value,
+                    fields,
+                });
             }
         }
     }
@@ -514,6 +658,7 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
         pps_output_mappings,
         port_registers,
         ansel_bits,
+        fuse_defs,
     })
 }
 

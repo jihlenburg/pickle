@@ -31,7 +31,6 @@ thiserror = "2"
 once_cell = "1"
 log = "0.4"
 tauri-plugin-log = "2"
-lopdf = "0.34"
 tempfile = "3"
 
 [build-dependencies]
