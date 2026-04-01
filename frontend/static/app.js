@@ -131,6 +131,129 @@ document.addEventListener('keydown', (e) => {
 });
 
 // =============================================================================
+// Analog Pin Sharing — Classification & Assignment Helpers
+// =============================================================================
+
+/**
+ * Check if a peripheral name is a passive analog input that can share a pin
+ * with other analog inputs (comparator inputs, ADC channels, op-amp inputs,
+ * voltage references).
+ */
+function isAnalogInput(name) {
+    return /^CMP\d+[A-D]$/.test(name)    // comparator inputs
+        || /^AN\d+$/.test(name)           // shared ADC channels
+        || /^ANA\d+$/.test(name)          // dedicated ADC channels
+        || /^OA\d+IN[+-]$/.test(name)     // op-amp inputs
+        || /^VREF[+-]$/.test(name);       // voltage references
+}
+
+/**
+ * Check if a peripheral name is an analog output (op-amp output, DAC output).
+ * Analog outputs drive the pin, so at most one can be active, but analog inputs
+ * can still share the pin (they read the driven value).
+ */
+function isAnalogOutput(name) {
+    return /^OA\d+OUT$/.test(name)
+        || /^DAC\d*OUT$/.test(name);
+}
+
+/** Check if a peripheral is any analog function (input or output). */
+function isAnalogFunction(name) {
+    return isAnalogInput(name) || isAnalogOutput(name);
+}
+
+/**
+ * Get all assignments at a pin position, always as an array.
+ * Handles both single-assignment (legacy) and multi-assignment (array) forms.
+ * @param {number} pos - Pin position
+ * @returns {Array<{peripheral:string, direction:string, ppsval:?number, rp_number:?number, fixed:boolean}>}
+ */
+function getAssignmentsAt(pos) {
+    const val = assignments[pos];
+    if (!val) return [];
+    return Array.isArray(val) ? val : [val];
+}
+
+/**
+ * Set a single exclusive assignment at a pin position (replaces all existing).
+ * Use for PPS, digital, and GPIO assignments.
+ */
+function setAssignment(pos, assignment) {
+    assignments[pos] = assignment;
+}
+
+/**
+ * Add an analog assignment to a pin, preserving existing analog assignments.
+ * If the pin already has a non-analog (digital/PPS) assignment, it replaces it.
+ */
+function addAnalogAssignment(pos, assignment) {
+    const existing = getAssignmentsAt(pos);
+
+    // If pin has no assignments, just set it
+    if (existing.length === 0) {
+        assignments[pos] = assignment;
+        return;
+    }
+
+    // If all existing assignments are analog, append
+    const allAnalog = existing.every(a => isAnalogFunction(a.peripheral));
+    if (allAnalog) {
+        // Don't add duplicates
+        if (existing.some(a => a.peripheral === assignment.peripheral)) return;
+        assignments[pos] = [...existing, assignment];
+    } else {
+        // Replace non-analog assignment
+        assignments[pos] = assignment;
+    }
+}
+
+/**
+ * Remove a specific peripheral assignment from a pin position.
+ * Handles both single and multi-assignment forms.
+ * @returns {boolean} true if something was removed
+ */
+function removeAssignment(pos, peripheralName) {
+    const val = assignments[pos];
+    if (!val) return false;
+
+    if (Array.isArray(val)) {
+        const filtered = val.filter(a => a.peripheral !== peripheralName);
+        if (filtered.length === val.length) return false;
+        if (filtered.length === 0) {
+            delete assignments[pos];
+        } else if (filtered.length === 1) {
+            assignments[pos] = filtered[0]; // unwrap single-element array
+        } else {
+            assignments[pos] = filtered;
+        }
+        return true;
+    }
+
+    if (val.peripheral === peripheralName) {
+        delete assignments[pos];
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Check if a specific peripheral is assigned at a pin position.
+ */
+function hasAssignmentFor(pos, peripheralName) {
+    return getAssignmentsAt(pos).some(a => a.peripheral === peripheralName);
+}
+
+/**
+ * Get the primary (first) assignment at a pin position, or null.
+ * Used for display when a single representative is needed.
+ */
+function primaryAssignment(pos) {
+    const val = assignments[pos];
+    if (!val) return null;
+    return Array.isArray(val) ? val[0] : val;
+}
+
+// =============================================================================
 // Peripheral Classification
 // =============================================================================
 
@@ -563,10 +686,13 @@ function findPinByFunction(fn) {
  */
 function canRestoreAssignmentOnPin(pin, assignment) {
     if (!pin || !assignment) return false;
-    if (!assignment.fixed) return pin.rp_number !== null;
-    if (!pin.functions.includes(assignment.peripheral)) return false;
-    if (isI2cRoutingFunction(assignment.peripheral)) {
-        return isI2cRoutingFunctionActive(assignment.peripheral);
+    // Handle multi-assignment arrays: check the primary (first) element
+    const primary = Array.isArray(assignment) ? assignment[0] : assignment;
+    if (!primary) return false;
+    if (!primary.fixed) return pin.rp_number !== null;
+    if (!pin.functions.includes(primary.peripheral)) return false;
+    if (isI2cRoutingFunction(primary.peripheral)) {
+        return isI2cRoutingFunctionActive(primary.peripheral);
     }
     return true;
 }
@@ -678,13 +804,13 @@ function reconcileI2cRoutingAssignments() {
 
         const sourcePin = [defaultPin, alternatePin].find(pin => {
             if (!pin) return false;
-            const peripheral = assignments[pin.position]?.peripheral;
-            return peripheral === defaultFunction || peripheral === alternateFunction;
+            const primary = primaryAssignment(pin.position);
+            return primary && (primary.peripheral === defaultFunction || primary.peripheral === alternateFunction);
         });
 
         if (!sourcePin) continue;
 
-        const sourceAssignment = assignments[sourcePin.position];
+        const sourceAssignment = primaryAssignment(sourcePin.position);
         if (activePin &&
             sourcePin.position === activePin.position &&
             sourceAssignment?.peripheral === activeFunction) {
@@ -896,18 +1022,48 @@ function checkConflicts() {
     const conflicts = [];
     const conflictPins = new Set();
 
-    // Build a map of peripheral+direction -> first assigned pin position
+    // 1. Cross-pin conflict: same peripheral+direction assigned to multiple pins
     const used = {};
-    for (const [pos, assign] of Object.entries(assignments)) {
-        const key = `${assign.peripheral}_${assign.direction}`;
-        if (used[key]) {
+    for (const [pos, val] of Object.entries(assignments)) {
+        const list = Array.isArray(val) ? val : [val];
+        for (const assign of list) {
+            const key = `${assign.peripheral}_${assign.direction}`;
+            if (used[key]) {
+                conflicts.push(
+                    `${assign.peripheral} (${assign.direction}) assigned to both pin ${used[key]} and pin ${pos}`
+                );
+                conflictPins.add(parseInt(used[key]));
+                conflictPins.add(parseInt(pos));
+            } else {
+                used[key] = pos;
+            }
+        }
+    }
+
+    // 2. Per-pin conflict: analog vs digital sharing on the same pin
+    for (const [pos, val] of Object.entries(assignments)) {
+        const list = Array.isArray(val) ? val : [val];
+        if (list.length < 2) continue;
+
+        const hasDigital = list.some(a => !isAnalogFunction(a.peripheral));
+        const hasAnalog = list.some(a => isAnalogFunction(a.peripheral));
+
+        if (hasDigital && hasAnalog) {
+            const digitalNames = list.filter(a => !isAnalogFunction(a.peripheral)).map(a => a.peripheral);
+            const analogNames = list.filter(a => isAnalogFunction(a.peripheral)).map(a => a.peripheral);
             conflicts.push(
-                `${assign.peripheral} (${assign.direction}) assigned to both pin ${used[key]} and pin ${pos}`
+                `Pin ${pos}: analog/digital conflict — ${analogNames.join(', ')} vs ${digitalNames.join(', ')}`
             );
-            conflictPins.add(parseInt(used[key]));
             conflictPins.add(parseInt(pos));
-        } else {
-            used[key] = pos;
+        }
+
+        // Multiple analog outputs on the same pin is a conflict (both drive)
+        const analogOutputs = list.filter(a => isAnalogOutput(a.peripheral));
+        if (analogOutputs.length > 1) {
+            conflicts.push(
+                `Pin ${pos}: multiple analog outputs — ${analogOutputs.map(a => a.peripheral).join(', ')}`
+            );
+            conflictPins.add(parseInt(pos));
         }
     }
 
@@ -956,7 +1112,7 @@ function extractPeripheralInstance(name) {
     if ((m = name.match(/^TCKI(\d+)$/))) return { type: 'Timer', instance: m[1], id: `Timer${m[1]}` };
     if ((m = name.match(/^ICM(\d+)$/))) return { type: 'Input Capture', instance: m[1], id: `ICM${m[1]}` };
     if ((m = name.match(/^OCM(\d+)/))) return { type: 'CCP', instance: m[1], id: `CCP${m[1]}` };
-    if ((m = name.match(/^CMP(\d+)$/))) return { type: 'Comparator', instance: m[1], id: `CMP${m[1]}` };
+    if ((m = name.match(/^CMP(\d+)[A-D]?$/))) return { type: 'Comparator', instance: m[1], id: `CMP${m[1]}` };
     if ((m = name.match(/^CLC(\d+)/))) return { type: 'CLC', instance: m[1], id: `CLC${m[1]}` };
     if ((m = name.match(/^INT(\d+)$/))) return { type: 'Interrupt', instance: m[1], id: `INT${m[1]}` };
     if ((m = name.match(/^PCI(\d+)$/))) return { type: 'PWM Fault', instance: m[1], id: `PCI${m[1]}` };
@@ -1104,8 +1260,11 @@ function buildPeripheralInstances() {
  */
 function buildReverseAssignments() {
     const reverse = {};
-    for (const [pos, assign] of Object.entries(assignments)) {
-        reverse[assign.peripheral] = parseInt(pos, 10);
+    for (const [pos, val] of Object.entries(assignments)) {
+        const list = Array.isArray(val) ? val : [val];
+        for (const assign of list) {
+            reverse[assign.peripheral] = parseInt(pos, 10);
+        }
     }
     return reverse;
 }
@@ -1129,9 +1288,10 @@ function getAvailableRpPins(signalName, signalDirection) {
         const label = `Pin ${pin.position} — ${portName} (RP${pin.rp_number})`;
 
         let usedBy = null;
-        const existing = assignments[pin.position];
-        if (existing && existing.peripheral !== signalName) {
-            usedBy = existing.peripheral;
+        const existingList = getAssignmentsAt(pin.position);
+        const otherPeriphs = existingList.filter(a => a.peripheral !== signalName);
+        if (otherPeriphs.length > 0) {
+            usedBy = otherPeriphs.map(a => a.peripheral).join(', ');
         }
 
         results.push({ pin, label, usedBy });
@@ -1316,7 +1476,7 @@ function renderPeriphCard(inst, reverse) {
             cb.dataset.signal = signal.name;
             cb.dataset.pinPos = signal.fixedPin;
             cb.dataset.direction = signal.direction;
-            cb.checked = assignedPin !== undefined;
+            cb.checked = hasAssignmentFor(signal.fixedPin, signal.name);
             cb.disabled = pinBlocked;
 
             cb.addEventListener('change', onPeriphFixedToggle);
@@ -1331,6 +1491,18 @@ function renderPeriphCard(inst, reverse) {
             fixedBadge.className = 'fixed-badge';
             fixedBadge.textContent = 'fixed';
             wrapper.appendChild(fixedBadge);
+
+            // Show other peripherals sharing this pin
+            const coAssigned = getAssignmentsAt(signal.fixedPin)
+                .filter(a => a.peripheral !== signal.name)
+                .map(a => a.peripheral);
+            if (coAssigned.length > 0) {
+                const shared = document.createElement('span');
+                shared.className = 'periph-shared-badge';
+                shared.textContent = `shared: ${coAssigned.join(', ')}`;
+                shared.title = 'Other analog functions sharing this pin';
+                wrapper.appendChild(shared);
+            }
 
             if (pinIsIcsp) {
                 const icspBadge = document.createElement('span');
@@ -1500,85 +1672,140 @@ function renderDevice() {
             } else {
                 const periphs = getAvailablePeripherals(pin);
 
-                const select = document.createElement('select');
-                select.className = 'assign-select';
-                select.dataset.pinPos = pin.position;
-                select.dataset.rpNum = pin.rp_number ?? '';
-                select.dataset.fixed = pin.rp_number === null ? '1' : '0';
+                // Separate fixed analog functions (checkboxes) from everything else (dropdown)
+                const analogFixedPeriphs = periphs.filter(p => p.fixed && isAnalogFunction(p.name));
+                const dropdownPeriphs = periphs.filter(p => !(p.fixed && isAnalogFunction(p.name)));
+                const fixedPeriphs = dropdownPeriphs.filter(p => p.fixed);
+                const ppsPeriphs = dropdownPeriphs.filter(p => !p.fixed);
 
-                const optNone = document.createElement('option');
-                optNone.value = '';
-                optNone.textContent = '\u2014 unassigned \u2014';
-                select.appendChild(optNone);
+                // Render analog fixed functions as labeled checkbox group
+                if (analogFixedPeriphs.length > 0) {
+                    const hasDigitalAssign = getAssignmentsAt(pin.position)
+                        .some(a => !isAnalogFunction(a.peripheral));
 
-                // Split peripherals into fixed and PPS sections
-                const fixedPeriphs = periphs.filter(p => p.fixed);
-                const ppsPeriphs = periphs.filter(p => !p.fixed);
+                    const analogBox = document.createElement('div');
+                    analogBox.className = 'pin-analog-checks';
 
-                // Helper: add optgroups for a set of peripherals
-                const addOptgroups = (list) => {
-                    const seen = new Set();
-                    for (const p of list) {
-                        if (seen.has(p.group)) continue;
-                        seen.add(p.group);
+                    const header = document.createElement('span');
+                    header.className = 'pin-analog-header';
+                    header.textContent = 'Analog';
+                    header.title = 'Analog functions can share this pin — check multiple';
+                    analogBox.appendChild(header);
 
-                        const optgroup = document.createElement('optgroup');
-                        optgroup.label = p.group;
-                        const groupPeriphs = list.filter(x => x.group === p.group);
-                        for (const gp of groupPeriphs) {
-                            const opt = document.createElement('option');
-                            let label = gp.name;
-                            if (!gp.fixed) {
-                                const dirLabel = gp.direction === 'out' ? 'OUT' : 'IN';
-                                label = `${gp.name} (${dirLabel})`;
-                            } else if (gp.direction === 'io') {
-                                label = `${gp.name} (IN/OUT)`;
-                            }
-                            opt.value = JSON.stringify({
-                                name: gp.name, direction: gp.direction,
-                                ppsval: gp.ppsval, fixed: gp.fixed,
-                            });
-                            opt.textContent = label;
-                            opt.className = periphClass(gp.name);
-                            const optDesc = getDescription(gp.name);
-                            if (optDesc) opt.title = optDesc;
-                            optgroup.appendChild(opt);
+                    for (const ap of analogFixedPeriphs) {
+                        const lbl = document.createElement('label');
+                        lbl.className = `pin-analog-check ${periphClass(ap.name)}`;
+                        const cb = document.createElement('input');
+                        cb.type = 'checkbox';
+                        cb.dataset.pinPos = pin.position;
+                        cb.dataset.signal = ap.name;
+                        cb.dataset.direction = ap.direction;
+                        cb.checked = hasAssignmentFor(pin.position, ap.name);
+                        if (hasDigitalAssign) {
+                            cb.disabled = true;
+                            lbl.title = 'Analog functions unavailable while a digital function is assigned';
+                        } else {
+                            const desc = getDescription(ap.name);
+                            if (desc) lbl.title = desc;
                         }
-                        select.appendChild(optgroup);
+                        cb.addEventListener('change', onPinViewAnalogToggle);
+                        lbl.appendChild(cb);
+                        lbl.appendChild(document.createTextNode(ap.name));
+                        analogBox.appendChild(lbl);
                     }
-                };
-
-                // Fixed functions section
-                addOptgroups(fixedPeriphs);
-
-                // PPS section with divider (or "no PPS" note)
-                if (pin.rp_number !== null && ppsPeriphs.length > 0) {
-                    const divider = document.createElement('option');
-                    divider.disabled = true;
-                    divider.className = 'assign-divider';
-                    divider.textContent = `\u2500\u2500 Remappable via PPS (RP${pin.rp_number}) \u2500\u2500`;
-                    select.appendChild(divider);
-                    addOptgroups(ppsPeriphs);
-                } else if (pin.rp_number === null) {
-                    const note = document.createElement('option');
-                    note.disabled = true;
-                    note.className = 'assign-divider';
-                    note.textContent = '\u2500\u2500 No PPS (fixed functions only) \u2500\u2500';
-                    select.appendChild(note);
+                    tdAssign.appendChild(analogBox);
                 }
 
-                // Restore previous assignment if present
-                if (assignments[pin.position]) {
-                    const a = assignments[pin.position];
-                    const val = JSON.stringify({
-                        name: a.peripheral, direction: a.direction,
-                        ppsval: a.ppsval, fixed: a.fixed || false,
-                    });
-                    select.value = val;
-                }
+                // Render dropdown for non-analog fixed + PPS functions
+                if (dropdownPeriphs.length > 0) {
+                    // Add "Digital" label when analog checkboxes are also present
+                    if (analogFixedPeriphs.length > 0) {
+                        const digHeader = document.createElement('span');
+                        digHeader.className = 'pin-digital-header';
+                        digHeader.textContent = 'Digital';
+                        digHeader.title = 'Digital functions are exclusive — only one can be assigned';
+                        tdAssign.appendChild(digHeader);
+                    }
 
-                select.addEventListener('change', onAssignChange);
-                tdAssign.appendChild(select);
+                    const select = document.createElement('select');
+                    select.className = 'assign-select';
+                    select.dataset.pinPos = pin.position;
+                    select.dataset.rpNum = pin.rp_number ?? '';
+                    select.dataset.fixed = pin.rp_number === null ? '1' : '0';
+
+                    const optNone = document.createElement('option');
+                    optNone.value = '';
+                    optNone.textContent = '\u2014 unassigned \u2014';
+                    select.appendChild(optNone);
+
+                    // Helper: add optgroups for a set of peripherals
+                    const addOptgroups = (list) => {
+                        const seen = new Set();
+                        for (const p of list) {
+                            if (seen.has(p.group)) continue;
+                            seen.add(p.group);
+
+                            const optgroup = document.createElement('optgroup');
+                            optgroup.label = p.group;
+                            const groupPeriphs = list.filter(x => x.group === p.group);
+                            for (const gp of groupPeriphs) {
+                                const opt = document.createElement('option');
+                                let label = gp.name;
+                                if (!gp.fixed) {
+                                    const dirLabel = gp.direction === 'out' ? 'OUT' : 'IN';
+                                    label = `${gp.name} (${dirLabel})`;
+                                } else if (gp.direction === 'io') {
+                                    label = `${gp.name} (IN/OUT)`;
+                                }
+                                opt.value = JSON.stringify({
+                                    name: gp.name, direction: gp.direction,
+                                    ppsval: gp.ppsval, fixed: gp.fixed,
+                                });
+                                opt.textContent = label;
+                                opt.className = periphClass(gp.name);
+                                const optDesc = getDescription(gp.name);
+                                if (optDesc) opt.title = optDesc;
+                                optgroup.appendChild(opt);
+                            }
+                            select.appendChild(optgroup);
+                        }
+                    };
+
+                    // Fixed functions section (non-analog only)
+                    addOptgroups(fixedPeriphs);
+
+                    // PPS section with divider (or "no PPS" note)
+                    if (pin.rp_number !== null && ppsPeriphs.length > 0) {
+                        const divider = document.createElement('option');
+                        divider.disabled = true;
+                        divider.className = 'assign-divider';
+                        divider.textContent = `\u2500\u2500 Remappable via PPS (RP${pin.rp_number}) \u2500\u2500`;
+                        select.appendChild(divider);
+                        addOptgroups(ppsPeriphs);
+                    } else if (pin.rp_number === null && fixedPeriphs.length > 0) {
+                        const note = document.createElement('option');
+                        note.disabled = true;
+                        note.className = 'assign-divider';
+                        note.textContent = '\u2500\u2500 No PPS (fixed functions only) \u2500\u2500';
+                        select.appendChild(note);
+                    }
+
+                    // Restore previous non-analog assignment if present
+                    const nonAnalogAssign = getAssignmentsAt(pin.position)
+                        .find(a => !isAnalogFunction(a.peripheral));
+                    if (nonAnalogAssign) {
+                        const val = JSON.stringify({
+                            name: nonAnalogAssign.peripheral,
+                            direction: nonAnalogAssign.direction,
+                            ppsval: nonAnalogAssign.ppsval,
+                            fixed: nonAnalogAssign.fixed || false,
+                        });
+                        select.value = val;
+                    }
+
+                    select.addEventListener('change', onAssignChange);
+                    tdAssign.appendChild(select);
+                }
             }
         }
         tr.appendChild(tdAssign);
@@ -1630,10 +1857,12 @@ function renderDevice() {
  * or the default port/pad name.
  */
 function pinLabel(pin) {
-    const assign = assignments[pin.position];
-    if (assign) {
+    const pinAssigns = getAssignmentsAt(pin.position);
+    if (pinAssigns.length > 0) {
         const sig = signalNames[pin.position];
-        return sig || assign.peripheral;
+        if (sig) return sig;
+        // For multi-assignment, show comma-separated peripheral names
+        return pinAssigns.map(a => a.peripheral).join(', ');
     }
     if (isJtagPin(pin)) {
         return getJtagFunction(pin) || 'JTAG';
@@ -1931,6 +2160,47 @@ function scrollToPin(pos) {
 // Assignment Change Handler
 // =============================================================================
 
+/** Handle analog function checkbox toggle in the pin view. */
+function onPinViewAnalogToggle(e) {
+    pushUndo();
+
+    const cb = e.target;
+    const pinPos = parseInt(cb.dataset.pinPos, 10);
+    const signalName = cb.dataset.signal;
+    const direction = cb.dataset.direction;
+    const row = document.getElementById(`pin-row-${pinPos}`);
+
+    if (cb.checked) {
+        // Clear any non-analog (digital/PPS) assignment — they conflict
+        const existing = getAssignmentsAt(pinPos);
+        const digitalAssign = existing.find(a => !isAnalogFunction(a.peripheral));
+        if (digitalAssign) {
+            removeAssignment(pinPos, digitalAssign.peripheral);
+            // Reset the dropdown to "unassigned"
+            const select = row?.querySelector('.assign-select');
+            if (select) select.value = '';
+        }
+
+        const pin = deviceData.pins.find(p => p.position === pinPos);
+        addAnalogAssignment(pinPos, {
+            peripheral: signalName,
+            direction: direction,
+            ppsval: null,
+            rp_number: pin ? pin.rp_number : null,
+            fixed: true,
+        });
+    } else {
+        removeAssignment(pinPos, signalName);
+        if (!assignments[pinPos]) {
+            delete signalNames[pinPos];
+        }
+    }
+
+    updateSummary();
+    checkConflicts();
+    renderPackageDiagram();
+}
+
 /** Handle peripheral assignment dropdown changes. Pushes undo state first. */
 function onAssignChange(e) {
     pushUndo();
@@ -1942,11 +2212,35 @@ function onAssignChange(e) {
 
     if (select.value) {
         const { name, direction, ppsval, fixed } = JSON.parse(select.value);
-        assignments[pinPos] = { peripheral: name, direction, ppsval, rp_number: rpNum, fixed: !!fixed };
+        const newAssign = { peripheral: name, direction, ppsval, rp_number: rpNum, fixed: !!fixed };
+        // Dropdown only contains non-analog functions; selecting one replaces everything
+        setAssignment(pinPos, newAssign);
         row.classList.add('assigned');
     } else {
+        // "Unassigned" only clears the dropdown (non-analog) assignment;
+        // preserve any checked analog functions
+        const analogAssigns = getAssignmentsAt(pinPos).filter(a => isAnalogFunction(a.peripheral));
         delete assignments[pinPos];
-        row.classList.remove('assigned');
+        if (analogAssigns.length > 0) {
+            assignments[pinPos] = analogAssigns.length === 1 ? analogAssigns[0] : analogAssigns;
+        } else {
+            row.classList.remove('assigned');
+        }
+    }
+
+    // Uncheck analog checkboxes in this row if a digital function was selected
+    const analogChecks = row.querySelectorAll('.pin-analog-check input[type="checkbox"]');
+    const hasDigital = getAssignmentsAt(pinPos).some(a => !isAnalogFunction(a.peripheral));
+    for (const cb of analogChecks) {
+        if (hasDigital) {
+            cb.checked = false;
+            cb.disabled = true;
+            cb.closest('.pin-analog-check').title = 'Analog functions unavailable while a digital function is assigned';
+        } else {
+            cb.disabled = false;
+            cb.checked = hasAssignmentFor(pinPos, cb.dataset.signal);
+            cb.closest('.pin-analog-check').title = getDescription(cb.dataset.signal) || '';
+        }
     }
 
     updateSummary();
@@ -1964,10 +2258,12 @@ function onPeriphAssignChange(e) {
     const ppsval = select.dataset.ppsval ? parseInt(select.dataset.ppsval) : null;
 
     // Remove old assignment for this signal (if any)
-    for (const [pos, assign] of Object.entries(assignments)) {
-        if (assign.peripheral === signalName) {
-            delete assignments[parseInt(pos, 10)];
-            delete signalNames[parseInt(pos, 10)];
+    for (const [pos, val] of Object.entries(assignments)) {
+        const list = Array.isArray(val) ? val : [val];
+        if (list.some(a => a.peripheral === signalName)) {
+            const intPos = parseInt(pos, 10);
+            removeAssignment(intPos, signalName);
+            if (!assignments[intPos]) delete signalNames[intPos];
             break;
         }
     }
@@ -2015,6 +2311,21 @@ function onPeriphSignalNameChange(e) {
         } else {
             delete signalNames[pinPos];
         }
+
+        // Sync signal name to co-assigned peripherals sharing the same pin
+        const coAssigned = getAssignmentsAt(pinPos);
+        if (coAssigned.length > 1) {
+            const val = input.value.trim();
+            for (const a of coAssigned) {
+                if (a.peripheral === signalName) continue;
+                const otherInput = document.querySelector(
+                    `.periph-signal-input[data-signal="${a.peripheral}"]`
+                );
+                if (otherInput) otherInput.value = val;
+            }
+        }
+
+        renderPackageDiagram();
     }
 }
 
@@ -2029,7 +2340,7 @@ function onPeriphFixedToggle(e) {
 
     if (cb.checked) {
         const pin = deviceData.pins.find(p => p.position === pinPos);
-        assignments[pinPos] = {
+        const newAssign = {
             peripheral: signalName,
             direction: direction,
             ppsval: null,
@@ -2037,14 +2348,24 @@ function onPeriphFixedToggle(e) {
             fixed: true,
         };
 
+        // Analog inputs can share a pin with other analog functions
+        if (isAnalogFunction(signalName)) {
+            addAnalogAssignment(pinPos, newAssign);
+        } else {
+            setAssignment(pinPos, newAssign);
+        }
+
         // Transfer signal name if present
         const input = document.querySelector(`.periph-signal-input[data-signal="${signalName}"]`);
         if (input && input.value.trim()) {
             signalNames[pinPos] = input.value.trim();
         }
     } else {
-        delete assignments[pinPos];
-        delete signalNames[pinPos];
+        removeAssignment(pinPos, signalName);
+        // Only clear signal name if no assignments remain on this pin
+        if (!assignments[pinPos]) {
+            delete signalNames[pinPos];
+        }
     }
 
     updateSummary();
@@ -2057,7 +2378,12 @@ function onPeriphFixedToggle(e) {
 
 /** Update the "Assigned" count in the summary bar. */
 function updateSummary() {
-    document.getElementById('sum-assigned').textContent = Object.keys(assignments).length;
+    // Count total individual assignments (multi-assignment pins count each peripheral)
+    let count = 0;
+    for (const val of Object.values(assignments)) {
+        count += Array.isArray(val) ? val.length : 1;
+    }
+    document.getElementById('sum-assigned').textContent = count;
 }
 
 /** Sync assigned/unassigned state on existing diagram pin elements (without full re-render). */
@@ -2082,14 +2408,21 @@ function updateDiagramDots() {
 async function generateCode() {
     if (!deviceData) return;
 
-    const assignmentList = Object.entries(assignments).map(([pos, a]) => ({
-        pinPosition: parseInt(pos),
-        rpNumber: a.rp_number,
-        peripheral: a.peripheral,
-        direction: a.direction,
-        ppsval: a.ppsval,
-        fixed: a.fixed || false,
-    }));
+    // Flatten multi-assignment arrays (analog pin sharing) into individual entries
+    const assignmentList = [];
+    for (const [pos, val] of Object.entries(assignments)) {
+        const list = Array.isArray(val) ? val : [val];
+        for (const a of list) {
+            assignmentList.push({
+                pinPosition: parseInt(pos),
+                rpNumber: a.rp_number,
+                peripheral: a.peripheral,
+                direction: a.direction,
+                ppsval: a.ppsval,
+                fixed: a.fixed || false,
+            });
+        }
+    }
 
     if (assignmentList.length === 0) {
         document.getElementById('code-output').textContent = '// No pin assignments configured.';
@@ -2192,8 +2525,9 @@ async function exportPinList() {
     for (const pin of deviceData.pins) {
         const num = String(pin.position);
         const name = pin.port ? `R${pin.port}${pin.port_bit}` : pin.pad_name || pin.functions[0] || '—';
-        const assign = assignments[pin.position]
-            ? assignments[pin.position].peripheral
+        const pinAssigns = getAssignmentsAt(pin.position);
+        const assign = pinAssigns.length > 0
+            ? pinAssigns.map(a => a.peripheral).join(', ')
             : (pin.is_power ? pin.functions[0] : '—');
         const sig = signalNames[pin.position] || '';
         rows.push([num, name, assign, sig]);
