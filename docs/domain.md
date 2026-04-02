@@ -1,151 +1,151 @@
-# dsPIC33 Domain Knowledge
+# dsPIC33 / PIC24 Notes
 
-Background on Microchip dsPIC33 concepts relevant to pickle.
+This page captures the device-level concepts that matter to pickle's parser and generator.
 
-## Part Number Format
+## Part Numbers
 
-```
+Example:
+
+```text
 DSPIC33CK64MP102T-E/M6VAO
-│       │  │   │ │ │ │  └── VAO = automotive qualification
-│       │  │   │ │ │ └──── M6 = package code (e.g. QFN)
-│       │  │   │ │ └────── E = temperature grade
-│       │  │   │ └──────── T = tape & reel
-│       │  │   └────────── 102 = pin count variant
-│       │  └────────────── MP = sub-family (Motor/Power)
-│       └───────────────── 64 = flash size (KB)
-└───────────────────────── DSPIC33CK = device family
+│       │  │   │ │ │ │  └── qualification / sales suffix
+│       │  │   │ │ │ └──── package code
+│       │  │   │ │ └────── temperature grade
+│       │  │   │ └──────── tape-and-reel suffix
+│       │  │   └────────── package / pin-count variant
+│       │  └────────────── sub-family
+│       └───────────────── flash size
+└───────────────────────── family
 ```
 
-pickle strips the suffix after the base part number (e.g. `DSPIC33CK64MP102`) for device lookup.
+pickle normalizes lookup keys to the base part number such as `DSPIC33CK64MP102`.
 
-## Device Family Packs (.atpack)
+## Device Family Packs
 
-Microchip distributes device data as `.atpack` files — ZIP archives containing:
+Microchip publishes device metadata in `.atpack` archives. The files pickle actually cares about are:
 
-- `edc/*.PIC` — EDC XML files with pin/peripheral definitions
-- `include/` — C header files
-- `scripts/` — Linker scripts
+- `edc/*.PIC` XML files for pin, PPS, and fuse data
+- pack index metadata used to discover matching archives
 
-pickle uses only the EDC XML files. The pack index at `https://packs.download.microchip.com/` lists all available packs with download URLs.
+The backend can work from:
 
-### EDC XML Structure
+- previously extracted EDC files
+- cached parsed JSON under `devices/`
+- downloaded/extracted `.atpack` data under `dfp_cache/`
 
-EDC files use the namespace `http://crownking/edc` and describe:
+## EDC Data Model
 
-- **DCR (Device Configuration Registers)** — fuse registers and fields
-- **PinList** — physical pins grouped by function
-- **PPS (Peripheral Pin Select)** — remappable I/O group definitions
+The XML describes several things the app relies on:
 
-Each `<edc:Pin>` element contains pad name, port/bit, RP number, and function list.
+- physical pads and package pinouts
+- remappable input/output definitions
+- configuration-register metadata (`DCR`, fields, values)
+- port, RP, and analog-channel metadata
 
-## PPS (Peripheral Pin Select)
+Those are collapsed into `DeviceData`, which is the canonical backend model handed to the frontend.
 
-Most digital peripherals on dsPIC33CK/CH devices are not hardwired to specific pins. Instead, they use PPS — a crossbar switch configured at runtime.
+## PPS
 
-### How PPS Works
+Peripheral Pin Select is the dsPIC33/PIC24 remapping mechanism for many digital peripherals.
 
-1. **Unlock** the PPS lock bit: `__builtin_write_RPCON(0x0000U)`
-2. **Write input mappings** to `RPINRn` registers — tells the peripheral which RP pin to listen to
-3. **Write output mappings** to `RPORn` registers — tells the pin which peripheral signal to drive
-4. **Lock** the PPS: `__builtin_write_RPCON(0x0800U)`
+Basic sequence:
 
-### Register Naming
+1. unlock PPS with `__builtin_write_RPCON(0x0000U)`
+2. write input selections to `RPINRn`
+3. write output selections to `RPORn`
+4. lock PPS with `__builtin_write_RPCON(0x0800U)`
 
-- Input: `RPINR18bits.U1RXR = 36U` — UART1 RX reads from RP36
-- Output: `RPOR1bits.RP37R = 1U` — RP37 drives peripheral function 1 (U1TX)
+Examples:
 
-Each peripheral has a fixed `ppsval` (the value written to RPORn for outputs, or the register/field for inputs). These values come from the EDC XML.
+- input: `RPINR18bits.U1RXR = 36U`
+- output: `RPOR1bits.RP37R = 1U`
 
-### RP Pin Numbers
+Key points for pickle:
 
-Each remappable pin has an RP number derived from its port position:
-- RA0 = RP0, RA1 = RP1, ..., RB0 = RP32, RB1 = RP33, etc.
-- Not all pins are remappable — power, MCLR, and some analog-only pins have no RP number.
+- input and output mappings come from EDC pack metadata
+- RP numbering is usually derived from port position but should be treated as parsed data, not a guessed formula
+- not every package pin is remappable
 
-## ICSP (In-Circuit Serial Programming)
+## ICSP And JTAG
 
-dsPIC33 devices have up to 3 ICSP debug channel pairs:
+Programming/debug pins are special and should not be treated like normal GPIO.
 
-| Channel | Clock Pin | Data Pin |
+### ICSP
+
+Typical debug channel pairs:
+
+| Channel | Clock | Data |
 |---|---|---|
-| 1 (default) | PGC1 | PGD1 |
-| 2 | PGC2 | PGD2 |
-| 3 | PGC3 | PGD3 |
+| 1 | `PGC1` | `PGD1` |
+| 2 | `PGC2` | `PGD2` |
+| 3 | `PGC3` | `PGD3` |
 
-The active channel is selected by `FICD.ICS` (configuration fuse). pickle detects ICSP pins by regex matching on pad function names and excludes them from TRIS/ANSEL code generation — only a reservation comment is emitted.
+`FICD.ICS` selects the active pair. pickle excludes ICSP/debug functions from generated port configuration and emits reservation comments instead.
 
-**MCLR** (Master Clear / Reset) is always reserved and never configured as GPIO.
+### JTAG
 
-## Configuration Fuses
+When `JTAGEN = ON`, JTAG-related pins (`TDI`, `TDO`, `TMS`, `TCK`) should also be treated as reserved. The frontend applies the reservation dynamically so assignment UI reflects the active fuse choice.
 
-dsPIC33 devices have non-volatile configuration registers set at programming time. In XC16, these are configured with `#pragma config`:
+## Fuses
 
-### FICD — ICD Configuration
-- `ICS` — ICSP channel (1, 2, or 3)
-- `JTAGEN` — JTAG port enable (ON/OFF)
+Device configuration registers are programmed through Microchip XC-family `#pragma config` lines (`xc16-gcc` for PIC24, `xc-dsc-gcc` for dsPIC33).
 
-### FWDT — Watchdog Timer
-- `FWDTEN` — Watchdog enable (ON, OFF, SWON for software-controlled)
-- `WDTPS` — Watchdog prescaler (PS1 through PS32768)
+Common fields surfaced by pickle include:
 
-### FOSCSEL — Oscillator Selection
-- `FNOSC` — Initial oscillator source (FRC, FRCPLL, PRI, PRIPLL, LPRC, etc.)
-- `IESO` — Two-speed startup enable
+| Register | Field | Meaning |
+|---|---|---|
+| `FICD` | `ICS` | debug channel selection |
+| `FICD` | `JTAGEN` | JTAG enable |
+| `FWDT` | `FWDTEN` | watchdog policy |
+| `FWDT` | `WDTPS` | watchdog prescaler |
+| `FOSCSEL` | `FNOSC` | initial oscillator source |
+| `FOSC` | `POSCMD` | primary oscillator mode |
+| `FBORPOR` | `BOREN` / `BORV` | brown-out behavior |
 
-### FOSC — Oscillator Configuration
-- `POSCMD` — Primary oscillator mode (EC, XT, HS, NONE)
-- `FCKSM` — Clock switching and monitor (CSDCMD = both disabled)
-
-### FBORPOR — Brown-out Reset
-- `BOREN` — Brown-out reset enable
-- `BORV` — Brown-out voltage threshold
+The backend does not hardcode values when it can avoid it; it prefers the parsed field/value list from the device pack.
 
 ## Oscillator System
 
-The dsPIC33CK oscillator system can use several clock sources:
+Relevant sources handled by pickle:
 
-```
-              ┌─────────┐
-  FRC (8MHz)──┤         ├──┐
-              │   MUX   │  │    ┌─────┐    ┌─────┐
-  Primary ────┤         ├──┴───>│ PLL │───>│ /2  │──> Fcy
-  (EC/XT/HS)  │         │      └─────┘    └─────┘
-              │         │        │
-  LPRC (32k)──┤         │   Fvco = Fplli * M / N1
-              └─────────┘   Fosc = Fvco / (N2 * N3)
-                             Fcy  = Fosc / 2
-```
+- `frc`
+- `frc_pll`
+- `pri`
+- `pri_pll`
+- `lprc`
 
-### PLL Constraints (dsPIC33CK)
+For PLL-backed modes the code searches across valid divider ranges:
 
-| Parameter | Min | Max |
-|---|---|---|
-| N1 (input divider) | 1 | 8 |
-| M (multiplier) | 16 | 200 |
-| N2 (post divider 1) | 1 | 7 |
-| N3 (post divider 2) | 1 | 7 |
-| Fvco | 400 MHz | 1.6 GHz |
-| FPFD (phase detector) | 8 MHz | — |
+| Parameter | Range |
+|---|---|
+| `N1` | 1–8 |
+| `M` | 16–200 |
+| `N2` | 1–7 |
+| `N3` | 1–7 |
 
-pickle performs a brute-force search over all valid (N1, M, N2, N3) combinations to find the set that produces Fosc closest to the user's target, preferring exact matches.
+With dsPIC33CK constraints:
+
+- `Fvco`: 400 MHz to 1.6 GHz
+- `FPFD`: at least 8 MHz
+
+The backend chooses the closest valid result to the requested `Fosc`.
 
 ## Port Registers
 
-Each I/O port has several control registers:
+The generator currently reasons about:
 
-| Register | Purpose | Bit = 1 |
-|---|---|---|
-| `TRISx` | Data direction | Input |
-| `PORTx` | Read pin state | High |
-| `LATx` | Output latch | High |
-| `ANSELx` | Analog select | Analog mode |
-| `ODCx` | Open-drain control | Open-drain enabled |
+| Register | Meaning |
+|---|---|
+| `TRISx` | direction |
+| `PORTx` | readback |
+| `LATx` | output latch access in generated aliases |
+| `ANSELx` | analog/digital mode |
 
-pickle generates writes to TRIS, LAT, ANSEL, and ODC based on peripheral assignments. Analog pins default to analog mode — ANSEL must be cleared explicitly for digital function.
+Important nuance: many dsPIC pins default to analog mode. A digital assignment therefore requires explicitly clearing the matching `ANSELx` bit.
 
 ## Pinout Overlays
 
-Some package variants are not present in the EDC XML but are documented in datasheets. pickle supports manual or verified overlays stored as JSON in `pinouts/`:
+Datasheets sometimes document package variants or corrections that do not appear cleanly in the EDC pack. pickle supports overlay files under `pinouts/`:
 
 ```json
 {
@@ -162,49 +162,36 @@ Some package variants are not present in the EDC XML but are documented in datas
 }
 ```
 
-These are loaded by `dfp_manager::load_pinout_overlays()` and merged into the device's pinout map at load time.
+These overlays are merged into the device at load time and can be created either manually or from verification results.
 
-## CLC (Configurable Logic Cell)
+## CLC
 
-dsPIC33CK devices include up to 4 CLC modules, each implementing a programmable combinational or sequential logic function in hardware. CLC modules can reduce external component count and improve response time by performing logic operations without CPU intervention.
+Configurable Logic Cell modules expose:
 
-### Architecture
+- four 3-bit data-source selectors (`DS1` to `DS4`)
+- four gates with true/complement source enables
+- gate polarity bits
+- a logic mode
+- an output stage and optional interrupts
 
-Each CLC module has:
+Supported mode values in the UI/generator:
 
-- **4 data source selectors (DS1-DS4)**: each selects one of 8 input sources from a device-specific mapping
-- **4 logic gates**: each gate can accept any combination of the 4 data sources as true, inverted, or disconnected
-- **1 logic function**: combines the 4 gate outputs using a selectable logic mode
-- **1 output**: can be routed to a pin via PPS or used internally by other CLC modules
+| Value | Mode |
+|---|---|
+| `0` | AND-OR |
+| `1` | OR-XOR |
+| `2` | 4-input AND |
+| `3` | S-R latch |
+| `4` | 1-input D flip-flop with S/R |
+| `5` | 2-input D flip-flop with R |
+| `6` | J-K flip-flop with R |
+| `7` | transparent latch with S/R |
 
-### Logic Modes
+### Source mapping priority
 
-| Mode | Value | Function | Description |
-|---|---|---|---|
-| AND-OR | 0 | `(G1 AND G2) OR (G3 AND G4)` | Two AND gates feeding an OR |
-| OR-XOR | 1 | `(G1 OR G2) XOR (G3 OR G4)` | Two OR gates feeding an XOR |
-| AND | 2 | `G1 AND G2 AND G3 AND G4` | 4-input AND |
-| S-R Latch | 3 | Set/Reset | G1=Set, G2=Reset, G3/G4=unused |
-| D Flip-Flop | 4 | D-type | G1=D, G2=unused, G3=CLK, G4=Reset |
-| D Flip-Flop (R) | 5 | D-type with enable | G1=D, G2=EN, G3=CLK, G4=Reset |
-| J-K Flip-Flop | 6 | J-K type | G1=J, G2=K, G3=CLK, G4=Reset |
-| Transparent Latch | 7 | Level-sensitive | G1=D, G2=unused, G3=LE, G4=Reset |
+CLC source labels are resolved in this order:
 
-### CLC Input Source Mapping
-
-Each data source selector (DS1-DS4) chooses from 8 input sources (values 0-7). The actual signal connected to each value is **device-specific** and defined in the CLCxSEL register description in the datasheet.
-
-| DS Index | Input Range | Typical Sources |
-|---|---|---|
-| DS1 | CLCIN0-7 | CLCINx pins, CLC1-4 outputs |
-| DS2 | CLCIN8-15 | Comparator, PWM, timer outputs |
-| DS3 | CLCIN16-23 | SCCP, UART, SPI outputs |
-| DS4 | CLCIN24-31 | Additional peripheral outputs |
-
-### Source Mapping Resolution
-
-pickle resolves CLC input source labels using this priority:
-
-1. **Device-specific mapping** from `clc_sources/<part_number>.json` (highest priority)
-2. **LLM-extracted mapping** from datasheet verification (saved to `clc_sources/` for reuse)
-3. **Generic fallback**: `CLCINn` index labels (lowest priority, used when no device-specific data is available)
+1. `clc_sources/<PART>.json`
+2. LLM-extracted data saved from verification
+3. hardcoded fallback mappings for known modules
+4. generic `CLCINn` labels when nothing better exists

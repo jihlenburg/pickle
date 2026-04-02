@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>pickle — Pin Configurator</title>
+    <script src="static/app/config.js"></script>
+    <script>
+        window.PickleConfig.applyDocumentTheme(document, window.PickleConfig.defaults.themeMode);
+    </script>
     <link rel="stylesheet" href="static/style.css">
 </head>
 <body>
@@ -32,7 +36,7 @@
         </div>
 
         <div class="header-meta">
-            <span id="index-badge" class="index-badge" style="display:none" onclick="refreshIndex()" title="Click to refresh"></span>
+            <button id="index-badge" type="button" class="index-badge" style="display:none" title="Click to refresh"></button>
             <button id="theme-toggle">System</button>
         </div>
     </header>
@@ -100,15 +104,12 @@
                 <div class="code-shell">
                     <div class="toolbar">
                         <button id="gen-btn">Generate C Code</button>
-                        <button id="check-btn" style="display:none">Check with XC16</button>
+                        <button id="check-btn" style="display:none">Compiler Check</button>
                         <button id="copy-btn">Copy</button>
                         <button id="export-btn">Export Files</button>
                     </div>
                     <div id="compile-result" class="compile-result"></div>
-                    <div class="code-tabs" id="code-tabs" style="display:none">
-                        <button class="code-tab active" data-file="pin_config.c">pin_config.c</button>
-                        <button class="code-tab" data-file="pin_config.h">pin_config.h</button>
-                    </div>
+                    <div class="code-tabs" id="code-tabs" style="display:none"></div>
                     <pre id="code-output">Load a device and assign peripherals to generate code.</pre>
                 </div>
             </div>
@@ -194,6 +195,19 @@
     </footer>
 
     <script src="static/pin_descriptions.js"></script>
-    <script src="static/app.js"></script>
+    <script src="static/app/model.js"></script>
+    <script src="static/app/00-core.js"></script>
+    <script src="static/app/01-reservations.js"></script>
+    <script src="static/app/02-peripheral-view.js"></script>
+    <script src="static/app/03-pin-view.js"></script>
+    <script src="static/app/04-interactions.js"></script>
+    <script src="static/app/05-codegen.js"></script>
+    <script src="static/app/05-device-config.js"></script>
+    <script src="static/app/05-clc-designer.js"></script>
+    <script src="static/app/05-config-files.js"></script>
+    <script src="static/app/05-compile-check.js"></script>
+    <script src="static/app/06-shell.js"></script>
+    <script src="static/app/07-verification.js"></script>
+    <script src="static/app/08-bootstrap.js"></script>
 </body>
 </html>

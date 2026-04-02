@@ -1,9 +1,11 @@
 //! End-to-end integration test: load device fixture -> assign pins -> generate code -> verify output.
 
 use pickle_lib::codegen::fuses::generate_dynamic_fuse_pragmas;
-use pickle_lib::codegen::generate::{generate_c_files, PinAssignment, PinConfig};
+use pickle_lib::codegen::generate::{
+    generate_c_files, generated_file_names, PinAssignment, PinConfig, DEFAULT_OUTPUT_BASENAME,
+};
 use pickle_lib::codegen::oscillator::OscConfig;
-use pickle_lib::parser::edc_parser::{DeviceData, DcrRegister, DcrField, DcrFieldValue};
+use pickle_lib::parser::edc_parser::{DcrField, DcrFieldValue, DcrRegister, DeviceData};
 use std::collections::HashMap;
 
 fn load_fixture() -> DeviceData {
@@ -54,6 +56,7 @@ fn test_resolve_pins_all_packages() {
 #[test]
 fn test_generate_code_with_uart_assignment() {
     let device = load_fixture();
+    let filenames = generated_file_names(DEFAULT_OUTPUT_BASENAME);
     let pins = device.resolve_pins(None);
 
     // Find an RP pin to assign UART
@@ -84,11 +87,17 @@ fn test_generate_code_with_uart_assignment() {
     let sig_names: HashMap<u32, String> = HashMap::new();
     let files = generate_c_files(&device, &config, None, Some(&sig_names), None, None, None);
 
-    assert!(files.contains_key("pin_config.c"), "Should produce .c file");
-    assert!(files.contains_key("pin_config.h"), "Should produce .h file");
+    assert!(
+        files.contains_key(&filenames.source),
+        "Should produce .c file"
+    );
+    assert!(
+        files.contains_key(&filenames.header),
+        "Should produce .h file"
+    );
 
-    let c_code = &files["pin_config.c"];
-    let h_code = &files["pin_config.h"];
+    let c_code = &files[&filenames.source];
+    let h_code = &files[&filenames.header];
 
     // PPS unlock/lock sequence
     assert!(
@@ -118,6 +127,7 @@ fn test_generate_code_with_uart_assignment() {
 #[test]
 fn test_generate_code_with_oscillator_and_fuses() {
     let device = load_fixture();
+    let filenames = generated_file_names(DEFAULT_OUTPUT_BASENAME);
 
     let config = PinConfig {
         part_number: device.part_number.clone(),
@@ -135,40 +145,75 @@ fn test_generate_code_with_oscillator_and_fuses() {
     // Construct minimal fuse definitions for the test (fixture JSON lacks fuse_defs)
     let test_fuse_defs = vec![
         DcrRegister {
-            cname: "FICD".into(), desc: "ICD Configuration".into(),
-            addr: 0xAF28, default_value: 0xFF,
+            cname: "FICD".into(),
+            desc: "ICD Configuration".into(),
+            addr: 0xAF28,
+            default_value: 0xFF,
             fields: vec![
                 DcrField {
-                    cname: "ICS".into(), desc: "ICD Channel".into(),
-                    mask: 0x3, width: 2, hidden: false,
+                    cname: "ICS".into(),
+                    desc: "ICD Channel".into(),
+                    mask: 0x3,
+                    width: 2,
+                    hidden: false,
                     values: vec![
-                        DcrFieldValue { cname: "PGD1".into(), desc: "PGC1/PGD1".into(), value: 3 },
-                        DcrFieldValue { cname: "PGD2".into(), desc: "PGC2/PGD2".into(), value: 2 },
+                        DcrFieldValue {
+                            cname: "PGD1".into(),
+                            desc: "PGC1/PGD1".into(),
+                            value: 3,
+                        },
+                        DcrFieldValue {
+                            cname: "PGD2".into(),
+                            desc: "PGC2/PGD2".into(),
+                            value: 2,
+                        },
                     ],
                 },
                 DcrField {
-                    cname: "JTAGEN".into(), desc: "JTAG Enable".into(),
-                    mask: 0x1, width: 1, hidden: false,
+                    cname: "JTAGEN".into(),
+                    desc: "JTAG Enable".into(),
+                    mask: 0x1,
+                    width: 1,
+                    hidden: false,
                     values: vec![
-                        DcrFieldValue { cname: "OFF".into(), desc: "Disabled".into(), value: 0 },
-                        DcrFieldValue { cname: "ON".into(), desc: "Enabled".into(), value: 1 },
+                        DcrFieldValue {
+                            cname: "OFF".into(),
+                            desc: "Disabled".into(),
+                            value: 0,
+                        },
+                        DcrFieldValue {
+                            cname: "ON".into(),
+                            desc: "Enabled".into(),
+                            value: 1,
+                        },
                     ],
                 },
             ],
         },
         DcrRegister {
-            cname: "FWDT".into(), desc: "Watchdog Timer".into(),
-            addr: 0xAF20, default_value: 0xFF,
-            fields: vec![
-                DcrField {
-                    cname: "FWDTEN".into(), desc: "WDT Enable".into(),
-                    mask: 0x1, width: 1, hidden: false,
-                    values: vec![
-                        DcrFieldValue { cname: "OFF".into(), desc: "Disabled".into(), value: 0 },
-                        DcrFieldValue { cname: "ON".into(), desc: "Enabled".into(), value: 1 },
-                    ],
-                },
-            ],
+            cname: "FWDT".into(),
+            desc: "Watchdog Timer".into(),
+            addr: 0xAF20,
+            default_value: 0xFF,
+            fields: vec![DcrField {
+                cname: "FWDTEN".into(),
+                desc: "WDT Enable".into(),
+                mask: 0x1,
+                width: 1,
+                hidden: false,
+                values: vec![
+                    DcrFieldValue {
+                        cname: "OFF".into(),
+                        desc: "Disabled".into(),
+                        value: 0,
+                    },
+                    DcrFieldValue {
+                        cname: "ON".into(),
+                        desc: "Enabled".into(),
+                        value: 1,
+                    },
+                ],
+            }],
         },
     ];
     let fuse_pragmas = generate_dynamic_fuse_pragmas(&test_fuse_defs, &HashMap::new());
@@ -184,7 +229,7 @@ fn test_generate_code_with_oscillator_and_fuses() {
         None,
     );
 
-    let c_code = &files["pin_config.c"];
+    let c_code = &files[&filenames.source];
 
     // Oscillator pragmas
     assert!(
@@ -230,6 +275,7 @@ fn test_device_json_roundtrip_preserves_data() {
 #[test]
 fn test_signal_name_macros() {
     let device = load_fixture();
+    let filenames = generated_file_names(DEFAULT_OUTPUT_BASENAME);
     let pins = device.resolve_pins(None);
 
     let rp_pin = pins
@@ -254,7 +300,7 @@ fn test_signal_name_macros() {
     sig_names.insert(rp_pin.position, "DEBUG_TX".to_string());
 
     let files = generate_c_files(&device, &config, None, Some(&sig_names), None, None, None);
-    let h_code = &files["pin_config.h"];
+    let h_code = &files[&filenames.header];
 
     assert!(
         h_code.contains("DEBUG_TX_PORT"),
@@ -267,5 +313,68 @@ fn test_signal_name_macros() {
     assert!(
         h_code.contains("DEBUG_TX_TRIS"),
         "Should have signal TRIS macro"
+    );
+}
+
+#[test]
+fn test_signal_name_macros_sanitize_non_identifier_characters() {
+    let device = load_fixture();
+    let filenames = generated_file_names(DEFAULT_OUTPUT_BASENAME);
+    let pins = device.resolve_pins(None);
+
+    let rp_pin = pins
+        .iter()
+        .find(|p| p.rp_number.is_some() && p.port.is_some())
+        .expect("Need an RP pin with port info");
+
+    let config = PinConfig {
+        part_number: device.part_number.clone(),
+        assignments: vec![PinAssignment {
+            pin_position: rp_pin.position,
+            rp_number: rp_pin.rp_number,
+            peripheral: "U1TX".to_string(),
+            direction: "out".to_string(),
+            ppsval: Some(1),
+            fixed: false,
+        }],
+        digital_pins: vec![rp_pin.position],
+    };
+
+    let mut sig_names: HashMap<u32, String> = HashMap::new();
+    sig_names.insert(rp_pin.position, "Debug TX/UART-1".to_string());
+
+    let files = generate_c_files(&device, &config, None, Some(&sig_names), None, None, None);
+    let h_code = &files[&filenames.header];
+
+    assert!(h_code.contains("DEBUG_TX_UART_1_PORT"));
+    assert!(h_code.contains("DEBUG_TX_UART_1_LAT"));
+    assert!(h_code.contains("DEBUG_TX_UART_1_TRIS"));
+}
+
+#[test]
+fn test_explicit_digital_pin_override_clears_ansel_for_fixture_pin() {
+    let device = load_fixture();
+    let filenames = generated_file_names(DEFAULT_OUTPUT_BASENAME);
+    let analog_pin = device
+        .resolve_pins(None)
+        .into_iter()
+        .find(|pin| pin.port.is_some() && pin.port_bit.is_some() && !pin.analog_channels.is_empty())
+        .expect("fixture should contain an analog-capable GPIO pin");
+
+    let port = analog_pin.port.expect("analog pin should have a port");
+    let bit = analog_pin.port_bit.expect("analog pin should have a bit");
+    let config = PinConfig {
+        part_number: device.part_number.clone(),
+        assignments: vec![],
+        digital_pins: vec![analog_pin.position],
+    };
+
+    let files = generate_c_files(&device, &config, None, None, None, None, None);
+    let c_code = &files[&filenames.source];
+    let ansel_write = format!("ANSEL{port}bits.ANSEL{port}{bit} = 0U;");
+
+    assert!(
+        c_code.contains(&ansel_write),
+        "explicit digital selection should clear the ANSEL bit for {port}{bit}"
     );
 }

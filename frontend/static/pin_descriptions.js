@@ -1,8 +1,9 @@
-// Pin function descriptions and grouping — pattern-based, device-family agnostic.
-// Used for tooltips and dropdown organization.
-
-// Pattern-based description generator. Works for any Microchip PIC/dsPIC device
-// without needing per-pin entries.
+/**
+ * Pin function descriptions and grouping helpers.
+ *
+ * Uses pattern-based matching instead of per-device tables so tooltips and
+ * dropdown grouping stay broadly correct across dsPIC33 and PIC24 families.
+ */
 const _DESC_PATTERNS = [
     // GPIO
     [/^R([A-Z])(\d+)$/, (m) => `Port ${m[1]} bit ${m[2]} (in/out)`],

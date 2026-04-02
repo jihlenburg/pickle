@@ -4,6 +4,7 @@
 //! frequency, and generates C initialization code with #pragma config lines.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 /// dsPIC33CK FRC nominal frequency
 pub const FRC_FREQ_HZ: u64 = 8_000_000;
@@ -125,6 +126,33 @@ fn xtcfg_for_crystal(crystal_hz: u64) -> &'static str {
     } else {
         "G3"
     }
+}
+
+/// Return the fuse fields owned by the oscillator panel for the selected source.
+///
+/// These fields are emitted directly by `generate_osc_code()`, so the generic
+/// fuse generator must not emit them again from the device DCR definitions.
+pub fn managed_config_fields(osc: &OscConfig) -> BTreeSet<&'static str> {
+    let mut fields = BTreeSet::new();
+    let source = osc.source.trim().to_ascii_lowercase();
+    let poscmd = osc.poscmd.trim().to_ascii_uppercase();
+
+    match source.as_str() {
+        "frc" | "lprc" | "pri" | "frc_pll" | "pri_pll" => {
+            fields.extend(["FNOSC", "IESO", "POSCMD", "FCKSM"]);
+        }
+        _ => return fields,
+    }
+
+    if matches!(source.as_str(), "frc_pll" | "pri_pll") {
+        fields.insert("PLLKEN");
+    }
+
+    if matches!(source.as_str(), "pri" | "pri_pll") && matches!(poscmd.as_str(), "XT" | "HS") {
+        fields.insert("XTCFG");
+    }
+
+    fields
 }
 
 /// Generate oscillator configuration code.
@@ -425,5 +453,28 @@ mod tests {
         assert!(init.contains("CLKDIVbits.PLLPRE"));
         assert!(init.contains("PLLFBDbits.PLLFBDIV"));
         assert!(init.contains("OSCCONbits.LOCK"));
+    }
+
+    #[test]
+    fn test_managed_config_fields_tracks_pll_and_primary_crystal_options() {
+        let frc_pll = managed_config_fields(&OscConfig {
+            source: "frc_pll".to_string(),
+            target_fosc_hz: 200_000_000,
+            crystal_hz: 0,
+            poscmd: "EC".to_string(),
+        });
+        assert!(frc_pll.contains("FNOSC"));
+        assert!(frc_pll.contains("PLLKEN"));
+        assert!(!frc_pll.contains("XTCFG"));
+
+        let pri_xt = managed_config_fields(&OscConfig {
+            source: "pri".to_string(),
+            target_fosc_hz: 8_000_000,
+            crystal_hz: 8_000_000,
+            poscmd: "XT".to_string(),
+        });
+        assert!(pri_xt.contains("FNOSC"));
+        assert!(pri_xt.contains("XTCFG"));
+        assert!(!pri_xt.contains("PLLKEN"));
     }
 }

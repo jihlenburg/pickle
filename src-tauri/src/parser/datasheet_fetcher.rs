@@ -249,7 +249,10 @@ fn looks_like_datasheet_preview(preview: &str, expected_title: &str, ds_id: &str
     // Check metadata title match
     let re_title = Regex::new(r"(?mi)^Title:\s*(.+)$").unwrap();
     if let Some(cap) = re_title.captures(preview) {
-        if cap[1].to_lowercase().contains(&expected_title.to_lowercase()) {
+        if cap[1]
+            .to_lowercase()
+            .contains(&expected_title.to_lowercase())
+        {
             return true;
         }
     }
@@ -285,7 +288,11 @@ pub fn resolve(part_number: &str) -> Result<DatasheetRef, String> {
     // 4. Try candidate revisions — high-probability first (H→A), then I→Z.
     //    Use a short timeout per probe to avoid hanging on slow proxy responses.
     let revisions = candidate_revisions(&ds_number, None);
-    log::info!("resolve: trying {} candidate revisions for {}", revisions.len(), part_upper);
+    log::info!(
+        "resolve: trying {} candidate revisions for {}",
+        revisions.len(),
+        part_upper
+    );
 
     for (i, rev) in revisions.iter().enumerate() {
         let pdf_url = build_candidate_pdf_url(&part_upper, &title, rev);
