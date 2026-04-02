@@ -41,6 +41,38 @@ fn default_direction() -> String {
     "in".to_string()
 }
 
+/// Configuration for a single CLC module (CLC1-4).
+/// Field values map directly to register bits as documented in DS70005298A.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClcModuleConfig {
+    /// Data Selection MUX values (DS1-DS4), 3 bits each
+    pub ds: [u8; 4],
+    /// Gate source enable bits: gates[gate_idx][bit_idx]
+    /// Bit order per gate: D1T, D1N, D2T, D2N, D3T, D3N, D4T, D4N
+    pub gates: [[bool; 8]; 4],
+    /// Gate polarity inversion (G1POL-G4POL)
+    pub gpol: [bool; 4],
+    /// Logic function mode (MODE<2:0>, 0-7)
+    pub mode: u8,
+    /// Output polarity inversion (LCPOL)
+    pub lcpol: bool,
+    /// Output enable to pin (LCOE)
+    pub lcoe: bool,
+    /// Module enable (LCEN)
+    pub lcen: bool,
+    /// Interrupt on positive edge (INTP)
+    pub intp: bool,
+    /// Interrupt on negative edge (INTN)
+    pub intn: bool,
+}
+
+/// CLC mode names for generated comments
+const CLC_MODE_NAMES: [&str; 8] = [
+    "AND-OR", "OR-XOR", "4-input AND", "S-R Latch",
+    "1-input D flip-flop with S/R", "2-input D flip-flop with R",
+    "J-K flip-flop with R", "Transparent latch with S/R",
+];
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PinConfig {
     pub part_number: String,
@@ -96,6 +128,7 @@ pub fn generate_c_files(
     signal_names: Option<&HashMap<u32, String>>,
     osc_config: Option<&OscConfig>,
     fuse_pragmas: Option<&str>,
+    clc_modules: Option<&HashMap<u32, ClcModuleConfig>>,
 ) -> HashMap<String, String> {
     let pinout = device.get_pinout(package);
     let resolved = device.resolve_pins(package);
@@ -143,6 +176,7 @@ pub fn generate_c_files(
     let has_opamp = fixed_assignments
         .iter()
         .any(|a| opamp_re.is_match(&a.peripheral));
+    let has_clc = clc_modules.map_or(false, |m| !m.is_empty());
 
     let (osc_pragmas, osc_init) = if let Some(osc) = osc_config {
         generate_osc_code(osc)
@@ -219,6 +253,9 @@ pub fn generate_c_files(
     h_lines.push("void configure_ports(void);".into());
     if has_opamp {
         h_lines.push("void configure_analog(void);".into());
+    }
+    if has_clc {
+        h_lines.push("void configure_clc(void);".into());
     }
     h_lines.push("void system_init(void);".into());
     h_lines.push(String::new());
@@ -588,6 +625,107 @@ pub fn generate_c_files(
         c_lines.push(String::new());
     }
 
+    // configure_clc() — CLC module initialization
+    if has_clc {
+        if let Some(clc_mods) = clc_modules {
+            c_lines.push(
+                "/* ---------------------------------------------------------------------------".into(),
+            );
+            c_lines.push(" * configure_clc".into());
+            c_lines.push(" *".into());
+            c_lines.push(" * Configures the Configurable Logic Cell modules. Each module is disabled".into());
+            c_lines.push(" * before writing its configuration registers, then enabled last.".into());
+            c_lines.push(
+                " * -------------------------------------------------------------------------*/".into(),
+            );
+            c_lines.push("void configure_clc(void)".into());
+            c_lines.push("{".into());
+
+            let mut sorted_keys: Vec<_> = clc_mods.keys().collect();
+            sorted_keys.sort();
+
+            for (i, idx) in sorted_keys.iter().enumerate() {
+                let mod_cfg = &clc_mods[idx];
+                let n = idx;
+
+                // Compute register values
+                let mut conl: u16 = (mod_cfg.mode & 0x7) as u16;
+                if mod_cfg.lcpol { conl |= 1 << 5; }
+                if mod_cfg.lcoe  { conl |= 1 << 7; }
+                if mod_cfg.intn  { conl |= 1 << 10; }
+                if mod_cfg.intp  { conl |= 1 << 11; }
+                // LCEN set separately at the end
+
+                let mut conh: u16 = 0;
+                for g in 0..4 {
+                    if mod_cfg.gpol[g] { conh |= 1 << g; }
+                }
+
+                let sel: u16 = (mod_cfg.ds[0] as u16 & 0x7)
+                    | ((mod_cfg.ds[1] as u16 & 0x7) << 4)
+                    | ((mod_cfg.ds[2] as u16 & 0x7) << 8)
+                    | ((mod_cfg.ds[3] as u16 & 0x7) << 12);
+
+                let mut glsl: u16 = 0;
+                for b in 0..8 {
+                    if mod_cfg.gates[0][b] { glsl |= 1 << b; }
+                    if mod_cfg.gates[1][b] { glsl |= 1 << (b + 8); }
+                }
+
+                let mut glsh: u16 = 0;
+                for b in 0..8 {
+                    if mod_cfg.gates[2][b] { glsh |= 1 << b; }
+                    if mod_cfg.gates[3][b] { glsh |= 1 << (b + 8); }
+                }
+
+                let conl_enable = conl | (1 << 15); // LCEN = 1
+
+                let mode_name = CLC_MODE_NAMES.get(mod_cfg.mode as usize).unwrap_or(&"Unknown");
+
+                let mut clc_lines = Vec::new();
+                clc_lines.push(format!("    /* CLC{} — {} */", n, mode_name));
+                clc_lines.push(format!(
+                    "    CLC{}CONL = 0x0000U; /* Disable module before configuration */", n
+                ));
+                clc_lines.push(format!(
+                    "    CLC{}SEL  = 0x{:04X}U; /* DS1={}, DS2={}, DS3={}, DS4={} */",
+                    n, sel, mod_cfg.ds[0], mod_cfg.ds[1], mod_cfg.ds[2], mod_cfg.ds[3]
+                ));
+                clc_lines.push(format!(
+                    "    CLC{}GLSL = 0x{:04X}U; /* Gate 1-2 source enables */", n, glsl
+                ));
+                clc_lines.push(format!(
+                    "    CLC{}GLSH = 0x{:04X}U; /* Gate 3-4 source enables */", n, glsh
+                ));
+                clc_lines.push(format!(
+                    "    CLC{}CONH = 0x{:04X}U; /* Gate polarity */", n, conh
+                ));
+                if mod_cfg.lcen {
+                    clc_lines.push(format!(
+                        "    CLC{}CONL = 0x{:04X}U; /* Enable: MODE={}, LCOE={}, LCPOL={} */",
+                        n, conl_enable, mod_cfg.mode,
+                        if mod_cfg.lcoe { "on" } else { "off" },
+                        if mod_cfg.lcpol { "inv" } else { "norm" }
+                    ));
+                } else {
+                    clc_lines.push(format!(
+                        "    CLC{}CONL = 0x{:04X}U; /* Module disabled */", n, conl
+                    ));
+                }
+
+                for line in align_comments(&clc_lines) {
+                    c_lines.push(line);
+                }
+                if i + 1 < sorted_keys.len() {
+                    c_lines.push(String::new());
+                }
+            }
+
+            c_lines.push("}".into());
+            c_lines.push(String::new());
+        }
+    }
+
     // system_init()
     c_lines.push(
         "/* ---------------------------------------------------------------------------".into(),
@@ -614,6 +752,9 @@ pub fn generate_c_files(
     c_lines.push("    configure_ports();".into());
     if has_opamp {
         c_lines.push("    configure_analog();".into());
+    }
+    if has_clc {
+        c_lines.push("    configure_clc();".into());
     }
     c_lines.push("}".into());
     c_lines.push(String::new());
@@ -643,6 +784,7 @@ pub fn generate_c_code(
         signal_names,
         osc_config,
         fuse_pragmas,
+        None,
     );
     let h_content = &files["pin_config.h"];
     let c_content = &files["pin_config.c"];
@@ -862,7 +1004,7 @@ mod tests {
             }],
             digital_pins: vec![],
         };
-        let files = generate_c_files(&device, &config, None, None, None, None);
+        let files = generate_c_files(&device, &config, None, None, None, None, None);
         assert!(files.contains_key("pin_config.h"));
         assert!(files.contains_key("pin_config.c"));
         assert!(files["pin_config.h"].contains("#ifndef PIN_CONFIG_H"));
@@ -894,7 +1036,7 @@ mod tests {
             ],
             digital_pins: vec![],
         };
-        let files = generate_c_files(&device, &config, None, None, None, None);
+        let files = generate_c_files(&device, &config, None, None, None, None, None);
         let c = &files["pin_config.c"];
         assert!(c.contains("reserved for PGD1"));
         assert!(c.contains("reserved for PGC1"));
@@ -922,7 +1064,7 @@ mod tests {
             }],
             digital_pins: vec![],
         };
-        let files = generate_c_files(&device, &config, None, None, Some(&osc), None);
+        let files = generate_c_files(&device, &config, None, None, Some(&osc), None, None);
         let c = &files["pin_config.c"];
 
         // system_init order: oscillator -> pps -> ports
@@ -951,7 +1093,7 @@ mod tests {
             }],
             digital_pins: vec![],
         };
-        let files = generate_c_files(&device, &config, None, None, None, None);
+        let files = generate_c_files(&device, &config, None, None, None, None, None);
         let c = &files["pin_config.c"];
 
         assert!(c.contains("0x0000U"));

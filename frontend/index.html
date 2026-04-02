@@ -92,6 +92,7 @@
             <div class="right-tabs" id="right-tabs">
                 <button class="right-tab active" data-tab="code">Code</button>
                 <button class="right-tab" data-tab="fuses">Fuses</button>
+                <button class="right-tab" data-tab="clc">CLC</button>
                 <button class="right-tab" data-tab="verify">Verification</button>
             </div>
 
@@ -148,6 +149,34 @@
                 </div>
 
                 <div id="fuses-empty" class="verify-empty">Load a device to configure oscillator and fuse settings.</div>
+            </div>
+
+            <div class="right-tab-content clc-tab-content" data-tab="clc">
+                <div id="clc-designer" class="clc-designer" style="display:none">
+                    <div class="clc-module-tabs" id="clc-module-tabs"></div>
+
+                    <div class="clc-section">
+                        <h2>Input Sources</h2>
+                        <div class="clc-inputs" id="clc-inputs"></div>
+                    </div>
+
+                    <div class="clc-section">
+                        <h2>Data Gate Matrix</h2>
+                        <div class="clc-gate-matrix" id="clc-gate-matrix"></div>
+                    </div>
+
+                    <div class="clc-section">
+                        <h2>Logic Function</h2>
+                        <div class="clc-mode-cards" id="clc-mode-cards"></div>
+                        <div class="clc-output-controls" id="clc-output-controls"></div>
+                    </div>
+
+                    <div class="clc-section">
+                        <h2>Registers</h2>
+                        <div class="clc-registers" id="clc-registers"></div>
+                    </div>
+                </div>
+                <div id="clc-empty" class="verify-empty">Load a device to configure CLC modules.</div>
             </div>
 
             <div class="right-tab-content" data-tab="verify">

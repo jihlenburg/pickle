@@ -13,7 +13,7 @@ use tauri::{AppHandle, Emitter};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::codegen::fuses::generate_dynamic_fuse_pragmas;
-use crate::codegen::generate::{generate_c_files, PinAssignment, PinConfig};
+use crate::codegen::generate::{generate_c_files, ClcModuleConfig, PinAssignment, PinConfig};
 use crate::codegen::oscillator::OscConfig;
 use crate::parser::dfp_manager;
 use crate::parser::pack_index;
@@ -157,6 +157,7 @@ pub struct CodegenRequest {
     pub digital_pins: Vec<u32>,
     pub oscillator: Option<OscRequest>,
     pub fuses: Option<FuseRequest>,
+    pub clc: Option<HashMap<String, ClcModuleConfig>>,
 }
 
 #[derive(Deserialize)]
@@ -529,6 +530,12 @@ pub fn generate_code(request: CodegenRequest) -> Result<Value, String> {
         .fuses
         .map(|f| generate_dynamic_fuse_pragmas(&device.fuse_defs, &f.selections));
 
+    let clc_modules: Option<HashMap<u32, ClcModuleConfig>> = request.clc.map(|map| {
+        map.into_iter()
+            .filter_map(|(k, v)| k.parse::<u32>().ok().map(|k| (k, v)))
+            .collect()
+    });
+
     let files = generate_c_files(
         &device,
         &config,
@@ -536,6 +543,7 @@ pub fn generate_code(request: CodegenRequest) -> Result<Value, String> {
         Some(&sig_names),
         osc.as_ref(),
         fuse_pragmas.as_deref(),
+        clc_modules.as_ref(),
     );
 
     Ok(serde_json::json!({ "files": files }))

@@ -82,7 +82,7 @@ fn test_generate_code_with_uart_assignment() {
     };
 
     let sig_names: HashMap<u32, String> = HashMap::new();
-    let files = generate_c_files(&device, &config, None, Some(&sig_names), None, None);
+    let files = generate_c_files(&device, &config, None, Some(&sig_names), None, None, None);
 
     assert!(files.contains_key("pin_config.c"), "Should produce .c file");
     assert!(files.contains_key("pin_config.h"), "Should produce .h file");
@@ -181,6 +181,7 @@ fn test_generate_code_with_oscillator_and_fuses() {
         Some(&sig_names),
         Some(&osc),
         Some(fuse_pragmas.as_str()),
+        None,
     );
 
     let c_code = &files["pin_config.c"];
@@ -252,7 +253,7 @@ fn test_signal_name_macros() {
     let mut sig_names: HashMap<u32, String> = HashMap::new();
     sig_names.insert(rp_pin.position, "DEBUG_TX".to_string());
 
-    let files = generate_c_files(&device, &config, None, Some(&sig_names), None, None);
+    let files = generate_c_files(&device, &config, None, Some(&sig_names), None, None, None);
     let h_code = &files["pin_config.h"];
 
     assert!(

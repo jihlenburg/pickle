@@ -1076,6 +1076,261 @@ header h1 {
     line-height: 1.6;
 }
 
+/* --- CLC Designer --- */
+.clc-tab-content {
+    gap: 0;
+    padding-bottom: 12px;
+}
+
+.clc-designer {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.clc-module-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 4px;
+}
+
+.clc-module-tab {
+    background: var(--bg-card);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 6px 6px 0 0;
+    padding: 5px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    position: relative;
+}
+
+.clc-module-tab:hover { color: var(--text); border-color: var(--text-dim); }
+
+.clc-module-tab.active {
+    color: var(--sys);
+    border-color: var(--sys);
+    border-bottom-color: var(--bg);
+    background: var(--bg);
+}
+
+.clc-module-tab .clc-tab-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--sys);
+    margin-left: 5px;
+    vertical-align: middle;
+}
+
+.clc-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
+}
+
+.clc-section h2 {
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--sys);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+/* Input source dropdowns */
+.clc-inputs {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 6px 10px;
+    align-items: center;
+}
+
+.clc-inputs label {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-weight: 500;
+}
+
+.clc-inputs select {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 4px 8px;
+    border-radius: 5px;
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+}
+
+.clc-inputs select:hover { border-color: var(--text-dim); }
+.clc-inputs select:focus { outline: none; border-color: var(--sys); }
+
+/* Gate matrix */
+.clc-gate-matrix {
+    overflow-x: auto;
+}
+
+.clc-gate-matrix table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+
+.clc-gate-matrix th {
+    padding: 4px 6px;
+    text-align: center;
+    font-weight: 600;
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+.clc-gate-matrix th.clc-gate-hdr {
+    color: var(--sys);
+    text-align: left;
+    padding-left: 0;
+}
+
+.clc-gate-matrix td {
+    padding: 4px 6px;
+    text-align: center;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+.clc-gate-matrix td.clc-gate-label {
+    text-align: left;
+    font-weight: 600;
+    color: var(--text);
+    padding-left: 0;
+    white-space: nowrap;
+}
+
+.clc-gate-matrix input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+    accent-color: var(--sys);
+}
+
+.clc-gate-matrix .clc-pol-toggle {
+    background: var(--bg);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.12s;
+}
+
+.clc-gate-matrix .clc-pol-toggle.active {
+    background: color-mix(in srgb, var(--sys) 20%, transparent);
+    color: var(--sys);
+    border-color: var(--sys);
+}
+
+/* Logic mode cards */
+.clc-mode-cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.clc-mode-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 6px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.12s;
+}
+
+.clc-mode-card:hover {
+    border-color: var(--text-dim);
+}
+
+.clc-mode-card.selected {
+    background: var(--selected);
+    border-color: var(--selected-border);
+}
+
+.clc-mode-card .clc-mode-name {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 2px;
+}
+
+.clc-mode-card .clc-mode-code {
+    font-size: 9px;
+    color: var(--text-dim);
+    font-family: monospace;
+}
+
+/* Output controls */
+.clc-output-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+}
+
+.clc-output-controls label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    color: var(--text-dim);
+    cursor: pointer;
+}
+
+.clc-output-controls input[type="checkbox"] {
+    accent-color: var(--sys);
+    cursor: pointer;
+}
+
+/* Register preview */
+.clc-registers {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 4px 16px;
+}
+
+.clc-reg-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    padding: 3px 0;
+}
+
+.clc-reg-name {
+    color: var(--text-dim);
+    font-weight: 500;
+}
+
+.clc-reg-value {
+    font-family: monospace;
+    color: var(--sys);
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.clc-reg-value:hover {
+    text-decoration: underline;
+}
+
 /* Progress spinner */
 .verify-progress {
     display: flex;
@@ -1477,7 +1732,8 @@ header h1 {
 .signal-input,
 .osc-row select,
 .osc-row input,
-.fuse-row select {
+.fuse-row select,
+.clc-inputs select {
     background: color-mix(in srgb, var(--surface-strong) 82%, transparent);
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -1735,7 +1991,8 @@ header h1 {
 .osc-config,
 .fuse-config,
 .verify-panel,
-.code-shell {
+.code-shell,
+.clc-section {
     background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
     border: 1px solid var(--border);
     border-radius: 10px;
