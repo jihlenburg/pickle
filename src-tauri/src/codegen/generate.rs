@@ -986,6 +986,8 @@ mod tests {
             port_registers,
             ansel_bits,
             fuse_defs: vec![],
+            clc_module_id: None,
+            clc_input_sources: None,
         }
     }
 

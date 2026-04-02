@@ -152,3 +152,34 @@ Supported fuse fields:
 | WDTPS | FWDT | PS1 – PS32768 |
 | BOREN | FBORPOR | ON, OFF |
 | BORV | FBORPOR | BOR_HIGH, BOR_MID, BOR_LOW |
+
+## CLC (Configurable Logic Cell) Configuration
+
+When CLC modules are configured in the UI, the code generator emits register writes for each active module:
+
+```c
+void configure_clc(void) {
+    /* ---- CLC Module 1: AND-OR ---- */
+    CLC1CONbits.LCEN  = 0U;         /* Disable CLC1 during config */
+    CLC1SELbits.DS1   = 0U;         /* Data source 1: CLCINA */
+    CLC1SELbits.DS2   = 1U;         /* Data source 2: CLCINB */
+    CLC1SELbits.DS3   = 4U;         /* Data source 3: CLC1OUT */
+    CLC1SELbits.DS4   = 7U;         /* Data source 4: CLC4OUT */
+    CLC1GLSbits.G1D1T = 1U;         /* Gate 1: DS1 true */
+    CLC1GLSbits.G1D2T = 1U;         /* Gate 1: DS2 true */
+    CLC1GLSbits.G2D3T = 1U;         /* Gate 2: DS3 true */
+    CLC1GLSbits.G2D4T = 1U;         /* Gate 2: DS4 true */
+    CLC1CONbits.LCMODE = 0U;        /* Logic mode: AND-OR */
+    CLC1CONbits.LCEN  = 1U;         /* Enable CLC1 */
+}
+```
+
+### CLC Register Summary
+
+| Register | Purpose |
+|---|---|
+| `CLCnCON` | Module enable, logic mode selection, output polarity |
+| `CLCnSEL` | Data source selection (DS1-DS4, each selects from 8 input sources) |
+| `CLCnGLS` | Gate logic selection (4 gates x 4 data inputs, true/complement/none) |
+
+The `system_pin_init()` function calls `configure_clc()` after `configure_ports()` when any CLC modules are active.

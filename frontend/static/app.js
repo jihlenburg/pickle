@@ -3023,29 +3023,19 @@ function renderClcInputs() {
  * defaults for dsPIC33CK and generic labels for unknown devices.
  */
 function getClcSourceLabel(dsIndex, source) {
-    // Common dsPIC33CK CLC input source assignments:
-    // DS1 (CLCIN0-7):  0=CLCINA, 1=CLCINB, 2=CLCINC, 3=CLCIND, 4=CLC1OUT, 5=CLC2OUT, 6=CLC3OUT, 7=CLC4OUT
-    // DS2 (CLCIN8-15):  often mirrors or adds peripherals (comparator, PWM, etc.)
-    // DS3 (CLCIN16-23): timer, SCCP, other peripherals
-    // DS4 (CLCIN24-31): more peripherals
-    //
-    // Since the exact mapping varies by device and isn't yet parsed from EDC,
-    // we provide named sources for the most commonly used inputs.
+    // Use device-specific CLC input source mapping when available.
+    // The mapping comes from the CLCxSEL register definition in the datasheet
+    // and is populated by the Rust backend (static lookup or LLM extraction).
+    if (deviceData && deviceData.clc_input_sources) {
+        const group = deviceData.clc_input_sources[dsIndex];
+        if (group && group[source]) {
+            return `${source}: ${group[source]}`;
+        }
+    }
+
+    // Fallback: generic CLCIN index labels
     const clcinIdx = dsIndex * 8 + source;
-
-    const knownSources = {
-         0: 'CLCINA (pin)',   1: 'CLCINB (pin)',   2: 'CLCINC (pin)',   3: 'CLCIND (pin)',
-         4: 'CLC1OUT',        5: 'CLC2OUT',        6: 'CLC3OUT',        7: 'CLC4OUT',
-         8: 'CLCINA (pin)',   9: 'CLCINB (pin)',  10: 'CLCINC (pin)',  11: 'CLCIND (pin)',
-        12: 'CLC1OUT',       13: 'CLC2OUT',       14: 'CLC3OUT',       15: 'CLC4OUT',
-        16: 'CLCINA (pin)',  17: 'CLCINB (pin)',  18: 'CLCINC (pin)',  19: 'CLCIND (pin)',
-        20: 'CLC1OUT',       21: 'CLC2OUT',       22: 'CLC3OUT',       23: 'CLC4OUT',
-        24: 'CLCINA (pin)',  25: 'CLCINB (pin)',  26: 'CLCINC (pin)',  27: 'CLCIND (pin)',
-        28: 'CLC1OUT',       29: 'CLC2OUT',       30: 'CLC3OUT',       31: 'CLC4OUT',
-    };
-
-    const name = knownSources[clcinIdx];
-    return name ? `${source}: ${name}` : `${source}: CLCIN${clcinIdx}`;
+    return `${source}: CLCIN${clcinIdx}`;
 }
 
 /** Render the 4x4 data gate matrix with T/N checkboxes and polarity toggles. */

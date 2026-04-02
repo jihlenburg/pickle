@@ -114,6 +114,11 @@ pub struct VerifyResult {
     pub packages: HashMap<String, PackageResult>,
     #[serde(default)]
     pub notes: Vec<String>,
+    /// CLC input source MUX mapping extracted from the CLCxSEL register chapter:
+    /// 4 groups (DS1–DS4) of 8 source labels.  `None` when the datasheet lacks
+    /// a CLC chapter or the LLM couldn't locate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clc_input_sources: Option<Vec<Vec<String>>>,
     #[serde(skip)]
     pub raw_response: String,
 }
@@ -140,13 +145,16 @@ impl VerifyResult {
     }
 }
 
-const VERIFY_PROMPT: &str = r#"You are analyzing a Microchip dsPIC33/PIC24 datasheet PDF to extract and verify pin mapping data.
+const VERIFY_PROMPT: &str = r#"You are analyzing a Microchip dsPIC33/PIC24 datasheet PDF to extract pin mapping data and CLC input source mappings.
 
 ## Where to Look
 
-In Microchip datasheets, the pinout diagrams and pin tables are located between the
-"Pin Diagrams" bookmark/section and the "Table of Contents" (or first functional chapter).
-Focus ONLY on this section — ignore all other content in the datasheet.
+**Pinout data:** Located between the "Pin Diagrams" section and the Table of Contents. Focus on
+the pin function tables (e.g., "28-PIN SSOP COMPLETE PIN FUNCTION DESCRIPTIONS").
+
+**CLC data:** Located in the "Configurable Logic Cell (CLC)" chapter. Find the **CLCxSEL register**
+definition — it defines what signals each Data Selection MUX (DS1–DS4) can select from. Each
+DSx[2:0] field lists 8 signal sources (values 000–111).
 
 ## Task
 
@@ -157,6 +165,7 @@ Extract ALL package pinout tables you find — the results will be cached and fi
 2. For each package, extract the COMPLETE pin-to-pad mapping (every pin number → pad name)
 3. For each pad, extract ALL listed functions/alternate names
 4. Compare against the current parsed data (provided below) and identify any discrepancies
+5. Find the CLC chapter and extract the CLCxSEL register's DS1–DS4 input source mappings
 
 ## Current Parsed Data
 
@@ -190,6 +199,12 @@ Return a JSON object with this exact structure (no markdown fencing, just raw JS
       "note": "<explanation>"
     }}
   ],
+  "clc_input_sources": [
+    ["<DS1 source 0>", "<DS1 source 1>", ..., "<DS1 source 7>"],
+    ["<DS2 source 0>", "<DS2 source 1>", ..., "<DS2 source 7>"],
+    ["<DS3 source 0>", "<DS3 source 1>", ..., "<DS3 source 7>"],
+    ["<DS4 source 0>", "<DS4 source 1>", ..., "<DS4 source 7>"]
+  ],
   "notes": ["<any general observations about data quality>"]
 }}
 
@@ -203,6 +218,9 @@ Return a JSON object with this exact structure (no markdown fencing, just raw JS
 - If the datasheet shows a package not in the current data, include it as a new entry
 - If pin data matches perfectly, say so in notes — don't invent corrections
 - Be precise: only flag actual discrepancies, not formatting differences
+- For CLC sources: use short signal names (e.g., "CLCINA", "Fcy", "CLC3OUT", "CMP1", "UART1 TX")
+- For CLC sources marked "Reserved" in the register, use the string "Reserved"
+- If the datasheet has no CLC chapter or CLCxSEL register, omit the clc_input_sources field entirely
 "#;
 
 fn build_current_data_summary(device_data: &Value) -> String {
@@ -437,6 +455,7 @@ fn parse_anthropic_response(raw: &str, device_data: &Value) -> VerifyResult {
         part_number: part,
         packages: HashMap::new(),
         notes: Vec::new(),
+        clc_input_sources: None,
         raw_response: raw.to_string(),
     };
 
@@ -600,6 +619,24 @@ fn parse_anthropic_response(raw: &str, device_data: &Value) -> VerifyResult {
             .collect();
     }
 
+    // Parse CLC input source mapping if the LLM found the CLCxSEL register
+    if let Some(clc_arr) = data.get("clc_input_sources").and_then(|v| v.as_array()) {
+        let sources: Vec<Vec<String>> = clc_arr
+            .iter()
+            .filter_map(|group| {
+                group.as_array().map(|g| {
+                    g.iter()
+                        .filter_map(|s| s.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+            })
+            .collect();
+        // Validate shape: must be exactly 4 groups of 8 sources
+        if sources.len() == 4 && sources.iter().all(|g| g.len() == 8) {
+            result.clc_input_sources = Some(sources);
+        }
+    }
+
     result
 }
 
@@ -726,6 +763,16 @@ pub fn save_overlay(
     let json = serde_json::to_string_pretty(&existing)
         .map_err(|e| format!("JSON serialize error: {e}"))?;
     fs::write(&overlay_path, json).map_err(|e| format!("Write error: {e}"))?;
+
+    // Save CLC input sources alongside the overlay when the LLM extracted them
+    if let Some(ref clc_sources) = verify_result.clc_input_sources {
+        let clc_dir = crate::parser::dfp_manager::clc_sources_dir();
+        let _ = fs::create_dir_all(&clc_dir);
+        let clc_path = clc_dir.join(format!("{}.json", part_number.to_uppercase()));
+        if let Ok(clc_json) = serde_json::to_string_pretty(clc_sources) {
+            let _ = fs::write(&clc_path, clc_json);
+        }
+    }
 
     Ok(overlay_path)
 }

@@ -359,6 +359,7 @@ pub fn load_device(part_number: String, package: Option<String>) -> Result<Value
         "pps_output_mappings": device.pps_output_mappings,
         "port_registers": device.port_registers,
         "fuse_defs": device.fuse_defs,
+        "clc_input_sources": device.clc_input_sources,
     }))
 }
 
@@ -822,6 +823,7 @@ pub fn apply_overlay(request: ApplyOverlayRequest) -> Result<Value, String> {
         part_number: request.part_number.clone(),
         packages: HashMap::new(),
         notes: Vec::new(),
+        clc_input_sources: None,
         raw_response: String::new(),
     };
 

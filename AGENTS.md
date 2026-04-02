@@ -18,10 +18,11 @@ pickle/
         edc_parser.rs    # Parses .PIC (XML) files into DeviceData
         dfp_manager.rs   # Finds/extracts .atpack files, caches devices
         pack_index.rs    # Microchip pack index fetch/cache
-        pinout_verifier.rs # Anthropic API pinout verification
+        pinout_verifier.rs # LLM-based pinout verification + CLC source extraction
+        datasheet_fetcher.rs # Microchip datasheet PDF resolution and caching
       codegen/
         mod.rs
-        generate.rs      # PPS, TRIS, ANSEL, op-amp C code generation
+        generate.rs      # PPS, TRIS, ANSEL, op-amp, CLC C code generation
         oscillator.rs    # PLL calculation and oscillator pragma generation
         fuses.rs         # Fuse pragma generation
     Cargo.toml
@@ -30,19 +31,24 @@ pickle/
   frontend/              # Served by Tauri webview
     index.html
     static/
-      app.js
+      app.js             # All UI logic including CLC designer and SVG preview
       style.css
       pin_descriptions.js
   tests/
     fixtures/            # Test device JSON files
+  pinouts/               # Pinout overlay JSON files (LLM-verified or manual)
+  clc_sources/           # CLC input source mapping overrides (per-device)
 ```
 
 ## Key Data Flow
 
 1. User enters part number -> `invoke('load_device', ...)` -> `dfp_manager::load_device()` -> `edc_parser::parse_edc_file()`
+   - Pinout overlays from `pinouts/*.json` are merged at load time
+   - CLC input source mapping is loaded from `clc_sources/` or extracted by LLM during verification
 2. Frontend renders package diagram + pin table from resolved pin data
 3. User assigns peripherals -> frontend collects assignments
-4. "Generate" -> `invoke('generate_code', ...)` -> `codegen::generate::generate_c_files()` -> C source returned
+4. User configures CLC modules via the CLC designer tab -> selects logic mode, input sources, gate connections
+5. "Generate" -> `invoke('generate_code', ...)` -> `codegen::generate::generate_c_files()` -> C source returned
 
 ## Development
 
@@ -103,6 +109,8 @@ cargo tauri build                   # Production build
 - Pinout overlays in `pinouts/*.json` add alternate package variants not present in the EDC file.
 - Tauri IPC: frontend uses `invoke('command_name', {args})`, backend uses `#[tauri::command]`.
 - All HTTP calls happen in Rust (reqwest), not from the frontend.
+- CLC input source mapping (`clc_input_sources`) is device-specific and loaded from `clc_sources/*.json`. When not available locally, the LLM verification flow extracts it from the datasheet and saves it for future use.
+- LLM verification supports dual providers: Anthropic (Anthropic) and OpenAI. The `api_key_status` command reports which providers are configured, and the frontend lets the user choose.
 
 ## Microchip dsPIC33 Domain Knowledge
 
@@ -110,6 +118,7 @@ cargo tauri build                   # Production build
 - FICD.ICS selects the active ICSP debug pair (PGC1/PGD1 is factory default).
 - Part number format: `DSPIC33CK64MP102T-E/M6VAO` = base + T(tape/reel) + temp grade + /package + VAO(automotive).
 - Config fuses: `#pragma config` for FICD, FWDT, FOSCSEL, FOSC, FBORPOR.
+- CLC (Configurable Logic Cell): up to 4 modules, each with 4 data select inputs, 4 gates, and a configurable logic function. Configured via CLCnCON, CLCnSEL, and CLCnGLS registers.
 
 ## What NOT to Do
 

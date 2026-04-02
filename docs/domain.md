@@ -163,3 +163,48 @@ Some package variants are not present in the EDC XML but are documented in datas
 ```
 
 These are loaded by `dfp_manager::load_pinout_overlays()` and merged into the device's pinout map at load time.
+
+## CLC (Configurable Logic Cell)
+
+dsPIC33CK devices include up to 4 CLC modules, each implementing a programmable combinational or sequential logic function in hardware. CLC modules can reduce external component count and improve response time by performing logic operations without CPU intervention.
+
+### Architecture
+
+Each CLC module has:
+
+- **4 data source selectors (DS1-DS4)**: each selects one of 8 input sources from a device-specific mapping
+- **4 logic gates**: each gate can accept any combination of the 4 data sources as true, inverted, or disconnected
+- **1 logic function**: combines the 4 gate outputs using a selectable logic mode
+- **1 output**: can be routed to a pin via PPS or used internally by other CLC modules
+
+### Logic Modes
+
+| Mode | Value | Function | Description |
+|---|---|---|---|
+| AND-OR | 0 | `(G1 AND G2) OR (G3 AND G4)` | Two AND gates feeding an OR |
+| OR-XOR | 1 | `(G1 OR G2) XOR (G3 OR G4)` | Two OR gates feeding an XOR |
+| AND | 2 | `G1 AND G2 AND G3 AND G4` | 4-input AND |
+| S-R Latch | 3 | Set/Reset | G1=Set, G2=Reset, G3/G4=unused |
+| D Flip-Flop | 4 | D-type | G1=D, G2=unused, G3=CLK, G4=Reset |
+| D Flip-Flop (R) | 5 | D-type with enable | G1=D, G2=EN, G3=CLK, G4=Reset |
+| J-K Flip-Flop | 6 | J-K type | G1=J, G2=K, G3=CLK, G4=Reset |
+| Transparent Latch | 7 | Level-sensitive | G1=D, G2=unused, G3=LE, G4=Reset |
+
+### CLC Input Source Mapping
+
+Each data source selector (DS1-DS4) chooses from 8 input sources (values 0-7). The actual signal connected to each value is **device-specific** and defined in the CLCxSEL register description in the datasheet.
+
+| DS Index | Input Range | Typical Sources |
+|---|---|---|
+| DS1 | CLCIN0-7 | CLCINx pins, CLC1-4 outputs |
+| DS2 | CLCIN8-15 | Comparator, PWM, timer outputs |
+| DS3 | CLCIN16-23 | SCCP, UART, SPI outputs |
+| DS4 | CLCIN24-31 | Additional peripheral outputs |
+
+### Source Mapping Resolution
+
+pickle resolves CLC input source labels using this priority:
+
+1. **Device-specific mapping** from `clc_sources/<part_number>.json` (highest priority)
+2. **LLM-extracted mapping** from datasheet verification (saved to `clc_sources/` for reuse)
+3. **Generic fallback**: `CLCINn` index labels (lowest priority, used when no device-specific data is available)

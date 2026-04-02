@@ -42,10 +42,18 @@
 - [ ] DMG bundling (fails on macOS 26 due to `create-dmg` script issue — `.app` works fine)
 
 ## Testing — Done
-- [x] 26 unit tests passing (parser, codegen, oscillator, fuses)
-- [x] 7 integration tests passing (fixture load, pin resolution, code generation, signal macros, oscillator+fuses)
+- [x] 29 unit tests + 7 integration tests passing (parser, codegen, oscillator, fuses, CLC)
 - [x] Clean build: 0 warnings
 
+## Phase 9 — CLC Designer — Done
+- [x] CLC tab UI with module selector and logic mode dropdown
+- [x] 4x4 gate matrix with true/complement checkboxes and polarity toggles
+- [x] Data source selectors with device-specific input labels
+- [x] SVG logic diagram preview (live-updating)
+- [x] CLC register write code generation (CLCnCON, CLCnSEL, CLCnGLS)
+- [x] LLM-based CLC input source extraction from datasheets
+- [x] `clc_sources/` persistence for extracted mappings
+
 ## Backlog (inherited from config-pic)
-- [ ] Peripheral-centric view
+- [x] Peripheral-centric view
 - [ ] Interrupt vector stub generation

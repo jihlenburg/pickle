@@ -356,18 +356,17 @@ fn load_pinout_overlays(device: &mut DeviceData) {
     }
 }
 
-pub fn get_cached_device(part_number: &str) -> Option<DeviceData> {
+pub fn get_cached_device(part_number: &str) -> Option<(DeviceData, bool)> {
     let filename = format!("{}.json", part_number.to_uppercase());
 
     for root in read_roots() {
-        // Honor the same precedence as the rest of runtime reads so the first hit
-        // matches the device/overlay set the user would see elsewhere.
         let dir = root.join("devices");
         let json_path = dir.join(&filename);
         if json_path.exists() {
             if let Ok(text) = fs::read_to_string(&json_path) {
+                let has_clc_key = text.contains("\"clc_module_id\"");
                 if let Ok(device) = DeviceData::from_json(&text) {
-                    return Some(device);
+                    return Some((device, has_clc_key));
                 }
             }
         }
@@ -453,14 +452,16 @@ pub fn load_device(part_number: &str) -> Option<DeviceData> {
     // Fast path: parsed JSON cache. Re-parse if the cache is stale:
     //   - empty fuse_defs: predates DCR parsing pass
     //   - any field with empty values: predates range-field filtering
-    if let Some(mut cached) = get_cached_device(&part_upper) {
+    //   - missing clc_module_id key: predates CLC module detection pass
+    if let Some((mut cached, has_clc_key)) = get_cached_device(&part_upper) {
         let fuse_stale = cached.fuse_defs.is_empty()
             || cached
                 .fuse_defs
                 .iter()
                 .any(|r| r.fields.iter().any(|f| f.values.is_empty()));
-        if !fuse_stale {
+        if !fuse_stale && has_clc_key {
             load_pinout_overlays(&mut cached);
+            load_clc_sources(&mut cached);
             return Some(cached);
         }
         // Stale cache — fall through to re-parse from the .PIC file.
@@ -498,11 +499,81 @@ pub fn load_device(part_number: &str) -> Option<DeviceData> {
 
     let mut device = parse_edc_file(&pic_path).ok()?;
     save_cached_device(&device);
-    // Apply overlays after parsing/caching so cached and freshly parsed devices
-    // expose the same package set to the frontend.
+    // Apply overlays and CLC source mappings after parsing/caching so cached
+    // and freshly parsed devices expose the same data to the frontend.
     load_pinout_overlays(&mut device);
+    load_clc_sources(&mut device);
 
     Some(device)
+}
+
+/// Known CLC input source MUX mappings keyed by the IP-block module ID
+/// extracted from the EDC `_modsrc` attribute.  Each entry is 4 groups (DS1–DS4)
+/// of 8 source labels matching the CLCxSEL register definition in the datasheet.
+///
+/// Source: DS70005363E §21.1, Register 21-3 (CLCxSEL) — dsPIC33CK64MP105 family.
+/// All 82 dsPIC33CK devices share the same CLC IP block.
+fn known_clc_sources(module_id: &str) -> Option<Vec<Vec<String>>> {
+    match module_id {
+        "DOS-01577_cla_clc_upb_v1.Module" => Some(vec![
+            // DS1[2:0] — page 373
+            vec![
+                "CLCINA".into(), "Fcy".into(), "CLC3OUT".into(), "LPRC".into(),
+                "REFCLKO".into(), "Reserved".into(), "SCCP2 Aux".into(), "SCCP4 Aux".into(),
+            ],
+            // DS2[2:0] — page 372
+            vec![
+                "CLCINB".into(), "Reserved".into(), "CMP1".into(), "UART1 TX".into(),
+                "Reserved".into(), "Reserved".into(), "SCCP1 OC".into(), "SCCP2 OC".into(),
+            ],
+            // DS3[2:0] — page 372
+            vec![
+                "CLCINC".into(), "CLC1OUT".into(), "CMP2".into(), "SPI1 SDO".into(),
+                "UART1 RX".into(), "CLC4OUT".into(), "SCCP3 CEF".into(), "SCCP4 CEF".into(),
+            ],
+            // DS4[2:0] — page 372
+            vec![
+                "PWM Event A".into(), "CLC2OUT".into(), "CMP3".into(), "SPI1 SDI".into(),
+                "Reserved".into(), "CLCIND".into(), "SCCP1 Aux".into(), "SCCP3 Aux".into(),
+            ],
+        ]),
+        _ => None,
+    }
+}
+
+/// Directory for CLC source mapping overrides (LLM-extracted or user-supplied).
+pub fn clc_sources_dir() -> PathBuf {
+    preferred_write_root("clc_sources").join("clc_sources")
+}
+
+/// Populate `device.clc_input_sources` from the best available source:
+/// 1. Per-device JSON override in `clc_sources/{PART}.json`
+/// 2. Hardcoded mapping for the device's `clc_module_id`
+fn load_clc_sources(device: &mut DeviceData) {
+    // 1. Check for per-device file override (from LLM extraction or manual edit)
+    let part_upper = device.part_number.to_uppercase();
+    for root in read_roots() {
+        let path = root
+            .join("clc_sources")
+            .join(format!("{}.json", part_upper));
+        if path.exists() {
+            if let Ok(text) = fs::read_to_string(&path) {
+                if let Ok(sources) = serde_json::from_str::<Vec<Vec<String>>>(&text) {
+                    if sources.len() == 4 && sources.iter().all(|g| g.len() == 8) {
+                        device.clc_input_sources = Some(sources);
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Fall back to hardcoded mapping by CLC module ID
+    if let Some(ref mod_id) = device.clc_module_id {
+        if let Some(sources) = known_clc_sources(mod_id) {
+            device.clc_input_sources = Some(sources);
+        }
+    }
 }
 
 /// Try to find a datasheet PDF locally. Searches:

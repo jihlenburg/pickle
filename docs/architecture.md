@@ -15,9 +15,10 @@ pickle/
         edc_parser.rs         Parses .PIC (EDC XML) files into DeviceData
         dfp_manager.rs        Finds/extracts .atpack files, JSON caching, overlay loading
         pack_index.rs         Microchip pack index fetch, parse, and cache
-        pinout_verifier.rs    Anthropic API pinout cross-check against datasheet PDFs
+        pinout_verifier.rs    LLM-based pinout verification + CLC source extraction
+        datasheet_fetcher.rs  Microchip datasheet PDF resolution and caching
       codegen/
-        generate.rs           PPS, TRIS, ANSEL, op-amp C code generation
+        generate.rs           PPS, TRIS, ANSEL, op-amp, CLC C code generation
         oscillator.rs         PLL divider calculation and oscillator pragma generation
         fuses.rs              Configuration fuse pragma generation
     Cargo.toml
@@ -26,11 +27,13 @@ pickle/
   frontend/                   Served by Tauri webview (no build step)
     index.html
     static/
-      app.js                  All UI logic, Tauri invoke() IPC calls, native dialog flows
+      app.js                  All UI logic including CLC designer and SVG preview
       style.css               Dark/light theme, peripheral color coding
       pin_descriptions.js     Human-readable peripheral descriptions
   tests/
     fixtures/                 Test device JSON files
+  pinouts/                    Pinout overlay JSON files (LLM-verified or manual)
+  clc_sources/                CLC input source mapping overrides (per-device)
 ```
 
 ## Data Flow
@@ -43,6 +46,7 @@ User enters part number
      -> Falls back to .atpack extraction via edc_parser::parse_edc_file()
      -> Auto-downloads pack from Microchip index if not found locally
      -> Applies pinout overlays from pinouts/*.json
+     -> Loads CLC input source mapping from clc_sources/ (if available)
   -> Frontend renders package diagram + pin table
 
 User assigns peripherals via dropdowns
@@ -72,7 +76,9 @@ User clicks "Generate C Code"
 | `PLLResult` | `oscillator.rs` | Computed PLL dividers and resulting frequencies |
 | `FuseConfig` | `fuses.rs` | Configuration fuse selections (ICSP, WDT, BOR) |
 | `PackIndex` | `pack_index.rs` | Cached Microchip pack index with device lookup |
-| `VerifyResult` | `pinout_verifier.rs` | Pinout verification result from Anthropic API |
+| `ClcModuleConfig` | `generate.rs` | CLC module configuration: logic mode, input sources, gate connections |
+| `DatasheetRef` | `datasheet_fetcher.rs` | Resolved datasheet PDF reference with URL and local cache path |
+| `VerifyResult` | `pinout_verifier.rs` | Pinout verification and CLC source extraction result from LLM |
 
 ## Frontend
 
@@ -108,8 +114,11 @@ These directories are used at runtime and excluded from version control:
 | Directory | Purpose |
 |---|---|
 | `dfp_cache/` | Extracted `.atpack` contents (EDC XML files) |
+| `dfp_cache/datasheets/` | Cached datasheet PDFs downloaded from Microchip |
+| `dfp_cache/verify_cache/` | Cached LLM verification results to avoid re-processing |
 | `devices/` | Parsed device data cached as JSON |
 | `pinouts/` | Pinout overlay files (corrections from verification or manual edits) |
+| `clc_sources/` | CLC input source mapping overrides (per-device JSON) |
 
 ## Release Staging
 
@@ -138,11 +147,12 @@ pickle is a Rust/Tauri port of [config-pic](https://github.com/jihlenburg/config
 
 ## Test Coverage
 
-26 unit tests across all code generation and parser modules:
+29 unit tests + 7 integration tests across all code generation and parser modules:
 
 | Module | Tests | Coverage |
 |---|---|---|
 | `edc_parser` | 6 | Parse int, port info, RP number, canonical name, JSON round-trip, resolve pins |
 | `oscillator` | 12 | PLL targets (100/140/200 MHz), crystal inputs, VCO/FPFD constraints, divider ranges, unreachable frequency, pragma generation |
 | `fuses` | 4 | Default/custom fuses, section completeness, field coverage |
-| `generate` | 4 | Multi-file output, ICSP exclusion, call order, PPS lock/unlock |
+| `generate` | 7 | Multi-file output, ICSP exclusion, call order, PPS lock/unlock, CLC register writes, CLC gate config, CLC logic modes |
+| integration | 7 | Fixture load, pin resolution, code generation, signal macros, oscillator+fuses, CLC end-to-end, overlay apply |

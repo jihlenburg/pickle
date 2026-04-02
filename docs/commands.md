@@ -30,7 +30,7 @@ Load device data and resolve pins for a specific package variant.
 | `partNumber` | string | yes | e.g. `"DSPIC33CK64MP102"` |
 | `package` | string | no | Package name; defaults to device's default pinout |
 
-**Response:** JSON object with `part_number`, `selected_package`, `packages`, `pin_count`, `pins` (array of resolved pins), `remappable_inputs`, `remappable_outputs`, `pps_input_mappings`, `pps_output_mappings`, `port_registers`.
+**Response:** JSON object with `part_number`, `selected_package`, `packages`, `pin_count`, `pins` (array of resolved pins), `remappable_inputs`, `remappable_outputs`, `pps_input_mappings`, `pps_output_mappings`, `port_registers`, `fuse_defs` (available configuration fuse fields and values), `clc_input_sources` (device-specific CLC input source mapping, if available).
 
 ### `refresh_index`
 
@@ -207,6 +207,7 @@ Generate C source files from the current pin configuration.
 | `digitalPins` | array | no | Pin positions forced to digital mode |
 | `oscillator` | object | no | Oscillator config (source, targetFoscMhz, crystalMhz, poscmd) |
 | `fuses` | object | no | Fuse config (ics, jtagen, fwdten, wdtps, boren, borv) |
+| `clc` | array | no | CLC module configs, each with `module` (1-4), `logicMode`, `dataSources` (4 DS indices), `gates` (4x4 T/N matrix), `polarities` |
 
 Each assignment:
 ```json
@@ -267,9 +268,28 @@ Test-compile generated C code using the local XC16 installation.
 
 ## Pinout Verification
 
+### `find_datasheet`
+
+Resolve and optionally download the official Microchip datasheet PDF for a device.
+
+**Parameters:**
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `partNumber` | string | yes | Device part number |
+| `download` | bool | no | If true, download and cache the PDF locally (default: false) |
+
+**Response:**
+```json
+{
+  "url": "https://ww1.microchip.com/downloads/...",
+  "cached": true,
+  "localPath": "/path/to/dfp_cache/datasheets/DSPIC33CK64MP102.pdf"
+}
+```
+
 ### `verify_pinout`
 
-Send a datasheet PDF to the Anthropic API to cross-check the parsed pinout against the official documentation.
+Send a datasheet PDF to an LLM (Anthropic or OpenAI) to cross-check the parsed pinout against the official documentation and extract CLC input source mappings.
 
 **Parameters:**
 | Name | Type | Required | Description |
@@ -277,13 +297,14 @@ Send a datasheet PDF to the Anthropic API to cross-check the parsed pinout again
 | `pdfBase64` | string | yes | Base64-encoded PDF file |
 | `partNumber` | string | yes | Device part number |
 | `package` | string | no | Package variant to verify |
-| `apiKey` | string | no | Anthropic API key (falls back to `ANTHROPIC_API_KEY` env var) |
+| `apiKey` | string | no | LLM API key (falls back to `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` env var) |
+| `provider` | string | no | LLM provider: `"anthropic"` (default) or `"openai"` |
 
-**Response:** `VerifyResult` with per-package pin corrections, match scores, and notes.
+**Response:** `VerifyResult` with per-package pin corrections, match scores, notes, and `clc_input_sources` (extracted CLC input source mapping, if found in the datasheet).
 
 ### `apply_overlay`
 
-Save verified pinout corrections as a JSON overlay file in `pinouts/`.
+Save verified pinout corrections as a JSON overlay file in `pinouts/`. If the verification result included CLC input source mappings, they are also saved to `clc_sources/`.
 
 **Parameters:**
 | Name | Type | Required | Description |
@@ -301,14 +322,14 @@ Save verified pinout corrections as a JSON overlay file in `pinouts/`.
 
 ### `api_key_status`
 
-Check whether a Anthropic API key is configured (via `.env` or environment variable).
+Check which LLM API keys are configured (via `.env` or environment variables). Supports both Anthropic (Anthropic) and OpenAI providers.
 
 **Parameters:** none
 
 **Response:**
 ```json
 {
-  "configured": true,
-  "hint": "...sk-1234"
+  "anthropic": { "configured": true, "hint": "...sk-1234" },
+  "openai": { "configured": true, "hint": "...sk-5678" }
 }
 ```

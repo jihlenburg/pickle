@@ -130,6 +130,17 @@ pub struct DeviceData {
     pub ansel_bits: HashMap<String, Vec<u32>>,
     #[serde(default)]
     pub fuse_defs: Vec<DcrRegister>,
+    /// CLC IP block identifier extracted from the EDC `_modsrc` attribute on
+    /// CLC SFR definitions. All devices sharing the same module ID use the
+    /// same CLCxSEL input source mapping.  `None` for devices without CLC.
+    /// Always serialized (even as null) so the cache can detect schema upgrades.
+    #[serde(default)]
+    pub clc_module_id: Option<String>,
+    /// CLC data-source MUX mapping: 4 groups (DS1–DS4) of 8 source labels.
+    /// Populated from a static lookup keyed by `clc_module_id`, with optional
+    /// per-device overrides from `clc_sources/{PART}.json` or LLM extraction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clc_input_sources: Option<Vec<Vec<String>>>,
 }
 
 impl DeviceData {
@@ -433,11 +444,12 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
     }
 
     // Second pass: parse SFR metadata to discover register addresses, ANSEL bit
-    // availability, and PPS field encodings needed for code generation.
+    // availability, PPS field encodings, and CLC module identity.
     let mut pps_input_mappings: Vec<PPSInputMapping> = Vec::new();
     let mut pps_output_mappings: Vec<PPSOutputMapping> = Vec::new();
     let mut port_registers: HashMap<String, u32> = HashMap::new();
     let mut ansel_bits: HashMap<String, Vec<u32>> = HashMap::new();
+    let mut clc_module_id: Option<String> = None;
 
     let re_port_reg = Regex::new(r"^(TRIS|ANSEL|LAT|PORT)[A-Z]$").unwrap();
     let re_ansel = Regex::new(r"^ANSEL([A-Z])$").unwrap();
@@ -533,6 +545,17 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
                             bit_offset +=
                                 parse_int(get_edc_attr(&mode_child, "nzwidth").unwrap_or("0"));
                         }
+                    }
+                }
+            }
+
+            // Detect CLC IP block identity from the first CLC register we encounter.
+            // All CLC registers on a device share the same `_modsrc` — we only need
+            // one hit to identify the module variant for input-source lookup.
+            if clc_module_id.is_none() && cname.starts_with("CLC") && cname.ends_with("CONL") {
+                if let Some(modsrc) = get_edc_attr(&sfr, "_modsrc") {
+                    if modsrc.contains("clc") {
+                        clc_module_id = Some(modsrc.to_string());
                     }
                 }
             }
@@ -659,6 +682,8 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
         port_registers,
         ansel_bits,
         fuse_defs,
+        clc_module_id,
+        clc_input_sources: None, // populated later by dfp_manager from static/file mapping
     })
 }
 
