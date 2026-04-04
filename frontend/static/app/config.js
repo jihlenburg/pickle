@@ -161,6 +161,10 @@
                 '--chip-bg': 'rgba(255,255,255,0.04)',
                 '--chip-border': 'rgba(255,255,255,0.08)',
                 '--pin-scroll-highlight': 'rgba(77,212,198,0.15)',
+                '--clc-source-1': '#67e8f9',
+                '--clc-source-2': '#fbbf24',
+                '--clc-source-3': '#c084fc',
+                '--clc-source-4': '#fb7185',
             },
             light: {
                 '--font-body': '"Avenir Next", "IBM Plex Sans", "Segoe UI", sans-serif',
@@ -214,6 +218,10 @@
                 '--chip-bg': 'rgba(15, 23, 42, 0.04)',
                 '--chip-border': 'rgba(15, 23, 42, 0.08)',
                 '--pin-scroll-highlight': 'rgba(15,155,142,0.1)',
+                '--clc-source-1': '#0891b2',
+                '--clc-source-2': '#b45309',
+                '--clc-source-3': '#7c3aed',
+                '--clc-source-4': '#e11d48',
             },
         },
     });

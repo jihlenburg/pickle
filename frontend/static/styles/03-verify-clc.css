@@ -344,6 +344,112 @@
     text-decoration: underline;
 }
 
+/* CLC Schematic */
+.clc-schematic-section {
+    padding: 10px 8px;
+}
+.clc-schematic-wrap {
+    width: 100%;
+    overflow-x: auto;
+    padding: 4px 0;
+}
+.clc-schematic-wrap svg {
+    width: 100%;
+    height: auto;
+    min-height: 180px;
+    max-height: 300px;
+    display: block;
+}
+.clc-schematic .clc-wire {
+    stroke-width: 1;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.clc-schematic .clc-sym {
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.clc-schematic .clc-dot {
+    fill: currentColor;
+    stroke: var(--bg);
+    stroke-width: 1.5;
+    paint-order: stroke fill;
+}
+.clc-schematic .clc-bubble {
+    fill: var(--bg);
+}
+.clc-schematic .clc-trace-active {
+    stroke: var(--sys);
+    color: var(--sys);
+}
+.clc-schematic .clc-trace-dim {
+    stroke: var(--border);
+    color: var(--border);
+    opacity: 0.4;
+}
+.clc-schematic .clc-source-net-1.clc-trace-active {
+    stroke: var(--clc-source-1);
+    color: var(--clc-source-1);
+}
+.clc-schematic .clc-source-net-2.clc-trace-active {
+    stroke: var(--clc-source-2);
+    color: var(--clc-source-2);
+}
+.clc-schematic .clc-source-net-3.clc-trace-active {
+    stroke: var(--clc-source-3);
+    color: var(--clc-source-3);
+}
+.clc-schematic .clc-source-net-4.clc-trace-active {
+    stroke: var(--clc-source-4);
+    color: var(--clc-source-4);
+}
+.clc-schematic text {
+    font-family: var(--font-mono);
+    fill: currentColor;
+}
+.clc-schematic text.clc-trace-active {
+    fill: var(--text);
+}
+.clc-schematic text.clc-trace-dim {
+    fill: var(--text-dim);
+    opacity: 0.4;
+}
+.clc-schematic .clc-label-src {
+    font-size: 10px;
+}
+.clc-schematic .clc-label-pin {
+    font-size: 10px;
+    font-weight: 600;
+}
+.clc-schematic .clc-label-gate {
+    font-size: 11px;
+    font-weight: 600;
+}
+.clc-schematic .clc-label-mode {
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--font-body);
+}
+.clc-schematic .clc-label-cond {
+    font-size: 9px;
+}
+.clc-schematic .clc-label-out {
+    font-size: 11px;
+    font-weight: 600;
+}
+.clc-schematic .clc-label-tn {
+    font-size: 7px;
+}
+.clc-schematic .clc-label-disabled {
+    font-size: 13px;
+    font-family: var(--font-body);
+}
+.clc-schematic .clc-disabled-overlay {
+    pointer-events: none;
+}
+
 /* Progress spinner */
 .verify-progress {
     display: flex;
@@ -588,4 +694,3 @@
     opacity: 0.9;
 }
 .verify-apply-btn.applied:hover { opacity: 0.9; }
-

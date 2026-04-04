@@ -146,6 +146,7 @@ function renderClcDesigner() {
     renderClcModeCards();
     renderClcOutputControls();
     updateClcRegisters();
+    if (typeof renderClcSchematic === 'function') renderClcSchematic();
 }
 
 /** Render the CLC1-4 module selector tabs. */
@@ -197,6 +198,7 @@ function renderClcInputs() {
             clcConfig[clcActiveModule].ds[parseInt(e.target.dataset.ds, 10)] = parseInt(e.target.value, 10);
             updateClcRegisters();
             renderClcModuleTabs();
+            if (typeof renderClcSchematic === 'function') renderClcSchematic();
         });
         container.appendChild(select);
     }
@@ -274,6 +276,7 @@ function renderClcGateMatrix() {
                     clcConfig[clcActiveModule].gates[gi][bi] = e.target.checked;
                     updateClcRegisters();
                     renderClcModuleTabs();
+                    if (typeof renderClcSchematic === 'function') renderClcSchematic();
                 });
                 td.appendChild(cb);
                 tr.appendChild(td);
@@ -293,6 +296,7 @@ function renderClcGateMatrix() {
             renderClcGateMatrix();
             updateClcRegisters();
             renderClcModuleTabs();
+            if (typeof renderClcSchematic === 'function') renderClcSchematic();
         });
         tdPol.appendChild(polBtn);
         tr.appendChild(tdPol);
@@ -330,6 +334,7 @@ function renderClcModeCards() {
             renderClcModeCards();
             updateClcRegisters();
             renderClcModuleTabs();
+            if (typeof renderClcSchematic === 'function') renderClcSchematic();
         });
         container.appendChild(card);
     }
@@ -359,6 +364,7 @@ function renderClcOutputControls() {
             clcConfig[clcActiveModule][ctrl.key] = e.target.checked;
             updateClcRegisters();
             renderClcModuleTabs();
+            if (typeof renderClcSchematic === 'function') renderClcSchematic();
         });
         label.appendChild(cb);
         label.appendChild(document.createTextNode(ctrl.label));
