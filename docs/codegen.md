@@ -1,185 +1,217 @@
 # Code Generation
 
-pickle generates MISRA C:2012 compliant C99 initialization code for dsPIC33 pin configuration. The output is split into two files: `pin_config.h` and `pin_config.c`.
+pickle generates a two-file output set:
 
-## Output Files
+- `mcu_init.h`
+- `mcu_init.c`
 
-### pin_config.h
+The basename is configurable through `settings.toml` under `[codegen].output_basename`.
 
-Contains:
-- Include guard
-- Part number comment
+The generator lives in `src-tauri/src/codegen/generate.rs` and is driven by `generate_code` from the Tauri command layer.
+
+## Output Shape
+
+### Header Output
+
+The header contains:
+
+- include guard
 - `#include <xc.h>`
-- Signal name `#define` macros (PORT, LAT, TRIS accessors)
-- Function prototypes: `system_pin_init()`, `configure_pps()`, `configure_ports()`
-- Oscillator and fuse function prototypes (if configured)
+- optional signal-name macros (`*_PORT`, `*_LAT`, `*_TRIS`)
+- prototypes for any generated helper functions
+- `void system_init(void);`
 
-### pin_config.c
+### Source Output
 
-Contains:
-- `#include "pin_config.h"`
-- `configure_pps()` — PPS register writes with RPCON unlock/lock
-- `configure_ports()` — TRIS, LAT, ANSEL, ODC register writes
-- `system_pin_init()` — calls the above in correct order
-- Oscillator init function (if configured)
-- Fuse `#pragma config` directives (appended at file end)
+The source contains:
 
-## PPS (Peripheral Pin Select)
+- file header comment and `#include "<configured basename>.h"`
+- optional oscillator `#pragma config` lines and `configure_oscillator()`
+- optional fuse `#pragma config` sections
+- optional `configure_pps()`
+- always-present `configure_ports()`
+- optional `configure_analog()` for on-chip op-amp enable
+- optional `configure_clc()`
+- `system_init()` in hardware-safe call order
 
-Remappable peripherals are configured by writing to RPINR (input) and RPOR (output) registers.
+## Generation Order
+
+The generator emits code in this order:
+
+1. oscillator pragmas and oscillator init, when configured
+2. fuse pragmas, when selected
+3. PPS setup
+4. port setup
+5. optional analog block
+6. optional CLC block
+7. `system_init()`
+
+That order is deliberate: clock configuration comes first, PPS is bound before pins are driven, and peripheral-enablement steps happen after base port state is established.
+
+## PPS Generation
+
+Remappable inputs and outputs are split into separate blocks and wrapped in the required RPCON unlock/lock sequence.
 
 ```c
-void configure_pps(void) {
-    __builtin_write_RPCON(0x0000U);  /* Unlock PPS */
+void configure_pps(void)
+{
+    __builtin_write_RPCON(0x0000U);
 
-    /* Inputs */
-    RPINR18bits.U1RXR = 36U;        /* U1RX <- RB4 (RP36) */
+    RPINR18bits.U1RXR = 36U;  /* U1RX <- RP36/RB4 */
+    RPOR1bits.RP37R   = 1U;   /* RP37/RB5 -> U1TX */
 
-    /* Outputs */
-    RPOR1bits.RP37R   = 1U;         /* U1TX -> RB5 (RP37) */
-
-    __builtin_write_RPCON(0x0800U);  /* Lock PPS */
+    __builtin_write_RPCON(0x0800U);
 }
 ```
 
-The unlock (`0x0000U`) and lock (`0x0800U`) writes bracket all PPS register modifications. Inputs reference `RPINRn` registers; outputs reference `RPORn` registers with the peripheral's `ppsval`.
+Important details:
+
+- input mappings probe both `U1RXR` and `U1RX` naming variants because device packs are inconsistent
+- output mappings require both the RP register field and the peripheral `ppsval`
+- comments are column-aligned so generated blocks stay readable
 
 ## Port Configuration
 
-Port registers are written per-port using bitmasks:
+`configure_ports()` is always emitted. It currently manages:
+
+- `ANSELx` for analog/digital mode
+- `TRISx` for direction
+- comments for ICSP/debug reservations
+
+Example:
 
 ```c
-void configure_ports(void) {
-    /* Port B */
-    TRISB  |= 0x0010U;   /* RB4 input  (U1RX) */
-    TRISB  &= ~0x0020U;  /* RB5 output (U1TX) */
-    ANSELB &= ~0x0030U;  /* RB4, RB5 digital */
+void configure_ports(void)
+{
+    /* ICSP/debug pins — directly controlled by the debug module (FICD.ICS) */
+    /* RB3 reserved for PGD1 — no ANSEL/TRIS configuration needed */
+
+    ANSELBbits.ANSELB0 = 0U;
+    ANSELBbits.ANSELB1 = 1U;
+
+    TRISBbits.TRISB0 = 0U;  /* U1TX (out) */
+    TRISBbits.TRISB1 = 1U;  /* AN6 (in) */
 }
 ```
 
-- **TRIS**: direction (1 = input, 0 = output)
-- **LAT**: output latch (set before enabling output)
-- **ANSEL**: analog select (cleared for digital function)
-- **ODC**: open-drain control (set for I2C SDA/SCL)
+Notes:
 
-## ICSP Pin Handling
+- explicit digital overrides are respected even without a peripheral assignment
+- analog-mode detection is driven by generated assignment content
+- ICSP/debug functions are not configured directly; they are documented and skipped
 
-ICSP debug pins (MCLR, PGCn, PGDn) are detected by regex and **excluded** from TRIS/ANSEL generation. Only a reservation comment is emitted:
+## Signal Macros
 
-```c
-/* Pin 1: MCLR — reserved (ICSP) */
-/* Pin 14: PGC1 — reserved (ICSP debug clock) */
-/* Pin 15: PGD1 — reserved (ICSP debug data) */
-```
-
-The active ICSP channel is determined by the `FICD.ICS` fuse setting.
-
-## Comment Alignment
-
-All inline comments are aligned to a consistent column using `align_comments()`. This produces clean, readable output:
+When the UI assigns a signal name to a pin, the header emits macros for direct register access:
 
 ```c
-RPINR18bits.U1RXR = 36U;        /* U1RX <- RB4 (RP36) */
-RPOR1bits.RP37R   = 1U;         /* U1TX -> RB5 (RP37) */
-RPINR20bits.SCK1R = 44U;        /* SCK1 <- RB12 (RP44) */
+#define MOTOR_ENABLE_PORT  (PORTBbits.RB5)
+#define MOTOR_ENABLE_LAT   (LATBbits.LATB5)
+#define MOTOR_ENABLE_TRIS  (TRISBbits.TRISB5)
 ```
 
-## Signal Name Macros
+Non-identifier characters are normalized to `_` and names are uppercased before emission.
 
-When users assign signal names, the header generates accessor macros:
+## Oscillator Generation
 
-```c
-/* ---- Signal name macros ---- */
-#define nRESET_PORT    PORTBbits.RB0
-#define nRESET_LAT     LATBbits.LATB0
-#define nRESET_TRIS    TRISBbits.TRISB0
-```
+Oscillator generation is delegated to `oscillator.rs`.
 
-## Oscillator Configuration
+Supported sources:
 
-The PLL calculator uses brute-force search over all valid divider combinations:
-
-| Parameter | Range | Description |
-|---|---|---|
-| N1 | 1–8 | Input divider (pre-PLL) |
-| M | 16–200 | PLL multiplier |
-| N2 | 1–7 | Post-PLL divider 1 |
-| N3 | 1–7 | Post-PLL divider 2 |
-
-**Constraints:**
-- VCO frequency: 400 MHz – 1.6 GHz
-- Phase detector input (FPFD): >= 8 MHz
-- Formula: `Fosc = (Fplli * M) / (N1 * N2 * N3)`
-
-**Supported clock sources:**
-| Source | Description |
+| Source | Meaning |
 |---|---|
-| `frc` | Fast RC oscillator (8 MHz), no PLL |
+| `frc` | Internal FRC, no PLL |
 | `frc_pll` | FRC through PLL |
-| `pri` | Primary oscillator (EC/XT/HS), no PLL |
+| `pri` | Primary oscillator, no PLL |
 | `pri_pll` | Primary oscillator through PLL |
-| `lprc` | Low-Power RC (32 kHz) |
+| `lprc` | Low-power RC |
 
-Output is a pair of `#pragma config` lines and an init function with register writes.
+PLL search spans valid `N1`, `M`, `N2`, and `N3` combinations and chooses the closest valid result that satisfies dsPIC33 constraints.
 
-## Fuse Configuration
+When enabled, oscillator output contributes:
 
-Generated as `#pragma config` directives:
+- top-of-file `#pragma config` lines
+- `configure_oscillator()` with register writes
+- a `system_init()` call to `configure_oscillator()`
 
-```c
-/* ---- Configuration Fuses ---- */
+When oscillator config is enabled, it owns the overlapping clock-related fuse
+fields (`FNOSC`, `IESO`, `POSCMD`, `XTCFG`, `FCKSM`, and `PLLKEN` when PLL is
+used). The generic fuse section intentionally suppresses those fields so
+generated output cannot emit duplicate `#pragma config` definitions.
 
-/* FICD: ICD Configuration */
-#pragma config ICS = 1            /* ICSP channel PGC1/PGD1 */
-#pragma config JTAGEN = OFF       /* JTAG disabled */
+## Fuse Generation
 
-/* FWDT: Watchdog Timer */
-#pragma config FWDTEN = OFF       /* Watchdog disabled */
-#pragma config WDTPS = PS1024     /* WDT prescaler 1:1024 */
+Fuse generation is delegated to `fuses.rs` and uses the device's parsed `fuse_defs`.
 
-/* FBORPOR: Brown-out Reset */
-#pragma config BOREN = ON         /* Brown-out reset enabled */
-#pragma config BORV = BOR_HIGH    /* Brown-out voltage high */
-```
+The frontend sends selections as:
 
-Supported fuse fields:
-
-| Fuse | Register | Options |
-|---|---|---|
-| ICS | FICD | 1, 2, 3 (ICSP channel) |
-| JTAGEN | FICD | ON, OFF |
-| FWDTEN | FWDT | ON, OFF, SWON |
-| WDTPS | FWDT | PS1 – PS32768 |
-| BOREN | FBORPOR | ON, OFF |
-| BORV | FBORPOR | BOR_HIGH, BOR_MID, BOR_LOW |
-
-## CLC (Configurable Logic Cell) Configuration
-
-When CLC modules are configured in the UI, the code generator emits register writes for each active module:
-
-```c
-void configure_clc(void) {
-    /* ---- CLC Module 1: AND-OR ---- */
-    CLC1CONbits.LCEN  = 0U;         /* Disable CLC1 during config */
-    CLC1SELbits.DS1   = 0U;         /* Data source 1: CLCINA */
-    CLC1SELbits.DS2   = 1U;         /* Data source 2: CLCINB */
-    CLC1SELbits.DS3   = 4U;         /* Data source 3: CLC1OUT */
-    CLC1SELbits.DS4   = 7U;         /* Data source 4: CLC4OUT */
-    CLC1GLSbits.G1D1T = 1U;         /* Gate 1: DS1 true */
-    CLC1GLSbits.G1D2T = 1U;         /* Gate 1: DS2 true */
-    CLC1GLSbits.G2D3T = 1U;         /* Gate 2: DS3 true */
-    CLC1GLSbits.G2D4T = 1U;         /* Gate 2: DS4 true */
-    CLC1CONbits.LCMODE = 0U;        /* Logic mode: AND-OR */
-    CLC1CONbits.LCEN  = 1U;         /* Enable CLC1 */
+```json
+{
+  "selections": {
+    "FICD": {
+      "ICS": "PGD1",
+      "JTAGEN": "OFF"
+    }
+  }
 }
 ```
 
-### CLC Register Summary
+The generator turns those into aligned pragma sections such as:
 
-| Register | Purpose |
+```c
+/* FICD: ICD Configuration */
+#pragma config ICS = PGD1       /* ICSP channel */
+#pragma config JTAGEN = OFF     /* JTAG disabled */
+```
+
+## Analog Helper Generation
+
+If any fixed assignment references an on-chip op-amp (`OA1OUT`, `OA2IN+`, and similar), the generator emits:
+
+```c
+void configure_analog(void)
+{
+    AMP1CONbits.AMPEN = 1U;  /* Enable Op-Amp 1 */
+}
+```
+
+This helper only enables the modules. Gain, routing, and other analog behavior remain application-specific.
+
+## CLC Generation
+
+When the UI sends populated `ClcModuleConfig` entries, the generator emits `configure_clc()` and writes the packed register values for each configured module.
+
+Generated registers:
+
+| Register | Meaning |
 |---|---|
-| `CLCnCON` | Module enable, logic mode selection, output polarity |
-| `CLCnSEL` | Data source selection (DS1-DS4, each selects from 8 input sources) |
-| `CLCnGLS` | Gate logic selection (4 gates x 4 data inputs, true/complement/none) |
+| `CLCnSEL` | data-source selectors |
+| `CLCnGLSL` / `CLCnGLSH` | gate source-enable matrices |
+| `CLCnCONH` | gate polarity bits |
+| `CLCnCONL` | mode, output polarity, interrupts, enable |
 
-The `system_pin_init()` function calls `configure_clc()` after `configure_ports()` when any CLC modules are active.
+The module is always written in two phases:
+
+1. write `CLCnCONL = 0x0000U` to disable it during setup
+2. write the packed registers
+3. write final `CLCnCONL` with or without `LCEN`
+
+## Single-File Compile Mode
+
+`generate_c_code()` is a compatibility helper used by compile-check flows that need one translation unit. It:
+
+- generates the normal header and source pair
+- replaces the generated local header include with `#include <xc.h>`
+- inlines generated signal macros so the Microchip family compiler can compile the result without a separate header file on disk
+
+## Validation Coverage
+
+The generator is covered by unit and integration tests for:
+
+- header/source file creation
+- PPS unlock/lock order
+- `system_init()` ordering
+- ICSP exclusion
+- oscillator/fuse output
+- signal macro generation
+- CLC register generation

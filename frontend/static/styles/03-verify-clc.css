@@ -1,0 +1,696 @@
+/* =============================================================================
+   Pinout Verification
+   ============================================================================= */
+
+.verify-btn {
+    background: transparent;
+    color: var(--accent2);
+    border: 1px solid var(--accent2);
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    white-space: nowrap;
+}
+.verify-btn:hover {
+    background: var(--accent2);
+    color: var(--bg);
+}
+
+/* =============================================================================
+   Right-panel tabs (Code / Verification)
+   ============================================================================= */
+
+.right-tabs {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 10px;
+    border-bottom: 2px solid var(--border);
+    padding-bottom: 0;
+}
+.right-tab {
+    background: transparent;
+    color: var(--text-dim);
+    border: none;
+    padding: 6px 16px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+.right-tab:hover {
+    color: var(--text);
+}
+.right-tab.active {
+    color: var(--accent2);
+    border-bottom-color: var(--accent2);
+}
+.right-tab-content {
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.fuses-tab-content {
+    gap: 12px;
+    padding-bottom: 12px;
+}
+.right-tab-content.active {
+    display: flex;
+}
+
+/* --- Verify panel --- */
+.verify-panel {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    background: var(--bg-card);
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+.verify-panel h2 {
+    margin: 0 0 12px 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--accent2);
+    letter-spacing: 0.01em;
+}
+.verify-empty {
+    color: var(--text-dim);
+    font-size: 0.82rem;
+    padding: 40px 20px;
+    text-align: center;
+    line-height: 1.6;
+}
+
+/* --- CLC Designer --- */
+.clc-tab-content {
+    gap: 0;
+    padding-bottom: 12px;
+}
+
+.clc-designer {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.clc-module-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 4px;
+}
+
+.clc-module-tab {
+    background: var(--bg-card);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 6px 6px 0 0;
+    padding: 5px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    position: relative;
+}
+
+.clc-module-tab:hover { color: var(--text); border-color: var(--text-dim); }
+
+.clc-module-tab.active {
+    color: var(--sys);
+    border-color: var(--sys);
+    border-bottom-color: var(--bg);
+    background: var(--bg);
+}
+
+.clc-module-tab .clc-tab-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--sys);
+    margin-left: 5px;
+    vertical-align: middle;
+}
+
+.clc-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
+}
+
+.clc-section h2 {
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--sys);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+/* Input source dropdowns */
+.clc-inputs {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 6px 10px;
+    align-items: center;
+}
+
+.clc-inputs label {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-weight: 500;
+}
+
+.clc-inputs select {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 4px 8px;
+    border-radius: 5px;
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+}
+
+.clc-inputs select:hover { border-color: var(--text-dim); }
+.clc-inputs select:focus { outline: none; border-color: var(--sys); }
+
+/* Gate matrix */
+.clc-gate-matrix {
+    overflow-x: auto;
+}
+
+.clc-gate-matrix table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+
+.clc-gate-matrix th {
+    padding: 4px 6px;
+    text-align: center;
+    font-weight: 600;
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+.clc-gate-matrix th.clc-gate-hdr {
+    color: var(--sys);
+    text-align: left;
+    padding-left: 0;
+}
+
+.clc-gate-matrix td {
+    padding: 4px 6px;
+    text-align: center;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+.clc-gate-matrix td.clc-gate-label {
+    text-align: left;
+    font-weight: 600;
+    color: var(--text);
+    padding-left: 0;
+    white-space: nowrap;
+}
+
+.clc-gate-matrix input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+    accent-color: var(--sys);
+}
+
+.clc-gate-matrix .clc-pol-toggle {
+    background: var(--bg);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.12s;
+}
+
+.clc-gate-matrix .clc-pol-toggle.active {
+    background: color-mix(in srgb, var(--sys) 20%, transparent);
+    color: var(--sys);
+    border-color: var(--sys);
+}
+
+/* Logic mode cards */
+.clc-mode-cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.clc-mode-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 6px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.12s;
+}
+
+.clc-mode-card:hover {
+    border-color: var(--text-dim);
+}
+
+.clc-mode-card.selected {
+    background: var(--selected);
+    border-color: var(--selected-border);
+}
+
+.clc-mode-card .clc-mode-name {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 2px;
+}
+
+.clc-mode-card .clc-mode-code {
+    font-size: 9px;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+}
+
+/* Output controls */
+.clc-output-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+}
+
+.clc-output-controls label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    color: var(--text-dim);
+    cursor: pointer;
+}
+
+.clc-output-controls input[type="checkbox"] {
+    accent-color: var(--sys);
+    cursor: pointer;
+}
+
+/* Register preview */
+.clc-registers {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 4px 16px;
+}
+
+.clc-reg-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    padding: 3px 0;
+}
+
+.clc-reg-name {
+    color: var(--text-dim);
+    font-weight: 500;
+}
+
+.clc-reg-value {
+    font-family: var(--font-mono);
+    color: var(--sys);
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.clc-reg-value:hover {
+    text-decoration: underline;
+}
+
+/* CLC Schematic */
+.clc-schematic-section {
+    padding: 10px 8px;
+}
+.clc-schematic-wrap {
+    width: 100%;
+    overflow-x: auto;
+    padding: 4px 0;
+}
+.clc-schematic-wrap svg {
+    width: 100%;
+    height: auto;
+    min-height: 180px;
+    max-height: 300px;
+    display: block;
+}
+.clc-schematic .clc-wire {
+    stroke-width: 1;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.clc-schematic .clc-sym {
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.clc-schematic .clc-dot {
+    fill: currentColor;
+    stroke: var(--bg);
+    stroke-width: 1.5;
+    paint-order: stroke fill;
+}
+.clc-schematic .clc-bubble {
+    fill: var(--bg);
+}
+.clc-schematic .clc-trace-active {
+    stroke: var(--sys);
+    color: var(--sys);
+}
+.clc-schematic .clc-trace-dim {
+    stroke: var(--border);
+    color: var(--border);
+    opacity: 0.4;
+}
+.clc-schematic .clc-source-net-1.clc-trace-active {
+    stroke: var(--clc-source-1);
+    color: var(--clc-source-1);
+}
+.clc-schematic .clc-source-net-2.clc-trace-active {
+    stroke: var(--clc-source-2);
+    color: var(--clc-source-2);
+}
+.clc-schematic .clc-source-net-3.clc-trace-active {
+    stroke: var(--clc-source-3);
+    color: var(--clc-source-3);
+}
+.clc-schematic .clc-source-net-4.clc-trace-active {
+    stroke: var(--clc-source-4);
+    color: var(--clc-source-4);
+}
+.clc-schematic text {
+    font-family: var(--font-mono);
+    fill: currentColor;
+}
+.clc-schematic text.clc-trace-active {
+    fill: var(--text);
+}
+.clc-schematic text.clc-trace-dim {
+    fill: var(--text-dim);
+    opacity: 0.4;
+}
+.clc-schematic .clc-label-src {
+    font-size: 10px;
+}
+.clc-schematic .clc-label-pin {
+    font-size: 10px;
+    font-weight: 600;
+}
+.clc-schematic .clc-label-gate {
+    font-size: 11px;
+    font-weight: 600;
+}
+.clc-schematic .clc-label-mode {
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--font-body);
+}
+.clc-schematic .clc-label-cond {
+    font-size: 9px;
+}
+.clc-schematic .clc-label-out {
+    font-size: 11px;
+    font-weight: 600;
+}
+.clc-schematic .clc-label-tn {
+    font-size: 7px;
+}
+.clc-schematic .clc-label-disabled {
+    font-size: 13px;
+    font-family: var(--font-body);
+}
+.clc-schematic .clc-disabled-overlay {
+    pointer-events: none;
+}
+
+/* Progress spinner */
+.verify-progress {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: 40px 20px;
+}
+.verify-spinner {
+    width: 24px;
+    height: 24px;
+    border: 2.5px solid var(--border);
+    border-top-color: var(--accent2);
+    border-radius: 50%;
+    animation: verify-spin 0.8s linear infinite;
+}
+@keyframes verify-spin { to { transform: rotate(360deg); } }
+.verify-progress-text {
+    color: var(--text);
+    font-size: 0.82rem;
+}
+.verify-progress-time {
+    color: var(--text-dim);
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.verify-loading {
+    color: var(--accent2);
+    padding: 20px;
+    text-align: center;
+    font-style: italic;
+}
+.verify-error {
+    color: var(--accent);
+    padding: 12px;
+    font-size: 0.82rem;
+}
+
+/* Notes: compact collapsible-feeling block */
+.verify-notes {
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    background: color-mix(in srgb, var(--bg-pin) 40%, transparent);
+    border-radius: 6px;
+    border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+.verify-note {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    padding: 3px 0;
+    line-height: 1.5;
+}
+
+/* Package tabs — pill style */
+.verify-pkg-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+}
+.verify-pkg-tab {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    padding: 5px 12px;
+    border-radius: 14px;
+    cursor: pointer;
+    font-size: 0.75rem;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+.verify-pkg-tab:hover {
+    border-color: var(--accent2);
+    color: var(--text);
+}
+.verify-pkg-tab.active {
+    color: var(--text-inverse);
+    background: var(--accent2);
+    border-color: var(--accent2);
+}
+.verify-score {
+    font-size: 0.68rem;
+    font-weight: 700;
+    margin-left: 4px;
+}
+.score-good { color: var(--status-good); }
+.score-warn { color: var(--status-warn); }
+.score-bad { color: var(--accent); }
+.verify-pkg-tab.active .score-good,
+.verify-pkg-tab.active .score-warn,
+.verify-pkg-tab.active .score-bad { color: inherit; }
+
+.verify-corr-badge {
+    background: var(--accent);
+    color: var(--text-inverse);
+    font-size: 0.6rem;
+    padding: 1px 5px;
+    border-radius: 6px;
+    margin-left: 3px;
+    font-weight: 700;
+    vertical-align: 1px;
+}
+.verify-pkg-tab.active .verify-corr-badge {
+    background: rgba(255,255,255,0.25);
+}
+
+.verify-pkg-detail.hidden { display: none; }
+
+/* Corrections */
+.verify-corrections {
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    background: var(--conflict-bg);
+    border: 1px solid var(--conflict-border);
+    border-radius: 6px;
+}
+.verify-corrections h4 {
+    margin: 0 0 6px 0;
+    color: var(--accent);
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+.verify-corr-item {
+    font-size: 0.78rem;
+    padding: 5px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 30%, transparent);
+    line-height: 1.5;
+}
+.verify-corr-item:last-child { border-bottom: none; }
+.verify-corr-type {
+    display: inline-block;
+    background: var(--accent);
+    color: var(--text-inverse);
+    font-size: 0.6rem;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    vertical-align: middle;
+    text-transform: uppercase;
+    margin-right: 4px;
+}
+.verify-old { color: var(--accent); text-decoration: line-through; }
+.verify-new { color: var(--status-good); font-weight: 600; }
+.verify-corr-note { color: var(--text-dim); font-style: italic; font-size: 0.75rem; }
+
+/* Summary banners */
+.verify-match,
+.verify-summary {
+    padding: 8px 12px;
+    font-size: 0.78rem;
+    border-radius: 6px;
+    margin-bottom: 10px;
+    line-height: 1.45;
+}
+.verify-match {
+    color: var(--status-good);
+    background: var(--success-bg);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.verify-match::before {
+    content: "\2713";
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    background: color-mix(in srgb, var(--status-good) 20%, transparent);
+    border-radius: 50%;
+    font-size: 0.65rem;
+    font-weight: bold;
+    flex-shrink: 0;
+}
+.verify-summary {
+    color: var(--text);
+    background: var(--conflict-bg);
+    border: 1px solid var(--conflict-border);
+}
+.verify-summary.verify-new-pkg {
+    color: var(--accent2);
+    background: var(--rp-bg);
+    border-color: color-mix(in srgb, var(--accent2) 20%, transparent);
+}
+
+/* Pin comparison table */
+.verify-table-wrap {
+    max-height: 340px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 12px;
+}
+.verify-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.75rem;
+}
+.verify-table th {
+    background: var(--bg-pin);
+    color: var(--text-dim);
+    padding: 5px 10px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+.verify-table td {
+    padding: 3px 10px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+}
+.verify-table tbody tr:hover td { background: var(--hover-overlay); }
+.verify-table tr.verify-ok td { color: var(--text); }
+.verify-table tr.verify-diff td { background: var(--conflict-bg); }
+.verify-table tr.verify-diff td:nth-child(2) { color: var(--status-good); font-weight: 600; }
+.verify-table tr.verify-diff td:nth-child(3) { color: var(--accent); text-decoration: line-through; }
+.verify-table tr.verify-new td { background: var(--success-bg); }
+.verify-table .status-icon { text-align: center; width: 36px; }
+
+.verify-apply-btn {
+    background: var(--accent2);
+    color: var(--text-inverse);
+    border: none;
+    padding: 6px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.78rem;
+    font-weight: 500;
+    transition: opacity 0.15s ease;
+}
+.verify-apply-btn:hover { opacity: 0.85; }
+.verify-apply-btn.applied {
+    background: var(--success-bg);
+    color: var(--status-good);
+    cursor: default;
+    opacity: 0.9;
+}
+.verify-apply-btn.applied:hover { opacity: 0.9; }

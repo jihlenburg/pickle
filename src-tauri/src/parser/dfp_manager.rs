@@ -131,6 +131,84 @@ fn search_paths() -> Vec<(PathBuf, u32)> {
     paths
 }
 
+fn compiler_pack_search_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+
+    for mplab_root in [
+        PathBuf::from("/Applications/microchip/mplabx"),
+        PathBuf::from("/opt/microchip/mplabx"),
+    ] {
+        let Ok(entries) = fs::read_dir(&mplab_root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let packs = entry.path().join("packs").join("Microchip");
+            if packs.exists() && !roots.contains(&packs) {
+                roots.push(packs);
+            }
+        }
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        let mchp = home.join(".mchp_packs").join("Microchip");
+        if mchp.exists() && !roots.contains(&mchp) {
+            roots.push(mchp);
+        }
+    }
+
+    roots
+}
+
+fn pack_version_dir_from_pic_path(pic_path: &Path) -> Option<PathBuf> {
+    let edc_dir = pic_path.parent()?;
+    if !edc_dir
+        .file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case("edc"))
+    {
+        return None;
+    }
+    edc_dir.parent().map(Path::to_path_buf)
+}
+
+fn compiler_support_dir_for_pack_version(pack_version_dir: &Path) -> Option<PathBuf> {
+    let support_dir = pack_version_dir.join("xc16");
+    if support_dir.join("bin").join("c30_device.info").is_file() {
+        Some(support_dir)
+    } else {
+        None
+    }
+}
+
+fn find_installed_compiler_support_dir(part_number: &str) -> Option<PathBuf> {
+    let part_upper = part_number.to_ascii_uppercase();
+    let mut matches = Vec::new();
+
+    for root in compiler_pack_search_roots() {
+        let Ok(entries) = glob_recursive_depth(&root, "*.PIC", 4) else {
+            continue;
+        };
+        for pic_file in entries {
+            let stem = pic_file
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_ascii_uppercase();
+            if stem != part_upper {
+                continue;
+            }
+            if let Some(pack_version_dir) = pack_version_dir_from_pic_path(&pic_file) {
+                if let Some(support_dir) = compiler_support_dir_for_pack_version(&pack_version_dir)
+                {
+                    matches.push(support_dir);
+                }
+            }
+        }
+    }
+
+    matches.sort();
+    matches.pop()
+}
+
 fn find_atpack_for_part(part_number: &str) -> Option<PathBuf> {
     let part_upper = part_number.to_uppercase();
     let mut family_key: Option<&str> = None;
@@ -266,6 +344,45 @@ fn extract_pic_from_atpack(atpack_path: &Path, part_number: &str) -> Option<Path
     }
 
     None
+}
+
+fn extract_compiler_support_from_atpack(atpack_path: &Path) -> Option<PathBuf> {
+    let stem = atpack_path.file_stem()?.to_string_lossy().to_string();
+    let toolchain_root = dfp_cache_dir().join("toolchain").join(stem);
+    let support_dir = toolchain_root.join("xc16");
+    if support_dir.join("bin").join("c30_device.info").is_file() {
+        return Some(support_dir);
+    }
+
+    fs::create_dir_all(&toolchain_root).ok()?;
+    let file = fs::File::open(atpack_path).ok()?;
+    let mut archive = zip::ZipArchive::new(file).ok()?;
+
+    for i in 0..archive.len() {
+        let Ok(mut entry) = archive.by_index(i) else {
+            continue;
+        };
+        let name = entry.name().replace('\\', "/");
+        let Some(relative) = name.strip_prefix("xc16/") else {
+            continue;
+        };
+        let output_path = support_dir.join(relative);
+        if entry.is_dir() {
+            fs::create_dir_all(&output_path).ok()?;
+            continue;
+        }
+        if let Some(parent) = output_path.parent() {
+            fs::create_dir_all(parent).ok()?;
+        }
+        let mut out = fs::File::create(&output_path).ok()?;
+        std::io::copy(&mut entry, &mut out).ok()?;
+    }
+
+    if support_dir.join("bin").join("c30_device.info").is_file() {
+        Some(support_dir)
+    } else {
+        None
+    }
 }
 
 fn load_pinout_overlays(device: &mut DeviceData) {
@@ -507,6 +624,34 @@ pub fn load_device(part_number: &str) -> Option<DeviceData> {
     Some(device)
 }
 
+/// Resolve a compiler-ready DFP directory for the given device.
+///
+/// XC16 and XC-DSC both expect `-mdfp` to point at the pack's `xc16/`
+/// subtree because `elf-cc1` resolves `bin/c30_device.info` relative to that
+/// path. Prefer installed MPLAB X packs, then fall back to a cached/downloaded
+/// `.atpack` extracted into pickle's own cache.
+pub fn find_compiler_support_dir(part_number: &str) -> Option<PathBuf> {
+    let part_upper = part_number.to_ascii_uppercase();
+
+    if let Some(installed) = find_installed_compiler_support_dir(&part_upper) {
+        return Some(installed);
+    }
+
+    let atpack = match find_atpack_for_part(&part_upper) {
+        Some(path)
+            if path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("atpack")) =>
+        {
+            Some(path)
+        }
+        _ => pack_index::lookup_device_pack(&part_upper)
+            .and_then(|(url, filename)| pack_index::download_atpack(&url, &filename).ok()),
+    }?;
+
+    extract_compiler_support_from_atpack(&atpack)
+}
+
 /// Known CLC input source MUX mappings keyed by the IP-block module ID
 /// extracted from the EDC `_modsrc` attribute.  Each entry is 4 groups (DS1–DS4)
 /// of 8 source labels matching the CLCxSEL register definition in the datasheet.
@@ -518,23 +663,47 @@ fn known_clc_sources(module_id: &str) -> Option<Vec<Vec<String>>> {
         "DOS-01577_cla_clc_upb_v1.Module" => Some(vec![
             // DS1[2:0] — page 373
             vec![
-                "CLCINA".into(), "Fcy".into(), "CLC3OUT".into(), "LPRC".into(),
-                "REFCLKO".into(), "Reserved".into(), "SCCP2 Aux".into(), "SCCP4 Aux".into(),
+                "CLCINA".into(),
+                "Fcy".into(),
+                "CLC3OUT".into(),
+                "LPRC".into(),
+                "REFCLKO".into(),
+                "Reserved".into(),
+                "SCCP2 Aux".into(),
+                "SCCP4 Aux".into(),
             ],
             // DS2[2:0] — page 372
             vec![
-                "CLCINB".into(), "Reserved".into(), "CMP1".into(), "UART1 TX".into(),
-                "Reserved".into(), "Reserved".into(), "SCCP1 OC".into(), "SCCP2 OC".into(),
+                "CLCINB".into(),
+                "Reserved".into(),
+                "CMP1".into(),
+                "UART1 TX".into(),
+                "Reserved".into(),
+                "Reserved".into(),
+                "SCCP1 OC".into(),
+                "SCCP2 OC".into(),
             ],
             // DS3[2:0] — page 372
             vec![
-                "CLCINC".into(), "CLC1OUT".into(), "CMP2".into(), "SPI1 SDO".into(),
-                "UART1 RX".into(), "CLC4OUT".into(), "SCCP3 CEF".into(), "SCCP4 CEF".into(),
+                "CLCINC".into(),
+                "CLC1OUT".into(),
+                "CMP2".into(),
+                "SPI1 SDO".into(),
+                "UART1 RX".into(),
+                "CLC4OUT".into(),
+                "SCCP3 CEF".into(),
+                "SCCP4 CEF".into(),
             ],
             // DS4[2:0] — page 372
             vec![
-                "PWM Event A".into(), "CLC2OUT".into(), "CMP3".into(), "SPI1 SDI".into(),
-                "Reserved".into(), "CLCIND".into(), "SCCP1 Aux".into(), "SCCP3 Aux".into(),
+                "PWM Event A".into(),
+                "CLC2OUT".into(),
+                "CMP3".into(),
+                "SPI1 SDI".into(),
+                "Reserved".into(),
+                "CLCIND".into(),
+                "SCCP1 Aux".into(),
+                "SCCP3 Aux".into(),
             ],
         ]),
         _ => None,
@@ -671,4 +840,31 @@ pub fn cache_datasheet(part_number: &str, pdf_bytes: &[u8]) -> Option<PathBuf> {
     let path = dir.join(format!("{}.pdf", part_number.to_uppercase()));
     fs::write(&path, pdf_bytes).ok()?;
     Some(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pack_version_dir_is_parent_of_edc_file() {
+        let pic = PathBuf::from(
+            "/tmp/packs/Microchip/dsPIC33CK-MP_DFP/1.15.423/edc/DSPIC33CK64MP105.PIC",
+        );
+        let expected = PathBuf::from("/tmp/packs/Microchip/dsPIC33CK-MP_DFP/1.15.423");
+        assert_eq!(pack_version_dir_from_pic_path(&pic), Some(expected));
+    }
+
+    #[test]
+    fn compiler_support_dir_uses_xc16_subtree() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let pack = temp.path().join("pack").join("1.0.0");
+        fs::create_dir_all(pack.join("xc16/bin")).expect("support dir");
+        fs::write(pack.join("xc16/bin/c30_device.info"), "").expect("device info");
+
+        assert_eq!(
+            compiler_support_dir_for_pack_version(&pack),
+            Some(pack.join("xc16"))
+        );
+    }
 }

@@ -1,158 +1,172 @@
 # Architecture
 
-## Project Structure
+## Overview
 
-```
+pickle is a Tauri desktop app with a static frontend and a Rust backend.
+
+- The frontend is plain HTML/CSS/JS with no bundler or framework.
+- The backend owns device discovery, DFP extraction, settings persistence, code generation, and native dialogs.
+- All cross-boundary communication happens through Tauri `invoke()` commands and `menu-action` / `verify-progress` events.
+
+## Project Layout
+
+```text
 pickle/
-  scripts/
-    release-app.sh           Builds `pickle.app` and stages it into `bin/`
-  src-tauri/
-    src/
-      main.rs                 Tauri entry point
-      lib.rs                  Library root
-      commands.rs             Tauri IPC command handlers (14 commands)
-      parser/
-        edc_parser.rs         Parses .PIC (EDC XML) files into DeviceData
-        dfp_manager.rs        Finds/extracts .atpack files, JSON caching, overlay loading
-        pack_index.rs         Microchip pack index fetch, parse, and cache
-        pinout_verifier.rs    LLM-based pinout verification + CLC source extraction
-        datasheet_fetcher.rs  Microchip datasheet PDF resolution and caching
-      codegen/
-        generate.rs           PPS, TRIS, ANSEL, op-amp, CLC C code generation
-        oscillator.rs         PLL divider calculation and oscillator pragma generation
-        fuses.rs              Configuration fuse pragma generation
-    Cargo.toml
-    tauri.conf.json
-    icons/
-  frontend/                   Served by Tauri webview (no build step)
+  frontend/
     index.html
     static/
-      app.js                  All UI logic including CLC designer and SVG preview
-      style.css               Dark/light theme, peripheral color coding
-      pin_descriptions.js     Human-readable peripheral descriptions
-  tests/
-    fixtures/                 Test device JSON files
-  pinouts/                    Pinout overlay JSON files (LLM-verified or manual)
-  clc_sources/                CLC input source mapping overrides (per-device)
+      app/
+        config.js            Unified theme tokens, typography, and shell-level UI constants
+        model.js             Pure frontend state and normalization helpers
+        00-05*.js            Core state, rendering, interactions, workflow modules, and editors
+        06-shell.js          Shell event wiring, catalog freshness, and theme handling
+        07-verification.js   Datasheet verification flow and overlay application
+        08-bootstrap.js      Final startup orchestration, menu events, and tooltips
+      style.css              Import manifest for the split stylesheet modules
+      styles/                Foundation, component, verification, shell, and responsive CSS modules
+      pin_descriptions.js    Pattern-based descriptions and grouping helpers
+  src-tauri/
+    src/
+      main.rs                Tauri bootstrap, plugins, native menu wiring
+      commands.rs            Shared IPC request/response types plus command helpers
+      commands/              Concern-focused Tauri command implementations
+      settings.rs            TOML-backed appearance/startup settings
+      codegen/
+        generate.rs          Configurable `mcu_init.c/.h`-style output generation
+        oscillator.rs        PLL search and oscillator pragma/init generation
+        fuses.rs             Dynamic fuse pragma generation
+      parser/
+        edc_parser.rs        EDC XML parsing and core device model
+        dfp_manager.rs       DFP lookup, extraction, cache roots, overlays
+        pack_index.rs        Microchip pack index fetch/cache
+        datasheet_fetcher.rs Datasheet resolution and cache/download fallback
+        pinout_verifier.rs   LLM-backed datasheet verification
+    tests/
+      integration.rs
+  docs/
+  tests/fixtures/
+  scripts/release-app.sh
 ```
 
-## Data Flow
+## Runtime Flow
 
-```
-User enters part number
-  -> invoke('load_device')
+### Device load
+
+```text
+Frontend `loadDevice()`
+  -> invoke("load_device")
   -> dfp_manager::load_device()
-     -> Checks JSON cache in devices/
-     -> Falls back to .atpack extraction via edc_parser::parse_edc_file()
-     -> Auto-downloads pack from Microchip index if not found locally
-     -> Applies pinout overlays from pinouts/*.json
-     -> Loads CLC input source mapping from clc_sources/ (if available)
-  -> Frontend renders package diagram + pin table
-
-User assigns peripherals via dropdowns
-  -> Frontend tracks assignments in memory
-
-User clicks "Generate C Code"
-  -> invoke('generate_code')
-  -> codegen::generate::generate_c_files()
-     -> PPS unlock/lock register writes
-     -> TRIS / LAT / ANSEL / ODC port configuration
-     -> ICSP pins (MCLR, PGCn, PGDn) excluded — reservation comment only
-     -> oscillator.rs / fuses.rs append #pragma config sections
-  -> Returns { "pin_config.c": "...", "pin_config.h": "..." }
+     -> find cached device JSON or extracted `.PIC`
+     -> optionally fetch/extract matching `.atpack`
+     -> parse EDC XML into `DeviceData`
+     -> merge `pinouts/*.json` overlays
+     -> load `clc_sources/*.json` overrides
+  -> frontend renders pin table, package diagram, fuse UI, and CLC UI
 ```
 
-## Key Data Model
+### Code generation
 
-| Struct | File | Purpose |
-|---|---|---|
-| `DeviceData` | `edc_parser.rs` | Central model: pads, pinouts, PPS mappings, port registers |
-| `Pad` | `edc_parser.rs` | Physical pin: functions, RP number, port/bit, analog channels |
-| `Pinout` | `edc_parser.rs` | Package variant: pin count, position-to-pad mapping |
-| `ResolvedPin` | `edc_parser.rs` | Fully resolved pin for a specific package |
-| `PinConfig` | `generate.rs` | User's complete pin configuration for code generation |
-| `PinAssignment` | `generate.rs` | Single peripheral-to-pin assignment |
-| `OscConfig` | `oscillator.rs` | Oscillator settings: source, target frequency, crystal |
-| `PLLResult` | `oscillator.rs` | Computed PLL dividers and resulting frequencies |
-| `FuseConfig` | `fuses.rs` | Configuration fuse selections (ICSP, WDT, BOR) |
-| `PackIndex` | `pack_index.rs` | Cached Microchip pack index with device lookup |
-| `ClcModuleConfig` | `generate.rs` | CLC module configuration: logic mode, input sources, gate connections |
-| `DatasheetRef` | `datasheet_fetcher.rs` | Resolved datasheet PDF reference with URL and local cache path |
-| `VerifyResult` | `pinout_verifier.rs` | Pinout verification and CLC source extraction result from LLM |
+```text
+Frontend collects assignments/settings
+  -> invoke("generate_code")
+  -> codegen::generate::generate_c_files()
+     -> optional oscillator pragmas/init
+     -> optional fuse pragmas
+     -> optional PPS function
+     -> `configure_ports()`
+     -> optional op-amp enable function
+     -> optional CLC function
+     -> `system_init()`
+  -> frontend shows/exports the configured `<basename>.c` and `<basename>.h` pair
+```
 
-## Frontend
+### Verification
 
-The UI is vanilla HTML/CSS/JS with no build step and no framework. All state lives in global variables (`deviceData`, `assignments`, `signalNames`, `generatedFiles`). The frontend communicates with the Rust backend exclusively through Tauri's `invoke()` IPC — there are no REST endpoints or HTTP calls from the browser. File open/save/export flows also go through Rust commands backed by `tauri-plugin-dialog`, so config loading, pin-list export, generated-code export, and datasheet PDF selection use native desktop pickers instead of browser `Blob` or hidden file-input logic.
+```text
+Frontend resolves datasheet
+  -> invoke("find_datasheet")
+  -> local cache / Downloads / Microchip fallback
 
-Undo/redo is supported via `undoStack` / `redoStack` arrays.
+Frontend sends PDF or cached content
+  -> invoke("verify_pinout")
+  -> pinout_verifier::verify_pinout()
+     -> selects OpenAI or Anthropic from available key
+     -> compares parsed pin data against datasheet tables
+     -> optionally extracts CLC input-source mappings
+```
 
-### Theming
+## Frontend Model
 
-CSS custom properties in `:root` support dark (default) and light themes. Peripheral types are color-coded:
+The frontend keeps state in a few long-lived globals spread across ordered browser scripts under `frontend/static/app/`:
 
-| Peripheral | CSS variable |
+- `deviceData`: currently loaded device/package payload from Rust
+- `assignments`: pin-position keyed assignment map, including analog-sharing arrays
+- `signalNames`: per-pin user aliases used in generated macros
+- `generatedFiles`: generated output keyed by filename
+- `appSettings`: persisted appearance/startup settings
+- `PickleConfig`: unified theme tokens and shell-level UI constants loaded before first paint
+
+The UI is intentionally imperative:
+
+- renderers rebuild DOM sections directly
+- undo/redo uses cloned state snapshots
+- native menu items are forwarded as Tauri events and handled in the same JS app
+- pure state helpers live in `frontend/static/app/model.js` so they can be tested in Node without a DOM
+- theme variables and shell copy live in `frontend/static/app/config.js` so CSS and JS do not drift independently
+
+## Backend Modules
+
+| Module | Responsibility |
 |---|---|
-| UART | `--uart` |
-| SPI | `--spi` |
-| I2C | `--i2c` |
-| PWM | `--pwm` |
-| ADC | `--adc` |
-| Timer | `--timer` |
+| `commands.rs` + `commands/*.rs` | Frontend IPC surface, request/response shapes, and command orchestration |
+| `settings.rs` | Canonical settings defaults, normalization, and TOML rendering |
+| `edc_parser.rs` | Core device structs plus XML parsing and pin resolution |
+| `dfp_manager.rs` | Runtime data-root selection, DFP lookup/extraction, overlays, caches |
+| `pack_index.rs` | Fetches and caches the Microchip pack catalog |
+| `generate.rs` | Builds the generated C source/header pair |
+| `oscillator.rs` | PLL search and oscillator-specific generated code |
+| `fuses.rs` | Device-driven `#pragma config` generation |
+| `pinout_verifier.rs` | Datasheet prompt construction, provider selection, overlay persistence |
 
 ## Runtime Directories
 
-pickle can read runtime data from multiple roots:
-
-- the current repo root
-- a sibling `../config-pic` checkout when present
-- the Tauri app-data directory as fallback
-
-For mutable data (`devices/`, `dfp_cache/`, `pinouts/`), writes go to the first existing matching root so the desktop app can share caches and overlays with the working `config-pic` app in this workspace.
-
-These directories are used at runtime and excluded from version control:
+pickle reads from multiple roots and writes to the first appropriate mutable root so caches stay colocated with the data the app is already using.
 
 | Directory | Purpose |
 |---|---|
-| `dfp_cache/` | Extracted `.atpack` contents (EDC XML files) |
-| `dfp_cache/datasheets/` | Cached datasheet PDFs downloaded from Microchip |
-| `dfp_cache/verify_cache/` | Cached LLM verification results to avoid re-processing |
-| `devices/` | Parsed device data cached as JSON |
-| `pinouts/` | Pinout overlay files (corrections from verification or manual edits) |
-| `clc_sources/` | CLC input source mapping overrides (per-device JSON) |
+| `devices/` | Parsed `DeviceData` JSON cache |
+| `dfp_cache/` | Extracted `.atpack` contents and downloaded assets |
+| `dfp_cache/datasheets/` | Cached datasheet PDFs/text fallbacks |
+| `dfp_cache/verify_cache/` | Cached verification responses |
+| `pinouts/` | Manual or verified package overlay JSON |
+| `clc_sources/` | Per-device CLC input-source mapping overrides |
 
-## Release Staging
+## Settings
 
-Use `./scripts/release-app.sh` to build the macOS `.app` bundle and copy the latest `pickle.app` into `./bin/`. The script intentionally runs `cargo tauri build --bundles app` so it skips the known-bad DMG bundling path on macOS 26 while still staging a current app bundle for local use.
+`settings.toml` lives in the platform app-data directory and currently stores:
 
-## Dependencies
+- theme mode: `dark`, `light`, or `system`
+- startup policy: fixed device or `last-used`
+- toolchain policy: fallback compiler plus family-specific overrides for `PIC24` and `dsPIC33`
+- last successfully loaded device/package
 
-| Crate | Purpose |
-|---|---|
-| `tauri` 2 | Desktop app framework, IPC |
-| `serde` / `serde_json` | Serialization for all structs and IPC |
-| `roxmltree` | XML parsing for EDC `.PIC` files |
-| `zip` | `.atpack` (ZIP) extraction |
-| `reqwest` (blocking) | HTTP for pack index and pack downloads |
-| `regex` | Part number matching, pad name parsing |
-| `chrono` | Cache age calculation |
-| `base64` | PDF encoding for Anthropic API |
-| `dirs` | Home directory / cache path detection |
-| `dotenvy` | `.env` file for API keys |
-| `lopdf` | PDF page extraction |
-| `tempfile` | Temp directory for compile checks |
+The backend normalizes casing and whitespace before saving so the file stays stable and diff-friendly.
 
-## Project History
+## Validation
 
-pickle is a Rust/Tauri port of [config-pic](https://github.com/jihlenburg/config-pic), originally written in Python with FastAPI. The port replaces the web server with native IPC, `fetch()` with `invoke()`, and delivers the app as a standalone desktop binary.
+The Rust backend is covered by unit and integration tests in `src-tauri/tests` plus fixture-driven tests under `tests/fixtures/`. A normal repo validation pass is:
 
-## Test Coverage
+```bash
+./scripts/validate.sh
 
-29 unit tests + 7 integration tests across all code generation and parser modules:
+## Equivalent manual commands
 
-| Module | Tests | Coverage |
-|---|---|---|
-| `edc_parser` | 6 | Parse int, port info, RP number, canonical name, JSON round-trip, resolve pins |
-| `oscillator` | 12 | PLL targets (100/140/200 MHz), crystal inputs, VCO/FPFD constraints, divider ranges, unreachable frequency, pragma generation |
-| `fuses` | 4 | Default/custom fuses, section completeness, field coverage |
-| `generate` | 7 | Multi-file output, ICSP exclusion, call order, PPS lock/unlock, CLC register writes, CLC gate config, CLC logic modes |
-| integration | 7 | Fixture load, pin resolution, code generation, signal macros, oscillator+fuses, CLC end-to-end, overlay apply |
+```bash
+cd src-tauri
+cargo test
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+node --check frontend/static/pin_descriptions.js
+for file in frontend/static/app/*.js; do node --check "$file"; done
+node --test frontend/tests/*.test.js
+```

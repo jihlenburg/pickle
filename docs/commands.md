@@ -1,44 +1,61 @@
 # Tauri Commands
 
-pickle exposes IPC commands via `#[tauri::command]` in `src-tauri/src/commands.rs`. The frontend calls them with `window.__TAURI__.core.invoke('command_name', { args })`.
+pickle exposes its desktop/backend API through `#[tauri::command]` handlers in `src-tauri/src/commands.rs` and `src-tauri/src/commands/*.rs`.
 
-## Device Management
+- Frontend calls use `window.__TAURI__.core.invoke("command_name", { ...args })`.
+- Some long-running verification commands also emit `verify-progress` events so the UI can stream status text.
+- Request field names passed from JS are camelCase; several response payloads are hand-built JSON and therefore intentionally use the field names shown below.
+
+## Catalog
+
+| Command | Purpose |
+|---|---|
+| `list_devices` | List cached and indexed part numbers |
+| `refresh_index` | Refresh the Microchip pack index cache |
+| `index_status` | Report pack index availability/staleness |
+| `load_app_settings` | Load or create `settings.toml` |
+| `set_theme_mode` | Persist theme preference |
+| `remember_last_used_device` | Persist last loaded part/package |
+| `load_device` | Resolve a device/package into the frontend payload |
+| `open_text_file_dialog` | Pick and read a text file |
+| `open_binary_file_dialog` | Pick and read a binary file as base64 |
+| `save_text_file_dialog` | Save a text file via native dialog |
+| `export_generated_files_dialog` | Export multiple generated files into a folder |
+| `generate_code` | Generate the configured `<basename>.c` and `<basename>.h` pair |
+| `compiler_info` | Resolve the active family compiler and report version/path |
+| `compile_check` | Compile-check generated code with the resolved PIC24/dsPIC33 compiler |
+| `find_datasheet` | Resolve a datasheet from cache/download/text fallback |
+| `verify_pinout` | Run datasheet verification with OpenAI or Anthropic |
+| `apply_overlay` | Save package pin overlays to `pinouts/` |
+| `api_key_status` | Report whether any supported verification key is configured |
+
+## Device Index And Loading
 
 ### `list_devices`
 
-List all known device part numbers (cached locally + from Microchip pack index).
+Returns known part numbers from the pack index plus the subset already cached locally.
 
-**Parameters:** none
+Request: none
 
-**Response:**
+Response:
+
 ```json
 {
-  "devices": ["DSPIC33CK64MP102", "DSPIC33CK256MP508", ...],
+  "devices": ["DSPIC33CK64MP102", "DSPIC33CK256MP508"],
   "cached": ["DSPIC33CK64MP102"],
   "total": 347,
   "cached_count": 1
 }
 ```
 
-### `load_device`
-
-Load device data and resolve pins for a specific package variant.
-
-**Parameters:**
-| Name | Type | Required | Description |
-|---|---|---|---|
-| `partNumber` | string | yes | e.g. `"DSPIC33CK64MP102"` |
-| `package` | string | no | Package name; defaults to device's default pinout |
-
-**Response:** JSON object with `part_number`, `selected_package`, `packages`, `pin_count`, `pins` (array of resolved pins), `remappable_inputs`, `remappable_outputs`, `pps_input_mappings`, `pps_output_mappings`, `port_registers`, `fuse_defs` (available configuration fuse fields and values), `clc_input_sources` (device-specific CLC input source mapping, if available).
-
 ### `refresh_index`
 
-Re-fetch the Microchip pack index XML from the internet and update the local cache.
+Fetches the latest Microchip pack index and refreshes the local cache.
 
-**Parameters:** none
+Request: none
 
-**Response:**
+Response:
+
 ```json
 {
   "success": true,
@@ -50,11 +67,12 @@ Re-fetch the Microchip pack index XML from the internet and update the local cac
 
 ### `index_status`
 
-Check current pack index availability and staleness without fetching.
+Reads the current pack-index cache without refreshing it.
 
-**Parameters:** none
+Request: none
 
-**Response:**
+Response:
+
 ```json
 {
   "available": true,
@@ -65,66 +83,115 @@ Check current pack index availability and staleness without fetching.
 }
 ```
 
-## Behavior Settings
+### `load_device`
 
-These commands back the shared `settings.toml` file stored under the platform app data directory.
+Loads a device by part number, picks the requested package when valid, resolves pins, and returns the full frontend payload.
+
+Request:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `partNumber` | string | yes | Canonical or user-entered part number |
+| `package` | string | no | Package override; falls back to the device default pinout |
+
+Response:
+
+```json
+{
+  "part_number": "DSPIC33CK64MP102",
+  "selected_package": "SSOP-28",
+  "packages": {
+    "SSOP-28": { "pin_count": 28, "source": "edc" }
+  },
+  "pin_count": 28,
+  "pins": [],
+  "remappable_inputs": [],
+  "remappable_outputs": [],
+  "pps_input_mappings": [],
+  "pps_output_mappings": [],
+  "port_registers": {},
+  "fuse_defs": [],
+  "clc_input_sources": null
+}
+```
+
+`pins` contains resolved per-position pin objects from `DeviceData::resolve_pins()`, including pad name, functions, RP number, port metadata, and package position.
+
+## Settings
 
 ### `load_app_settings`
 
-Load the current behavior settings, creating the file with defaults if it does not exist yet.
+Loads and normalizes `settings.toml`, creating it with defaults if missing or empty.
 
-**Parameters:** none
+Request: none
 
-**Response:**
+Response:
+
 ```json
 {
   "path": "/Users/me/Library/Application Support/pickle/settings.toml",
   "settings": {
     "appearance": { "theme": "dark" },
     "startup": { "device": "last-used", "package": "" },
-    "last_used": { "part_number": "DSPIC33CK64MP102", "package": "TQFP-28" }
+    "toolchain": {
+      "fallback_compiler": "xc-dsc-gcc",
+      "family_compilers": {
+        "pic24": "xc16-gcc",
+        "dspic33": "xc-dsc-gcc"
+      }
+    },
+    "codegen": {
+      "output_basename": "mcu_init"
+    },
+    "last_used": { "part_number": "DSPIC33CK64MP102", "package": "SSOP-28" }
   }
 }
 ```
 
 ### `set_theme_mode`
 
-Persist the theme mode used by the frontend toggle.
+Persists the selected theme.
 
-**Parameters:**
-| Name | Type | Required | Description |
-|---|---|---|---|
-| `theme` | string | yes | One of `"dark"`, `"light"`, or `"system"` |
+Request:
 
-**Response:** none
+| Field | Type | Required |
+|---|---|---|
+| `theme` | string | yes |
+
+Allowed values are `dark`, `light`, and `system`. Invalid values are normalized by the backend.
 
 ### `remember_last_used_device`
 
-Update the `last_used` device/package after a successful load so `startup.device = "last-used"` can reopen it on the next launch.
+Stores the most recently loaded part/package so startup policy `last-used` can reopen it later.
 
-**Parameters:**
-| Name | Type | Required | Description |
-|---|---|---|---|
-| `partNumber` | string | yes | Canonical part number |
-| `package` | string | no | Last selected package |
+Request:
 
-**Response:** none
+| Field | Type | Required |
+|---|---|---|
+| `partNumber` | string | yes |
+| `package` | string | no |
+
+Response: none
 
 ## Native File Dialogs
 
-These commands back the desktop-native open/save/export flows used by the Tauri frontend.
+All dialog commands return `null` when the user cancels.
 
 ### `open_text_file_dialog`
 
-Open a text file with the platform file picker and return its contents.
+Request:
 
-**Parameters:**
-| Name | Type | Required | Description |
-|---|---|---|---|
-| `title` | string | no | Dialog title |
-| `filters` | array | no | File filters, each with `name` and `extensions` |
+```json
+{
+  "request": {
+    "title": "Open Pin Configuration",
+    "filters": [{ "name": "JSON", "extensions": ["json"] }]
+  }
+}
+```
 
-**Response:**
+Response:
+
 ```json
 {
   "path": "/Users/me/config.json",
@@ -134,15 +201,10 @@ Open a text file with the platform file picker and return its contents.
 
 ### `open_binary_file_dialog`
 
-Open a binary file with the platform file picker and return its bytes as base64.
+Same request shape as `open_text_file_dialog`.
 
-**Parameters:**
-| Name | Type | Required | Description |
-|---|---|---|---|
-| `title` | string | no | Dialog title |
-| `filters` | array | no | File filters, each with `name` and `extensions` |
+Response:
 
-**Response:**
 ```json
 {
   "path": "/Users/me/datasheet.pdf",
@@ -153,183 +215,269 @@ Open a binary file with the platform file picker and return its bytes as base64.
 
 ### `save_text_file_dialog`
 
-Open a save dialog and write a UTF-8 text file to the selected destination.
+Request:
 
-**Parameters:**
-| Name | Type | Required | Description |
-|---|---|---|---|
-| `title` | string | no | Dialog title |
-| `suggestedName` | string | yes | Default filename shown in the save dialog |
-| `contents` | string | yes | File contents |
-| `filters` | array | no | File filters, each with `name` and `extensions` |
-
-**Response:**
 ```json
 {
-  "path": "/Users/me/DSPIC33CK64MP102_28-pin SSOP.json"
+  "request": {
+    "title": "Save Pin Configuration",
+    "suggestedName": "DSPIC33CK64MP102_SSOP-28.json",
+    "contents": "{...}",
+    "filters": [{ "name": "JSON", "extensions": ["json"] }]
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "path": "/Users/me/DSPIC33CK64MP102_SSOP-28.json"
 }
 ```
 
 ### `export_generated_files_dialog`
 
-Open a folder picker and write multiple generated files into the selected directory.
+Request:
 
-**Parameters:**
-| Name | Type | Required | Description |
-|---|---|---|---|
-| `title` | string | no | Dialog title |
-| `files` | object | yes | Filename to contents mapping |
+```json
+{
+  "request": {
+    "title": "Export Generated C Files",
+    "files": {
+      "mcu_init.c": "/* ... */",
+      "mcu_init.h": "/* ... */"
+    }
+  }
+}
+```
 
-**Response:**
+Response:
+
 ```json
 {
   "directory": "/Users/me/Desktop/pickle-export",
   "writtenFiles": [
-    "/Users/me/Desktop/pickle-export/pin_config.c",
-    "/Users/me/Desktop/pickle-export/pin_config.h"
+    "/Users/me/Desktop/pickle-export/mcu_init.c",
+    "/Users/me/Desktop/pickle-export/mcu_init.h"
   ]
 }
 ```
 
-## Code Generation
+## Code Generation And Compile Checks
 
 ### `generate_code`
 
-Generate C source files from the current pin configuration.
+Generates the source/header pair used by the code tab and export flow. The
+default basename is `mcu_init`, but the backend reads `[codegen].output_basename`
+from `settings.toml` and names both files from that value.
 
-**Parameters** (as `CodegenRequest`):
-| Name | Type | Required | Description |
+Request:
+
+| Field | Type | Required | Notes |
 |---|---|---|---|
-| `partNumber` | string | yes | Target device |
-| `package` | string | no | Package variant |
-| `assignments` | array | yes | Pin assignments (see below) |
-| `signalNames` | object | no | `{ "pin_position": "signal_name" }` |
-| `digitalPins` | array | no | Pin positions forced to digital mode |
-| `oscillator` | object | no | Oscillator config (source, targetFoscMhz, crystalMhz, poscmd) |
-| `fuses` | object | no | Fuse config (ics, jtagen, fwdten, wdtps, boren, borv) |
-| `clc` | array | no | CLC module configs, each with `module` (1-4), `logicMode`, `dataSources` (4 DS indices), `gates` (4x4 T/N matrix), `polarities` |
+| `request.partNumber` | string | yes | Target part number |
+| `request.package` | string | no | Package variant |
+| `request.assignments` | array | yes | Flattened assignment list |
+| `request.signalNames` | object | no | Pin-position keyed alias map |
+| `request.digitalPins` | array | no | Explicit digital overrides |
+| `request.oscillator` | object | no | `source`, `targetFoscMhz`, `crystalMhz`, `poscmd` |
+| `request.fuses` | object | no | `selections` nested by register and field |
+| `request.clc` | object | no | Module-number keyed `ClcModuleConfig` map |
 
-Each assignment:
+If `request.oscillator` is present, clock-related fuse fields that it owns are
+still accepted in `request.fuses`, but they are ignored during emission so the
+generated source cannot contain duplicate `#pragma config` lines.
+
+Assignment entry shape:
+
 ```json
 {
   "pinPosition": 5,
   "rpNumber": 36,
-  "peripheral": "U1RX",
-  "direction": "in",
+  "peripheral": "U1TX",
+  "direction": "out",
   "ppsval": 1,
   "fixed": false
 }
 ```
 
-**Response:**
+Response:
+
 ```json
 {
   "files": {
-    "pin_config.c": "/* generated code ... */",
-    "pin_config.h": "#ifndef PIN_CONFIG_H ..."
+    "mcu_init.c": "/* generated source */",
+    "mcu_init.h": "/* generated header */"
   }
 }
 ```
 
 ### `compiler_info`
 
-Check whether the XC16 compiler is installed and accessible.
+Resolves the compiler for the requested part family, then checks for that executable on `PATH` or common Microchip install roots. When a `partNumber` is provided, availability also requires a matching compiler DFP (`-mdfp`) for that device.
 
-**Parameters:** none
+Request:
 
-**Response:**
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `partNumber` | string | no | Optional part number used to choose `xc16-gcc` for PIC24 or `xc-dsc-gcc` for dsPIC33 |
+
+Response:
+
 ```json
 {
   "available": true,
-  "path": "/Applications/microchip/xc16/v2.10/bin/xc16-gcc",
-  "version": "XC16 v2.10"
+  "command": "xc-dsc-gcc",
+  "device_family": "dspic33",
+  "path": "/Applications/microchip/xc-dsc/v3.10/bin/xc-dsc-gcc",
+  "version": "Microchip MPLAB XC-DSC C Compiler v3.10"
 }
 ```
 
 ### `compile_check`
 
-Test-compile generated C code using the local XC16 installation.
+Writes the generated files into a temporary directory and invokes the configured family compiler with `-mdfp=<pack>/xc16` and `-mcpu=<part>`. The DFP is resolved from installed MPLAB X packs first, then from pickle's cached/downloaded `.atpack` files.
 
-**Parameters:**
-| Name | Type | Required | Description |
-|---|---|---|---|
-| `code` | string | yes | C source code |
-| `header` | string | no | Header file content |
-| `partNumber` | string | yes | Target device (for `-mcpu` flag) |
+Request:
 
-**Response:**
+| Field | Type | Required |
+|---|---|---|
+| `request.code` | string | yes |
+| `request.header` | string | no |
+| `request.partNumber` | string | yes |
+
+Response:
+
 ```json
 {
   "success": true,
+  "command": "xc16-gcc",
+  "device_family": "pic24",
   "errors": "",
   "warnings": ""
 }
 ```
 
-## Pinout Verification
+## Datasheet Lookup And Verification
 
 ### `find_datasheet`
 
-Resolve and optionally download the official Microchip datasheet PDF for a device.
+Search order:
 
-**Parameters:**
-| Name | Type | Required | Description |
-|---|---|---|---|
-| `partNumber` | string | yes | Device part number |
-| `download` | bool | no | If true, download and cache the PDF locally (default: false) |
+1. cached datasheet files under `dfp_cache/datasheets`
+2. shallow scan of `~/Downloads`
+3. Microchip product-page resolution and PDF download
+4. text-extraction fallback when PDF download fails
 
-**Response:**
+Request:
+
+| Field | Type | Required |
+|---|---|---|
+| `partNumber` | string | yes |
+
+Response is `null` when nothing can be resolved. Otherwise it is one of these shapes:
+
+Local or downloaded PDF:
+
 ```json
 {
-  "url": "https://ww1.microchip.com/downloads/...",
-  "cached": true,
-  "localPath": "/path/to/dfp_cache/datasheets/DSPIC33CK64MP102.pdf"
+  "name": "DSPIC33CK64MP102-DS70005349.pdf",
+  "base64": "JVBERi0xLjcK...",
+  "source": "local"
 }
 ```
 
+The local variant also includes `path`; the downloaded variant also includes `revision`.
+
+Text fallback:
+
+```json
+{
+  "name": "DSPIC33CK64MP102-DS70005349.md",
+  "text": "# Extracted datasheet text...",
+  "source": "text_proxy",
+  "revision": "DS70005349",
+  "pdf_url": "https://..."
+}
+```
+
+This command emits `verify-progress` events while it searches/downloads.
+
 ### `verify_pinout`
 
-Send a datasheet PDF to an LLM (Anthropic or OpenAI) to cross-check the parsed pinout against the official documentation and extract CLC input source mappings.
+Runs the LLM-backed datasheet comparison.
 
-**Parameters:**
-| Name | Type | Required | Description |
+Request:
+
+| Field | Type | Required | Notes |
 |---|---|---|---|
-| `pdfBase64` | string | yes | Base64-encoded PDF file |
-| `partNumber` | string | yes | Device part number |
-| `package` | string | no | Package variant to verify |
-| `apiKey` | string | no | LLM API key (falls back to `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` env var) |
-| `provider` | string | no | LLM provider: `"anthropic"` (default) or `"openai"` |
+| `pdfBase64` | string | yes | Datasheet bytes encoded as base64 |
+| `partNumber` | string | yes | Device under test |
+| `package` | string | no | Package to compare against |
+| `apiKey` | string | no | Optional override; otherwise backend checks `OPENAI_API_KEY` first, then `ANTHROPIC_API_KEY` |
 
-**Response:** `VerifyResult` with per-package pin corrections, match scores, notes, and `clc_input_sources` (extracted CLC input source mapping, if found in the datasheet).
+Response: serialized `VerifyResult`
+
+```json
+{
+  "part_number": "DSPIC33CK64MP102",
+  "packages": {},
+  "notes": [],
+  "clc_input_sources": [
+    ["CLCINA", "Fcy", "CLC3OUT", "LPRC", "REFCLKO", "Reserved", "SCCP2 Aux", "SCCP4 Aux"],
+    ["CLCINB", "Reserved", "CMP1", "UART1 TX", "Reserved", "Reserved", "SCCP1 OC", "SCCP2 OC"],
+    ["CLCINC", "CLC1OUT", "CMP2", "SPI1 SDO", "UART1 RX", "CLC4OUT", "SCCP3 CEF", "SCCP4 CEF"],
+    ["PWM Event A", "CLC2OUT", "CMP3", "SPI1 SDI", "Reserved", "CLCIND", "SCCP1 Aux", "SCCP3 Aux"]
+  ]
+}
+```
+
+The real response includes per-package pin maps, `pin_functions`, correction lists, and optional extracted CLC input-source tables. This command also emits `verify-progress` events.
 
 ### `apply_overlay`
 
-Save verified pinout corrections as a JSON overlay file in `pinouts/`. If the verification result included CLC input source mappings, they are also saved to `clc_sources/`.
+Writes package pin overlays to `pinouts/<PART>.json`.
 
-**Parameters:**
-| Name | Type | Required | Description |
-|---|---|---|---|
-| `partNumber` | string | yes | Device part number |
-| `packages` | object | yes | Package name -> pin data mapping |
+Request:
 
-**Response:**
+```json
+{
+  "request": {
+    "partNumber": "DSPIC33CK64MP102",
+    "packages": {
+      "SSOP-28": {
+        "pin_count": 28,
+        "pins": {
+          "1": "MCLR",
+          "2": "RB0"
+        }
+      }
+    }
+  }
+}
+```
+
+Response:
+
 ```json
 {
   "success": true,
-  "path": "pinouts/DSPIC33CK64MP102.json"
+  "path": "/.../pinouts/DSPIC33CK64MP102.json"
 }
 ```
 
 ### `api_key_status`
 
-Check which LLM API keys are configured (via `.env` or environment variables). Supports both Anthropic (Anthropic) and OpenAI providers.
+Reports whether either supported provider key is available.
 
-**Parameters:** none
+Request: none
 
-**Response:**
+Response:
+
 ```json
 {
-  "anthropic": { "configured": true, "hint": "...sk-1234" },
-  "openai": { "configured": true, "hint": "...sk-5678" }
+  "configured": true,
+  "hint": "...abcd"
 }
 ```

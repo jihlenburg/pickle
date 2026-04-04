@@ -1,6 +1,6 @@
-//! C code generator for dsPIC33 PPS pin configuration.
+//! C code generator for dsPIC33 and PIC24 PPS pin configuration.
 //!
-//! Generates pin_config.h and pin_config.c for PPS-remappable and fixed-function
+//! Generates C and header outputs for PPS-remappable and fixed-function
 //! pin assignments. Outputs MISRA C:2012 compliant C99 code.
 //!
 //! Generation is intentionally phase-ordered:
@@ -10,11 +10,12 @@
 //! 4. optional analog peripheral enables
 //! 5. `system_init()` calling those routines in hardware-safe order
 
+use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use crate::codegen::oscillator::{generate_osc_code, OscConfig};
+use crate::codegen::oscillator::{generate_osc_code, managed_config_fields, OscConfig};
 use crate::parser::edc_parser::DeviceData;
 
 /// Regex for identifying ICSP/debug pins
@@ -23,6 +24,40 @@ const ICSP_PATTERN: &str = r"^MCLR$|^PGC\d$|^PGD\d$|^PGEC\d$|^PGED\d$";
 const PPS_UNLOCK: &str = "0x0000U";
 const PPS_LOCK: &str = "0x0800U";
 const COMMENT_COL: usize = 40;
+pub const DEFAULT_OUTPUT_BASENAME: &str = "mcu_init";
+
+static ICSP_RE: Lazy<Regex> = Lazy::new(|| Regex::new(ICSP_PATTERN).unwrap());
+static OPAMP_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^OA(\d+)(OUT|IN[+-]?)$").unwrap());
+static OPAMP_NUM_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^OA(\d+)").unwrap());
+static ANALOG_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^AN[A-Z]?\d+$").unwrap());
+static SAFE_SIGNAL_NAME_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"[^A-Za-z0-9_]").unwrap());
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeneratedFileNames {
+    pub basename: String,
+    pub source: String,
+    pub header: String,
+}
+
+pub fn generated_file_names(output_basename: &str) -> GeneratedFileNames {
+    let basename = if output_basename.trim().is_empty() {
+        DEFAULT_OUTPUT_BASENAME.to_string()
+    } else {
+        output_basename.trim().to_string()
+    };
+
+    GeneratedFileNames {
+        source: format!("{basename}.c"),
+        header: format!("{basename}.h"),
+        basename,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct GenerateOutputOptions<'a> {
+    pub package: Option<&'a str>,
+    pub output_basename: &'a str,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PinAssignment {
@@ -39,6 +74,169 @@ pub struct PinAssignment {
 
 fn default_direction() -> String {
     "in".to_string()
+}
+
+fn push_section_comment(lines: &mut Vec<String>, title: &str, body: &[&str]) {
+    lines.push(
+        "/* ---------------------------------------------------------------------------".into(),
+    );
+    lines.push(format!(" * {}", title));
+    for line in body {
+        lines.push(format!(" * {}", line));
+    }
+    lines.push(
+        " * -------------------------------------------------------------------------*/".into(),
+    );
+}
+
+fn extend_aligned_sections(lines: &mut Vec<String>, text: &str) {
+    let mut sections: Vec<Vec<String>> = vec![vec![]];
+    for line in text.lines() {
+        if line.is_empty() {
+            sections.push(vec![]);
+        } else {
+            sections
+                .last_mut()
+                .expect("sections always contains at least one block")
+                .push(line.to_string());
+        }
+    }
+
+    for (index, section) in sections.iter().enumerate() {
+        if !section.is_empty() {
+            lines.extend(align_comments(section));
+        }
+        if index + 1 < sections.len() {
+            lines.push(String::new());
+        }
+    }
+}
+
+fn pragma_config_field(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let rest = trimmed.strip_prefix("#pragma config ")?;
+    let (field, _) = rest.split_once('=')?;
+    Some(field.trim())
+}
+
+fn filter_fuse_pragmas_for_oscillator(
+    fuse_text: &str,
+    osc_config: Option<&OscConfig>,
+) -> Option<String> {
+    let trimmed = fuse_text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let Some(osc) = osc_config else {
+        return Some(trimmed.to_string());
+    };
+
+    let excluded_fields = managed_config_fields(osc);
+    if excluded_fields.is_empty() {
+        return Some(trimmed.to_string());
+    }
+
+    let kept_sections: Vec<String> = trimmed
+        .split("\n\n")
+        .filter_map(|section| {
+            let mut kept_lines = Vec::new();
+            let mut kept_pragmas = 0usize;
+
+            for line in section.lines() {
+                if let Some(field) = pragma_config_field(line) {
+                    if excluded_fields.contains(field) {
+                        continue;
+                    }
+                    kept_pragmas += 1;
+                }
+                kept_lines.push(line.to_string());
+            }
+
+            if kept_pragmas == 0 {
+                None
+            } else {
+                Some(kept_lines.join("\n"))
+            }
+        })
+        .collect();
+
+    if kept_sections.is_empty() {
+        None
+    } else {
+        Some(kept_sections.join("\n\n"))
+    }
+}
+
+fn sanitize_signal_name(name: &str) -> String {
+    SAFE_SIGNAL_NAME_RE.replace_all(name, "_").to_uppercase()
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ClcRegisterValues {
+    conl: u16,
+    conl_enable: u16,
+    conh: u16,
+    sel: u16,
+    glsl: u16,
+    glsh: u16,
+}
+
+fn compute_clc_register_values(config: &ClcModuleConfig) -> ClcRegisterValues {
+    let mut conl = (config.mode & 0x7) as u16;
+    if config.lcpol {
+        conl |= 1 << 5;
+    }
+    if config.lcoe {
+        conl |= 1 << 7;
+    }
+    if config.intn {
+        conl |= 1 << 10;
+    }
+    if config.intp {
+        conl |= 1 << 11;
+    }
+
+    let mut conh = 0;
+    for gate in 0..4 {
+        if config.gpol[gate] {
+            conh |= 1 << gate;
+        }
+    }
+
+    let sel = (config.ds[0] as u16 & 0x7)
+        | ((config.ds[1] as u16 & 0x7) << 4)
+        | ((config.ds[2] as u16 & 0x7) << 8)
+        | ((config.ds[3] as u16 & 0x7) << 12);
+
+    let mut glsl = 0;
+    for bit in 0..8 {
+        if config.gates[0][bit] {
+            glsl |= 1 << bit;
+        }
+        if config.gates[1][bit] {
+            glsl |= 1 << (bit + 8);
+        }
+    }
+
+    let mut glsh = 0;
+    for bit in 0..8 {
+        if config.gates[2][bit] {
+            glsh |= 1 << bit;
+        }
+        if config.gates[3][bit] {
+            glsh |= 1 << (bit + 8);
+        }
+    }
+
+    ClcRegisterValues {
+        conl,
+        conl_enable: conl | (1 << 15),
+        conh,
+        sel,
+        glsl,
+        glsh,
+    }
 }
 
 /// Configuration for a single CLC module (CLC1-4).
@@ -68,9 +266,14 @@ pub struct ClcModuleConfig {
 
 /// CLC mode names for generated comments
 const CLC_MODE_NAMES: [&str; 8] = [
-    "AND-OR", "OR-XOR", "4-input AND", "S-R Latch",
-    "1-input D flip-flop with S/R", "2-input D flip-flop with R",
-    "J-K flip-flop with R", "Transparent latch with S/R",
+    "AND-OR",
+    "OR-XOR",
+    "4-input AND",
+    "S-R Latch",
+    "1-input D flip-flop with S/R",
+    "2-input D flip-flop with R",
+    "J-K flip-flop with R",
+    "Transparent latch with S/R",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -130,16 +333,35 @@ pub fn generate_c_files(
     fuse_pragmas: Option<&str>,
     clc_modules: Option<&HashMap<u32, ClcModuleConfig>>,
 ) -> HashMap<String, String> {
-    let pinout = device.get_pinout(package);
-    let resolved = device.resolve_pins(package);
+    generate_c_files_named(
+        device,
+        config,
+        signal_names,
+        osc_config,
+        fuse_pragmas,
+        clc_modules,
+        GenerateOutputOptions {
+            package,
+            output_basename: DEFAULT_OUTPUT_BASENAME,
+        },
+    )
+}
+
+pub fn generate_c_files_named(
+    device: &DeviceData,
+    config: &PinConfig,
+    signal_names: Option<&HashMap<u32, String>>,
+    osc_config: Option<&OscConfig>,
+    fuse_pragmas: Option<&str>,
+    clc_modules: Option<&HashMap<u32, ClcModuleConfig>>,
+    output: GenerateOutputOptions<'_>,
+) -> HashMap<String, String> {
+    let filenames = generated_file_names(output.output_basename);
+    let pinout = device.get_pinout(output.package);
+    let resolved = device.resolve_pins(output.package);
     let pin_by_pos: HashMap<u32, _> = resolved.iter().map(|p| (p.position, p)).collect();
     let empty_sig: HashMap<u32, String> = HashMap::new();
     let sig = signal_names.unwrap_or(&empty_sig);
-
-    let icsp_re = Regex::new(ICSP_PATTERN).unwrap();
-    let opamp_re = Regex::new(r"^OA(\d+)(OUT|IN[+-]?)$").unwrap();
-    let opamp_num_re = Regex::new(r"^OA(\d+)").unwrap();
-    let analog_re = Regex::new(r"^AN[A-Z]?\d+$").unwrap();
 
     // PPS and fixed-function assignments feed different generated sections.
     let pps_assignments: Vec<_> = config.assignments.iter().filter(|a| !a.fixed).collect();
@@ -175,21 +397,23 @@ pub fn generate_c_files(
         .any(|a| a.direction == "in" || a.direction == "out");
     let has_opamp = fixed_assignments
         .iter()
-        .any(|a| opamp_re.is_match(&a.peripheral));
-    let has_clc = clc_modules.map_or(false, |m| !m.is_empty());
+        .any(|a| OPAMP_RE.is_match(&a.peripheral));
+    let has_clc = clc_modules.is_some_and(|m| !m.is_empty());
 
     let (osc_pragmas, osc_init) = if let Some(osc) = osc_config {
         generate_osc_code(osc)
     } else {
         (String::new(), String::new())
     };
+    let filtered_fuse_pragmas =
+        fuse_pragmas.and_then(|text| filter_fuse_pragmas_for_oscillator(text, osc_config));
 
     // =========================================================================
-    // Generate pin_config.h
+    // Generate the configured header output.
     // =========================================================================
     let mut h_lines = Vec::new();
     h_lines.push("/**".into());
-    h_lines.push(" * @file   pin_config.h".into());
+    h_lines.push(format!(" * @file   {}", filenames.header));
     h_lines.push(format!(
         " * @brief  Pin configuration header for {} ({})",
         device.part_number, pinout.package
@@ -206,15 +430,11 @@ pub fn generate_c_files(
 
     // Signal name defines
     if !sig.is_empty() {
-        h_lines.push(
-            "/* ---------------------------------------------------------------------------".into(),
+        push_section_comment(
+            &mut h_lines,
+            "Signal name aliases",
+            &["Maps user-defined signal names to PORT/LAT/TRIS bit-fields."],
         );
-        h_lines.push(" * Signal name aliases".into());
-        h_lines.push(" * Maps user-defined signal names to PORT/LAT/TRIS bit-fields.".into());
-        h_lines.push(
-            " * -------------------------------------------------------------------------*/".into(),
-        );
-        let safe_re = Regex::new(r"[^A-Za-z0-9_]").unwrap();
         for assign in &config.assignments {
             if let Some(name) = sig.get(&assign.pin_position) {
                 if name.is_empty() {
@@ -222,7 +442,7 @@ pub fn generate_c_files(
                 }
                 if let Some(pin) = pin_by_pos.get(&assign.pin_position) {
                     if let (Some(port), Some(bit)) = (&pin.port, pin.port_bit) {
-                        let safe_name = safe_re.replace_all(name, "_").to_uppercase();
+                        let safe_name = sanitize_signal_name(name);
                         h_lines.push(format!(
                             "#define {}_PORT  (PORT{}bits.R{}{})",
                             safe_name, port, port, bit
@@ -263,12 +483,12 @@ pub fn generate_c_files(
     h_lines.push(String::new());
 
     // =========================================================================
-    // Generate pin_config.c
+    // Generate the configured C output.
     // =========================================================================
     let mut c_lines: Vec<String> = Vec::new();
 
     c_lines.push("/**".into());
-    c_lines.push(" * @file   pin_config.c".into());
+    c_lines.push(format!(" * @file   {}", filenames.source));
     c_lines.push(format!(
         " * @brief  Pin configuration for {} ({})",
         device.part_number, pinout.package
@@ -280,7 +500,7 @@ pub fn generate_c_files(
     c_lines.push(" * @note   Generated by pickle. MISRA C:2012 compliant.".into());
     c_lines.push(" */".into());
     c_lines.push(String::new());
-    c_lines.push("#include \"pin_config.h\"".into());
+    c_lines.push(format!("#include \"{}\"", filenames.header));
     c_lines.push(String::new());
 
     // Oscillator pragmas are emitted first because Microchip expects config
@@ -298,25 +518,9 @@ pub fn generate_c_files(
 
     // Align fuse pragmas section-by-section so unrelated pragma groups do not
     // try to share one huge comment column.
-    if let Some(fuse_text) = fuse_pragmas {
+    if let Some(fuse_text) = filtered_fuse_pragmas.as_deref() {
         if !fuse_text.is_empty() {
-            // Align each section separately
-            let mut sections: Vec<Vec<String>> = vec![vec![]];
-            for line in fuse_text.lines() {
-                if line.is_empty() {
-                    sections.push(vec![]);
-                } else {
-                    sections.last_mut().unwrap().push(line.to_string());
-                }
-            }
-            for (i, section) in sections.iter().enumerate() {
-                if !section.is_empty() {
-                    c_lines.extend(align_comments(section));
-                }
-                if i < sections.len() - 1 {
-                    c_lines.push(String::new());
-                }
-            }
+            extend_aligned_sections(&mut c_lines, fuse_text);
             c_lines.push(String::new());
         }
     }
@@ -337,15 +541,14 @@ pub fn generate_c_files(
         .collect();
 
     if !pps_in.is_empty() || !pps_out.is_empty() {
-        c_lines.push(
-            "/* ---------------------------------------------------------------------------".into(),
-        );
-        c_lines.push(" * configure_pps".into());
-        c_lines.push(" *".into());
-        c_lines.push(" * Configures Peripheral Pin Select (PPS) input and output mappings.".into());
-        c_lines.push(" * The RPCON register is unlocked before writing and locked after.".into());
-        c_lines.push(
-            " * -------------------------------------------------------------------------*/".into(),
+        push_section_comment(
+            &mut c_lines,
+            "configure_pps",
+            &[
+                "",
+                "Configures Peripheral Pin Select (PPS) input and output mappings.",
+                "The RPCON register is unlocked before writing and locked after.",
+            ],
         );
         c_lines.push("void configure_pps(void)".into());
         c_lines.push("{".into());
@@ -438,15 +641,14 @@ pub fn generate_c_files(
 
     // Port configuration runs after PPS so remappable functions are bound before
     // the pins are driven or sampled.
-    c_lines.push(
-        "/* ---------------------------------------------------------------------------".into(),
-    );
-    c_lines.push(" * configure_ports".into());
-    c_lines.push(" *".into());
-    c_lines.push(" * Configures ANSELx (analog/digital), and TRISx (direction) registers".into());
-    c_lines.push(" * for all assigned pins.".into());
-    c_lines.push(
-        " * -------------------------------------------------------------------------*/".into(),
+    push_section_comment(
+        &mut c_lines,
+        "configure_ports",
+        &[
+            "",
+            "Configures ANSELx (analog/digital), and TRISx (direction) registers",
+            "for all assigned pins.",
+        ],
     );
     c_lines.push("void configure_ports(void)".into());
     c_lines.push("{".into());
@@ -464,7 +666,7 @@ pub fn generate_c_files(
             let port = pin.port.as_ref().unwrap().clone();
             let bit = pin.port_bit.unwrap_or(0);
 
-            if icsp_re.is_match(&assign.peripheral) {
+            if ICSP_RE.is_match(&assign.peripheral) {
                 icsp_pins.push((port, bit, assign.peripheral.clone()));
                 continue;
             }
@@ -514,7 +716,7 @@ pub fn generate_c_files(
         for (key, (periph, _, _)) in &port_config {
             // In generated code, explicit analog functions keep ANSEL enabled and
             // everything else defaults to digital behavior.
-            if analog_re.is_match(periph) {
+            if ANALOG_RE.is_match(periph) {
                 analog_pins.insert(key.clone());
             } else {
                 digital_pins.insert(key.clone());
@@ -591,8 +793,8 @@ pub fn generate_c_files(
     // Op-amp enables
     let mut opamp_nums: BTreeSet<u32> = BTreeSet::new();
     for assign in &fixed_assignments {
-        if opamp_re.is_match(&assign.peripheral) {
-            if let Some(caps) = opamp_num_re.captures(&assign.peripheral) {
+        if OPAMP_RE.is_match(&assign.peripheral) {
+            if let Some(caps) = OPAMP_NUM_RE.captures(&assign.peripheral) {
                 if let Ok(num) = caps.get(1).unwrap().as_str().parse::<u32>() {
                     opamp_nums.insert(num);
                 }
@@ -601,15 +803,14 @@ pub fn generate_c_files(
     }
 
     if !opamp_nums.is_empty() {
-        c_lines.push(
-            "/* ---------------------------------------------------------------------------".into(),
-        );
-        c_lines.push(" * configure_analog".into());
-        c_lines.push(" *".into());
-        c_lines.push(" * Enables on-chip op-amp modules. Gain and mode settings should be".into());
-        c_lines.push(" * configured separately according to the application requirements.".into());
-        c_lines.push(
-            " * -------------------------------------------------------------------------*/".into(),
+        push_section_comment(
+            &mut c_lines,
+            "configure_analog",
+            &[
+                "",
+                "Enables on-chip op-amp modules. Gain and mode settings should be",
+                "configured separately according to the application requirements.",
+            ],
         );
         c_lines.push("void configure_analog(void)".into());
         c_lines.push("{".into());
@@ -628,15 +829,14 @@ pub fn generate_c_files(
     // configure_clc() — CLC module initialization
     if has_clc {
         if let Some(clc_mods) = clc_modules {
-            c_lines.push(
-                "/* ---------------------------------------------------------------------------".into(),
-            );
-            c_lines.push(" * configure_clc".into());
-            c_lines.push(" *".into());
-            c_lines.push(" * Configures the Configurable Logic Cell modules. Each module is disabled".into());
-            c_lines.push(" * before writing its configuration registers, then enabled last.".into());
-            c_lines.push(
-                " * -------------------------------------------------------------------------*/".into(),
+            push_section_comment(
+                &mut c_lines,
+                "configure_clc",
+                &[
+                    "",
+                    "Configures the Configurable Logic Cell modules. Each module is disabled",
+                    "before writing its configuration registers, then enabled last.",
+                ],
             );
             c_lines.push("void configure_clc(void)".into());
             c_lines.push("{".into());
@@ -647,69 +847,46 @@ pub fn generate_c_files(
             for (i, idx) in sorted_keys.iter().enumerate() {
                 let mod_cfg = &clc_mods[idx];
                 let n = idx;
-
-                // Compute register values
-                let mut conl: u16 = (mod_cfg.mode & 0x7) as u16;
-                if mod_cfg.lcpol { conl |= 1 << 5; }
-                if mod_cfg.lcoe  { conl |= 1 << 7; }
-                if mod_cfg.intn  { conl |= 1 << 10; }
-                if mod_cfg.intp  { conl |= 1 << 11; }
-                // LCEN set separately at the end
-
-                let mut conh: u16 = 0;
-                for g in 0..4 {
-                    if mod_cfg.gpol[g] { conh |= 1 << g; }
-                }
-
-                let sel: u16 = (mod_cfg.ds[0] as u16 & 0x7)
-                    | ((mod_cfg.ds[1] as u16 & 0x7) << 4)
-                    | ((mod_cfg.ds[2] as u16 & 0x7) << 8)
-                    | ((mod_cfg.ds[3] as u16 & 0x7) << 12);
-
-                let mut glsl: u16 = 0;
-                for b in 0..8 {
-                    if mod_cfg.gates[0][b] { glsl |= 1 << b; }
-                    if mod_cfg.gates[1][b] { glsl |= 1 << (b + 8); }
-                }
-
-                let mut glsh: u16 = 0;
-                for b in 0..8 {
-                    if mod_cfg.gates[2][b] { glsh |= 1 << b; }
-                    if mod_cfg.gates[3][b] { glsh |= 1 << (b + 8); }
-                }
-
-                let conl_enable = conl | (1 << 15); // LCEN = 1
-
-                let mode_name = CLC_MODE_NAMES.get(mod_cfg.mode as usize).unwrap_or(&"Unknown");
+                let registers = compute_clc_register_values(mod_cfg);
+                let mode_name = CLC_MODE_NAMES
+                    .get(mod_cfg.mode as usize)
+                    .unwrap_or(&"Unknown");
 
                 let mut clc_lines = Vec::new();
                 clc_lines.push(format!("    /* CLC{} — {} */", n, mode_name));
                 clc_lines.push(format!(
-                    "    CLC{}CONL = 0x0000U; /* Disable module before configuration */", n
+                    "    CLC{}CONL = 0x0000U; /* Disable module before configuration */",
+                    n
                 ));
                 clc_lines.push(format!(
                     "    CLC{}SEL  = 0x{:04X}U; /* DS1={}, DS2={}, DS3={}, DS4={} */",
-                    n, sel, mod_cfg.ds[0], mod_cfg.ds[1], mod_cfg.ds[2], mod_cfg.ds[3]
+                    n, registers.sel, mod_cfg.ds[0], mod_cfg.ds[1], mod_cfg.ds[2], mod_cfg.ds[3]
                 ));
                 clc_lines.push(format!(
-                    "    CLC{}GLSL = 0x{:04X}U; /* Gate 1-2 source enables */", n, glsl
+                    "    CLC{}GLSL = 0x{:04X}U; /* Gate 1-2 source enables */",
+                    n, registers.glsl
                 ));
                 clc_lines.push(format!(
-                    "    CLC{}GLSH = 0x{:04X}U; /* Gate 3-4 source enables */", n, glsh
+                    "    CLC{}GLSH = 0x{:04X}U; /* Gate 3-4 source enables */",
+                    n, registers.glsh
                 ));
                 clc_lines.push(format!(
-                    "    CLC{}CONH = 0x{:04X}U; /* Gate polarity */", n, conh
+                    "    CLC{}CONH = 0x{:04X}U; /* Gate polarity */",
+                    n, registers.conh
                 ));
                 if mod_cfg.lcen {
                     clc_lines.push(format!(
                         "    CLC{}CONL = 0x{:04X}U; /* Enable: MODE={}, LCOE={}, LCPOL={} */",
-                        n, conl_enable, mod_cfg.mode,
+                        n,
+                        registers.conl_enable,
+                        mod_cfg.mode,
                         if mod_cfg.lcoe { "on" } else { "off" },
                         if mod_cfg.lcpol { "inv" } else { "norm" }
                     ));
                 } else {
                     clc_lines.push(format!(
-                        "    CLC{}CONL = 0x{:04X}U; /* Module disabled */", n, conl
+                        "    CLC{}CONL = 0x{:04X}U; /* Module disabled */",
+                        n, registers.conl
                     ));
                 }
 
@@ -727,19 +904,15 @@ pub fn generate_c_files(
     }
 
     // system_init()
-    c_lines.push(
-        "/* ---------------------------------------------------------------------------".into(),
-    );
-    c_lines.push(" * system_init".into());
-    c_lines.push(" *".into());
-    c_lines
-        .push(" * Master initialization function. Calls all configuration routines in the".into());
-    c_lines.push(
-        " * correct order: oscillator first (clock must be stable), then PPS (requires".into(),
-    );
-    c_lines.push(" * unlock/lock), then port direction/analog, then peripheral enables.".into());
-    c_lines.push(
-        " * -------------------------------------------------------------------------*/".into(),
+    push_section_comment(
+        &mut c_lines,
+        "system_init",
+        &[
+            "",
+            "Master initialization function. Calls all configuration routines in the",
+            "correct order: oscillator first (clock must be stable), then PPS (requires",
+            "unlock/lock), then port direction/analog, then peripheral enables.",
+        ],
     );
     c_lines.push("void system_init(void)".into());
     c_lines.push("{".into());
@@ -759,12 +932,12 @@ pub fn generate_c_files(
     c_lines.push("}".into());
     c_lines.push(String::new());
 
-    c_lines.push("/* End of pin_config.c */".into());
+    c_lines.push(format!("/* End of {} */", filenames.source));
     c_lines.push(String::new());
 
     let mut result = HashMap::new();
-    result.insert("pin_config.h".to_string(), h_lines.join("\n"));
-    result.insert("pin_config.c".to_string(), c_lines.join("\n"));
+    result.insert(filenames.header, h_lines.join("\n"));
+    result.insert(filenames.source, c_lines.join("\n"));
     result
 }
 
@@ -777,17 +950,41 @@ pub fn generate_c_code(
     osc_config: Option<&OscConfig>,
     fuse_pragmas: Option<&str>,
 ) -> String {
-    let files = generate_c_files(
+    generate_c_code_named(
         device,
         config,
         package,
         signal_names,
         osc_config,
         fuse_pragmas,
+        DEFAULT_OUTPUT_BASENAME,
+    )
+}
+
+pub fn generate_c_code_named(
+    device: &DeviceData,
+    config: &PinConfig,
+    package: Option<&str>,
+    signal_names: Option<&HashMap<u32, String>>,
+    osc_config: Option<&OscConfig>,
+    fuse_pragmas: Option<&str>,
+    output_basename: &str,
+) -> String {
+    let filenames = generated_file_names(output_basename);
+    let files = generate_c_files_named(
+        device,
+        config,
+        signal_names,
+        osc_config,
+        fuse_pragmas,
         None,
+        GenerateOutputOptions {
+            package,
+            output_basename,
+        },
     );
-    let h_content = &files["pin_config.h"];
-    let c_content = &files["pin_config.c"];
+    let h_content = &files[&filenames.header];
+    let c_content = &files[&filenames.source];
 
     let mut defines = Vec::new();
     let mut in_defines = false;
@@ -808,11 +1005,14 @@ pub fn generate_c_code(
         }
     }
 
-    let mut merged = c_content.replace("#include \"pin_config.h\"", "#include <xc.h>");
+    let mut merged = c_content.replace(
+        &format!("#include \"{}\"", filenames.header),
+        "#include <xc.h>",
+    );
 
     if !defines.is_empty() {
-        // XC16 compile-check uses a single translation unit, so inline the signal-name
-        // macros that would normally come from `pin_config.h`.
+        // Family-specific compile-checks use a single translation unit, so inline the signal-name
+        // macros that would normally come from the generated header.
         let define_block = defines.join("\n");
         merged = merged.replace(
             "#include <xc.h>\n",
@@ -994,6 +1194,7 @@ mod tests {
     #[test]
     fn test_generates_header_and_source() {
         let device = make_test_device();
+        let filenames = generated_file_names(DEFAULT_OUTPUT_BASENAME);
         let config = PinConfig {
             part_number: "DSPIC33CK64MP102".to_string(),
             assignments: vec![PinAssignment {
@@ -1007,10 +1208,10 @@ mod tests {
             digital_pins: vec![],
         };
         let files = generate_c_files(&device, &config, None, None, None, None, None);
-        assert!(files.contains_key("pin_config.h"));
-        assert!(files.contains_key("pin_config.c"));
-        assert!(files["pin_config.h"].contains("#ifndef PIN_CONFIG_H"));
-        assert!(files["pin_config.c"].contains("#include \"pin_config.h\""));
+        assert!(files.contains_key(&filenames.header));
+        assert!(files.contains_key(&filenames.source));
+        assert!(files[&filenames.header].contains("#ifndef PIN_CONFIG_H"));
+        assert!(files[&filenames.source].contains(&format!("#include \"{}\"", filenames.header)));
     }
 
     #[test]
@@ -1039,7 +1240,7 @@ mod tests {
             digital_pins: vec![],
         };
         let files = generate_c_files(&device, &config, None, None, None, None, None);
-        let c = &files["pin_config.c"];
+        let c = &files[&generated_file_names(DEFAULT_OUTPUT_BASENAME).source];
         assert!(c.contains("reserved for PGD1"));
         assert!(c.contains("reserved for PGC1"));
         assert!(!c.contains("ANSELB3") || !c.contains("= 0U"));
@@ -1067,7 +1268,7 @@ mod tests {
             digital_pins: vec![],
         };
         let files = generate_c_files(&device, &config, None, None, Some(&osc), None, None);
-        let c = &files["pin_config.c"];
+        let c = &files[&generated_file_names(DEFAULT_OUTPUT_BASENAME).source];
 
         // system_init order: oscillator -> pps -> ports
         // Find positions within system_init function
@@ -1096,12 +1297,141 @@ mod tests {
             digital_pins: vec![],
         };
         let files = generate_c_files(&device, &config, None, None, None, None, None);
-        let c = &files["pin_config.c"];
+        let c = &files[&generated_file_names(DEFAULT_OUTPUT_BASENAME).source];
 
         assert!(c.contains("0x0000U"));
         assert!(c.contains("0x0800U"));
         let unlock_pos = c.find("0x0000U").unwrap();
         let lock_pos = c.find("0x0800U").unwrap();
         assert!(unlock_pos < lock_pos);
+    }
+
+    #[test]
+    fn test_explicit_digital_override_clears_ansel_for_analog_capable_pin() {
+        let device = make_test_device();
+        let config = PinConfig {
+            part_number: "DSPIC33CK64MP102".to_string(),
+            assignments: vec![],
+            digital_pins: vec![1],
+        };
+
+        let files = generate_c_files(&device, &config, None, None, None, None, None);
+        let c = &files[&generated_file_names(DEFAULT_OUTPUT_BASENAME).source];
+
+        assert!(
+            c.contains("ANSELBbits.ANSELB0 = 0U;"),
+            "explicit digital pins should force ANSEL off on analog-capable pads"
+        );
+        assert!(
+            c.contains("TRISBbits.TRISB0 = 1U;"),
+            "unassigned digital pins should still default to input direction"
+        );
+    }
+
+    #[test]
+    fn test_signal_name_aliases_are_sanitized_for_c_macros() {
+        let device = make_test_device();
+        let config = PinConfig {
+            part_number: "DSPIC33CK64MP102".to_string(),
+            assignments: vec![PinAssignment {
+                pin_position: 1,
+                rp_number: Some(32),
+                peripheral: "U1RX".to_string(),
+                direction: "in".to_string(),
+                ppsval: None,
+                fixed: false,
+            }],
+            digital_pins: vec![],
+        };
+
+        let mut signal_names = HashMap::new();
+        signal_names.insert(1, "Debug TX/UART-1".to_string());
+
+        let files = generate_c_files(
+            &device,
+            &config,
+            None,
+            Some(&signal_names),
+            None,
+            None,
+            None,
+        );
+        let h = &files[&generated_file_names(DEFAULT_OUTPUT_BASENAME).header];
+
+        assert!(h.contains("DEBUG_TX_UART_1_PORT"));
+        assert!(h.contains("DEBUG_TX_UART_1_LAT"));
+        assert!(h.contains("DEBUG_TX_UART_1_TRIS"));
+    }
+
+    #[test]
+    fn test_oscillator_owned_fuse_pragmas_are_filtered_from_dynamic_fuse_sections() {
+        let device = make_test_device();
+        let config = PinConfig {
+            part_number: "DSPIC33CK64MP102".to_string(),
+            assignments: vec![PinAssignment {
+                pin_position: 1,
+                rp_number: Some(32),
+                peripheral: "U1RX".to_string(),
+                direction: "in".to_string(),
+                ppsval: None,
+                fixed: false,
+            }],
+            digital_pins: vec![],
+        };
+        let osc = OscConfig {
+            source: "frc_pll".to_string(),
+            target_fosc_hz: 200_000_000,
+            crystal_hz: 0,
+            poscmd: "EC".to_string(),
+        };
+        let fuse_pragmas = r#"/* FOSC */
+#pragma config FNOSC = FRCDIVN    /* conflicting oscillator source */
+#pragma config IESO = ON          /* conflicting oscillator startup */
+#pragma config POSCMD = NONE      /* conflicting primary oscillator mode */
+#pragma config FCKSM = CSECME     /* conflicting clock switching policy */
+#pragma config PLLKEN = OFF       /* conflicting PLL lock behavior */
+
+/* FICD */
+#pragma config ICS = PGD1         /* keep unrelated debug channel */"#;
+
+        let files = generate_c_files(
+            &device,
+            &config,
+            None,
+            None,
+            Some(&osc),
+            Some(fuse_pragmas),
+            None,
+        );
+        let c = &files[&generated_file_names(DEFAULT_OUTPUT_BASENAME).source];
+
+        assert_eq!(c.matches("#pragma config FNOSC").count(), 1);
+        assert_eq!(c.matches("#pragma config IESO").count(), 1);
+        assert_eq!(c.matches("#pragma config POSCMD").count(), 1);
+        assert_eq!(c.matches("#pragma config FCKSM").count(), 1);
+        assert_eq!(c.matches("#pragma config PLLKEN").count(), 1);
+        assert!(c.contains("#pragma config FNOSC = FRCPLL"));
+        assert!(c.contains("#pragma config PLLKEN = ON"));
+        assert!(!c.contains("#pragma config FNOSC = FRCDIVN"));
+        assert!(!c.contains("#pragma config PLLKEN = OFF"));
+        assert!(c.contains("#pragma config ICS = PGD1"));
+    }
+
+    #[test]
+    fn test_fuse_only_generation_preserves_oscillator_fields_without_oscillator_config() {
+        let device = make_test_device();
+        let config = PinConfig {
+            part_number: "DSPIC33CK64MP102".to_string(),
+            assignments: vec![],
+            digital_pins: vec![],
+        };
+        let fuse_pragmas = r#"/* FOSC */
+#pragma config FNOSC = FRCDIVN    /* fuse-managed oscillator source */"#;
+
+        let files = generate_c_files(&device, &config, None, None, None, Some(fuse_pragmas), None);
+        let c = &files[&generated_file_names(DEFAULT_OUTPUT_BASENAME).source];
+
+        assert_eq!(c.matches("#pragma config FNOSC").count(), 1);
+        assert!(c.contains("#pragma config FNOSC = FRCDIVN"));
     }
 }

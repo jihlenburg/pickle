@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Native desktop pin multiplexing configurator for Microchip dsPIC33 microcontrollers, built with Rust/Tauri. Parses Device Family Pack (DFP) `.atpack` files, presents an interactive pin assignment UI, and generates MISRA C:2012 compliant initialization code. This is the Rust port of the Python/FastAPI `config-pic` project.
+Native desktop pin multiplexing configurator for Microchip dsPIC33 and PIC24 devices, built with Rust/Tauri. Parses Device Family Pack (DFP) `.atpack` files, presents an interactive pin assignment UI, and generates MISRA C:2012 compliant initialization code. This is the Rust port of the Python/FastAPI `config-pic` project.
 
 ## Architecture
 
@@ -11,7 +11,8 @@ pickle/
   src-tauri/
     src/
       main.rs            # Tauri entry point
-      commands.rs        # All #[tauri::command] handlers
+      commands.rs        # Shared command types/helpers plus module exports
+      commands/          # Concern-focused #[tauri::command] implementations
       lib.rs             # Library root, module declarations
       parser/
         mod.rs
@@ -31,8 +32,12 @@ pickle/
   frontend/              # Served by Tauri webview
     index.html
     static/
-      app.js             # All UI logic including CLC designer and SVG preview
-      style.css
+      app/
+        config.js        # Unified frontend theme tokens and shell-level UI constants
+        model.js         # Pure frontend state/normalization helpers
+        00-*.js          # Ordered browser scripts for state, views, workflows, bootstrap
+      style.css              # CSS import manifest
+      styles/                # Split stylesheet modules loaded by style.css
       pin_descriptions.js
   tests/
     fixtures/            # Test device JSON files
@@ -62,18 +67,23 @@ cargo tauri build                   # Production build
 
 - **Rust**: Edition 2021, all structs derive `Debug, Clone, Serialize, Deserialize`. Use `thiserror` or `String` for errors.
 - **Frontend**: Vanilla JS, no build step, no framework. All state in global variables. Uses `invoke()` instead of `fetch()`.
-- **CSS**: CSS custom properties in `:root`, supports dark/light/system themes. Peripheral colors: UART=`--uart`, SPI=`--spi`, I2C=`--i2c`, PWM=`--pwm`.
+- **Frontend config**: `frontend/static/app/config.js` is the source of truth for theme tokens, typography, shell copy, and UI timings. Do not add new hard-coded UI constants in random JS/CSS files when they belong there.
+- **CSS**: `style.css` is the stable entrypoint and should only coordinate the split `frontend/static/styles/*.css` files. Those modules should consume config-driven CSS variables instead of re-defining theme palettes inline. Peripheral colors still flow through tokens like UART=`--uart`, SPI=`--spi`, I2C=`--i2c`, PWM=`--pwm`.
 - **Code generation output**: MISRA C:2012 compliant C99. All register values use `U` suffix. Comments explain every write.
 - **No auto-commit**: Never commit or push without explicit user permission.
 
 ## Commenting Strategy
 
-- **Current state**: top-level documentation is decent in `frontend/static/app.js`, `src-tauri/src/commands.rs`, and the parser modules, but comment quality is not yet uniform across the codebase. The main gap is in complex logic where the code says *what* it does but not always *why* it does it.
+- **Current state**: top-level documentation is now expected in every non-trivial source file, but comment quality should still be reviewed whenever logic becomes denser or more cross-coupled.
 - **Comment the why, not the obvious**: do not add noise like "increment counter" or "set variable". Add comments when the intent, invariant, workaround, or hardware/domain rule would not be obvious from the code alone.
 - **Start each non-trivial source file with a short file/module header**:
   - Rust: use `//!` module docs
   - JS: use a top-of-file block comment
   - The header should say the file's responsibility, the key data it owns, and the main boundaries/dependencies
+- **Future standard**:
+  - treat file headers plus intent-level comments for risky blocks as mandatory, not optional
+  - when splitting code into new files, add the header in the same patch
+  - when removing or changing behavior, update nearby comments immediately so stale comments do not accumulate
 - **Document public shapes and quirks**:
   - Use `///` on Rust structs/functions when the semantics are non-obvious
   - In JS, use short JSDoc on state objects and major functions
@@ -99,7 +109,12 @@ cargo tauri build                   # Production build
   - `src-tauri/src/parser/dfp_manager.rs`: root selection, cache lookup order, overlay/load precedence
   - `src-tauri/src/parser/edc_parser.rs`: parsing passes, PPS extraction rules, canonical pad fallback
   - `src-tauri/src/codegen/generate.rs`: generation phases, ordering constraints, ICSP exclusions, analog/digital decisions
-  - `frontend/static/app.js`: restore/load flows, catalog freshness state, verification/apply-overlay path
+  - `frontend/static/app/05-config-files.js`: restore/load flows and config persistence boundaries
+  - `frontend/static/app/05-clc-designer.js`: dense CLC state/rendering logic and register preview coupling
+  - `frontend/static/app/05-compile-check.js`: toolchain detection, compiler UX, backend/UI contract
+  - `frontend/static/app/06-shell.js`: shell event wiring, catalog freshness state, theme/app-shell coupling
+  - `frontend/static/app/07-verification.js`: datasheet verification rendering, overlay application, verifier/UI contract
+  - `frontend/static/app/08-bootstrap.js`: startup/menu/tooltip orchestration boundaries
 
 ## Important Patterns
 

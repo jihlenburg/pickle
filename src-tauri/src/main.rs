@@ -1,11 +1,146 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+//! Tauri desktop bootstrap for pickle.
+//!
+//! Owns plugin registration, native menu construction, startup logging, and
+//! the IPC command surface exposed to the frontend webview.
+
 use log::info;
 use pickle_lib::commands;
-use tauri::menu::{AboutMetadataBuilder, MenuBuilder, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::Emitter;
+use tauri::menu::{
+    AboutMetadata, AboutMetadataBuilder, Menu, MenuBuilder, MenuItem, PredefinedMenuItem, Submenu,
+};
+use tauri::{App, AppHandle, Emitter, Runtime};
 use tauri_plugin_log::{Target, TargetKind, TimezoneStrategy};
+
+const FORWARDED_MENU_ACTIONS: &[&str] = &[
+    "open",
+    "save",
+    "export",
+    "undo",
+    "redo",
+    "generate",
+    "copy_code",
+];
+
+fn build_about_metadata() -> AboutMetadata<'static> {
+    AboutMetadataBuilder::new()
+        .name(Some("pickle"))
+        .version(Some(env!("CARGO_PKG_VERSION")))
+        .comments(Some("Pin configurator for Microchip dsPIC33 and PIC24"))
+        .build()
+}
+
+fn build_file_menu<R: Runtime>(app: &App<R>) -> tauri::Result<Submenu<R>> {
+    Submenu::with_items(
+        app,
+        "File",
+        true,
+        &[
+            &MenuItem::with_id(app, "open", "Open...", true, Some("CmdOrCtrl+O"))?,
+            &MenuItem::with_id(app, "save", "Save...", true, Some("CmdOrCtrl+S"))?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(
+                app,
+                "export",
+                "Export C Files...",
+                true,
+                Some("CmdOrCtrl+E"),
+            )?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::quit(app, None)?,
+        ],
+    )
+}
+
+fn build_edit_menu<R: Runtime>(app: &App<R>) -> tauri::Result<Submenu<R>> {
+    Submenu::with_items(
+        app,
+        "Edit",
+        true,
+        &[
+            &MenuItem::with_id(app, "undo", "Undo", true, Some("CmdOrCtrl+Z"))?,
+            &MenuItem::with_id(app, "redo", "Redo", true, Some("CmdOrCtrl+Shift+Z"))?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::cut(app, None)?,
+            &PredefinedMenuItem::copy(app, None)?,
+            &PredefinedMenuItem::paste(app, None)?,
+            &PredefinedMenuItem::select_all(app, None)?,
+        ],
+    )
+}
+
+fn build_view_menu<R: Runtime>(app: &App<R>) -> tauri::Result<Submenu<R>> {
+    Submenu::with_items(
+        app,
+        "View",
+        true,
+        &[
+            &MenuItem::with_id(app, "generate", "Generate Code", true, Some("CmdOrCtrl+G"))?,
+            &MenuItem::with_id(
+                app,
+                "copy_code",
+                "Copy Code",
+                true,
+                Some("CmdOrCtrl+Shift+C"),
+            )?,
+        ],
+    )
+}
+
+fn build_help_menu<R: Runtime>(app: &App<R>) -> tauri::Result<Submenu<R>> {
+    Submenu::with_items(
+        app,
+        "Help",
+        true,
+        &[&PredefinedMenuItem::about(
+            app,
+            None,
+            Some(build_about_metadata()),
+        )?],
+    )
+}
+
+fn build_menu<R: Runtime>(app: &App<R>) -> tauri::Result<Menu<R>> {
+    let file_menu = build_file_menu(app)?;
+    let edit_menu = build_edit_menu(app)?;
+    let view_menu = build_view_menu(app)?;
+    let help_menu = build_help_menu(app)?;
+
+    MenuBuilder::new(app)
+        .items(&[&file_menu, &edit_menu, &view_menu, &help_menu])
+        .build()
+}
+
+fn log_runtime_paths() {
+    info!(
+        "app-data fallback dir: {:?}",
+        pickle_lib::parser::dfp_manager::base_dir()
+    );
+    info!(
+        "data read roots: {:?}",
+        pickle_lib::parser::dfp_manager::read_roots()
+    );
+    info!(
+        "device cache dir: {:?}",
+        pickle_lib::parser::dfp_manager::devices_dir()
+    );
+    info!(
+        "dfp cache dir: {:?}",
+        pickle_lib::parser::dfp_manager::dfp_cache_dir()
+    );
+    info!(
+        "pinouts dir: {:?}",
+        pickle_lib::parser::dfp_manager::pinouts_dir()
+    );
+}
+
+fn forward_menu_action<R: Runtime>(app: &AppHandle<R>, id: &str) {
+    if FORWARDED_MENU_ACTIONS.contains(&id) {
+        let _ = app.emit("menu-action", id);
+    }
+}
 
 fn main() {
     tauri::Builder::default()
@@ -23,134 +158,32 @@ fn main() {
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             info!("pickle v{} starting", env!("CARGO_PKG_VERSION"));
-            info!(
-                "app-data fallback dir: {:?}",
-                pickle_lib::parser::dfp_manager::base_dir()
-            );
-            info!(
-                "data read roots: {:?}",
-                pickle_lib::parser::dfp_manager::read_roots()
-            );
-            info!(
-                "device cache dir: {:?}",
-                pickle_lib::parser::dfp_manager::devices_dir()
-            );
-            info!(
-                "dfp cache dir: {:?}",
-                pickle_lib::parser::dfp_manager::dfp_cache_dir()
-            );
-            info!(
-                "pinouts dir: {:?}",
-                pickle_lib::parser::dfp_manager::pinouts_dir()
-            );
-            let about_meta = AboutMetadataBuilder::new()
-                .name(Some("pickle"))
-                .version(Some(env!("CARGO_PKG_VERSION")))
-                .comments(Some("Pin configurator for Microchip dsPIC33"))
-                .build();
-
-            let file_menu = Submenu::with_items(
-                app,
-                "File",
-                true,
-                &[
-                    &MenuItem::with_id(app, "open", "Open...", true, Some("CmdOrCtrl+O"))?,
-                    &MenuItem::with_id(app, "save", "Save...", true, Some("CmdOrCtrl+S"))?,
-                    &PredefinedMenuItem::separator(app)?,
-                    &MenuItem::with_id(
-                        app,
-                        "export",
-                        "Export C Files...",
-                        true,
-                        Some("CmdOrCtrl+E"),
-                    )?,
-                    &PredefinedMenuItem::separator(app)?,
-                    &PredefinedMenuItem::quit(app, None)?,
-                ],
-            )?;
-
-            let edit_menu = Submenu::with_items(
-                app,
-                "Edit",
-                true,
-                &[
-                    &MenuItem::with_id(app, "undo", "Undo", true, Some("CmdOrCtrl+Z"))?,
-                    &MenuItem::with_id(app, "redo", "Redo", true, Some("CmdOrCtrl+Shift+Z"))?,
-                    &PredefinedMenuItem::separator(app)?,
-                    &PredefinedMenuItem::cut(app, None)?,
-                    &PredefinedMenuItem::copy(app, None)?,
-                    &PredefinedMenuItem::paste(app, None)?,
-                    &PredefinedMenuItem::select_all(app, None)?,
-                ],
-            )?;
-
-            let view_menu = Submenu::with_items(
-                app,
-                "View",
-                true,
-                &[
-                    &MenuItem::with_id(
-                        app,
-                        "generate",
-                        "Generate Code",
-                        true,
-                        Some("CmdOrCtrl+G"),
-                    )?,
-                    &MenuItem::with_id(
-                        app,
-                        "copy_code",
-                        "Copy Code",
-                        true,
-                        Some("CmdOrCtrl+Shift+C"),
-                    )?,
-                ],
-            )?;
-
-            let help_menu = Submenu::with_items(
-                app,
-                "Help",
-                true,
-                &[&PredefinedMenuItem::about(app, None, Some(about_meta))?],
-            )?;
-
-            let menu = MenuBuilder::new(app)
-                .items(&[&file_menu, &edit_menu, &view_menu, &help_menu])
-                .build()?;
-
-            app.set_menu(menu)?;
+            log_runtime_paths();
+            app.set_menu(build_menu(app)?)?;
             Ok(())
         })
-        .on_menu_event(|app, event| {
-            let id = event.id().as_ref();
-            match id {
-                "open" | "save" | "export" | "undo" | "redo" | "generate" | "copy_code" => {
-                    let _ = app.emit("menu-action", id);
-                }
-                _ => {}
-            }
-        })
+        .on_menu_event(|app, event| forward_menu_action(app, event.id().as_ref()))
         .invoke_handler(tauri::generate_handler![
-            commands::list_devices,
-            commands::refresh_index,
-            commands::index_status,
-            commands::load_app_settings,
-            commands::set_theme_mode,
-            commands::remember_last_used_device,
-            commands::load_device,
-            commands::open_text_file_dialog,
-            commands::open_binary_file_dialog,
-            commands::save_text_file_dialog,
-            commands::export_generated_files_dialog,
-            commands::generate_code,
-            commands::compiler_info,
-            commands::compile_check,
-            commands::find_datasheet,
-            commands::verify_pinout,
-            commands::apply_overlay,
-            commands::api_key_status,
+            commands::catalog::list_devices,
+            commands::catalog::refresh_index,
+            commands::catalog::index_status,
+            commands::settings_state::load_app_settings,
+            commands::settings_state::set_theme_mode,
+            commands::settings_state::remember_last_used_device,
+            commands::devices::load_device,
+            commands::dialogs::open_text_file_dialog,
+            commands::dialogs::open_binary_file_dialog,
+            commands::dialogs::save_text_file_dialog,
+            commands::dialogs::export_generated_files_dialog,
+            commands::devices::generate_code,
+            commands::toolchain::compiler_info,
+            commands::toolchain::compile_check,
+            commands::verification::find_datasheet,
+            commands::verification::verify_pinout,
+            commands::verification::apply_overlay,
+            commands::verification::api_key_status,
         ])
         .run(tauri::generate_context!())
         .expect("error running tauri application");

@@ -1,3 +1,8 @@
+//! Build-time consistency checks for versioned app metadata.
+//!
+//! Keeps `VERSION`, `Cargo.toml`, and `tauri.conf.json` aligned so release
+//! artifacts and the app menu all report the same canonical version string.
+
 use std::env;
 use std::fs;
 use std::path::Path;
