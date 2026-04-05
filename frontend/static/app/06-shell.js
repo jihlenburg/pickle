@@ -347,8 +347,8 @@ function setupTheme() {
 // --- About dialog ---
 
 function showAboutDialog() {
-    const backdrop = $('about-backdrop');
-    if (!backdrop) return;
+    const dialog = $('about-dialog');
+    if (!dialog || dialog.open) return;
 
     // Populate version lazily on first open
     const versionEl = $('about-version');
@@ -363,35 +363,29 @@ function showAboutDialog() {
         }
     }
 
-    backdrop.hidden = false;
-    requestAnimationFrame(() => backdrop.classList.add('visible'));
-}
-
-function hideAboutDialog() {
-    const backdrop = $('about-backdrop');
-    if (!backdrop) return;
-    backdrop.classList.remove('visible');
-    backdrop.addEventListener('transitionend', () => {
-        backdrop.hidden = true;
-    }, { once: true });
+    dialog.showModal();
 }
 
 function wireAboutDialog() {
-    const backdrop = $('about-backdrop');
-    if (!backdrop) return;
-    backdrop.addEventListener('click', (e) => {
-        if (e.target === backdrop) hideAboutDialog();
+    const dialog = $('about-dialog');
+    if (!dialog) return;
+    // Clicks on ::backdrop register on the <dialog> element; close when
+    // the click lands outside the dialog's bounding box.
+    dialog.addEventListener('click', (e) => {
+        const rect = dialog.getBoundingClientRect();
+        if (e.clientX < rect.left || e.clientX > rect.right ||
+            e.clientY < rect.top  || e.clientY > rect.bottom) {
+            dialog.close();
+        }
     });
-    bindClick('about-close-btn', hideAboutDialog);
+    bindClick('about-close-btn', () => dialog.close());
     bindClick('about-github-btn', () => {
         const opener = window.__TAURI__?.opener;
         if (opener?.openUrl) {
             opener.openUrl('https://github.com/jihlenburg/pickle');
         }
     });
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && !backdrop.hidden) hideAboutDialog();
-    });
+    // Escape is handled natively by <dialog>
 }
 
 function initializeShellChrome() {

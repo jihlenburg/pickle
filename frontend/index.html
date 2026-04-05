@@ -205,31 +205,29 @@
     </div>
 
     <!-- About dialog -->
-    <div id="about-backdrop" class="about-backdrop" hidden>
-        <div class="about-dialog" role="dialog" aria-label="About pickle">
-            <img src="static/pickle-icon.png" alt="pickle" class="about-icon">
-            <h2 class="about-title">pickle</h2>
-            <p class="about-subtitle">Pin Configurator</p>
-            <p class="about-version" id="about-version"></p>
-            <p class="about-desc">
-                Native desktop pin multiplexing configurator for Microchip
-                dsPIC33 and PIC24 devices. Parses Device Family Pack files,
-                presents an interactive pin assignment UI, and generates
-                MISRA&nbsp;C:2012 compliant initialization code.
-            </p>
-            <div class="about-tech">
-                <span class="about-tag">Rust</span>
-                <span class="about-tag">Tauri</span>
-                <span class="about-tag">dsPIC33</span>
-                <span class="about-tag">PIC24</span>
-            </div>
-            <div class="about-links">
-                <button class="about-link" id="about-github-btn">GitHub</button>
-            </div>
-            <p class="about-copy">&copy; 2026 J. Ihlenburg</p>
-            <button class="about-close" id="about-close-btn">Close</button>
+    <dialog id="about-dialog" class="about-dialog" aria-label="About pickle">
+        <img src="static/pickle-icon.png" alt="pickle" class="about-icon">
+        <h2 class="about-title">pickle</h2>
+        <p class="about-subtitle">Pin Configurator</p>
+        <p class="about-version" id="about-version"></p>
+        <p class="about-desc">
+            Native desktop pin multiplexing configurator for Microchip
+            dsPIC33 and PIC24 devices. Parses Device Family Pack files,
+            presents an interactive pin assignment UI, and generates
+            MISRA&nbsp;C:2012 compliant initialization code.
+        </p>
+        <div class="about-tech">
+            <span class="about-tag">Rust</span>
+            <span class="about-tag">Tauri</span>
+            <span class="about-tag">dsPIC33</span>
+            <span class="about-tag">PIC24</span>
         </div>
-    </div>
+        <div class="about-links">
+            <button class="about-link" id="about-github-btn">GitHub</button>
+        </div>
+        <p class="about-copy">&copy; 2026 J. Ihlenburg</p>
+        <button class="about-close" id="about-close-btn">Close</button>
+    </dialog>
 
     <footer class="status-bar">
         <span id="status">Ready</span>
