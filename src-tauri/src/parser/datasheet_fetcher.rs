@@ -165,6 +165,33 @@ fn parse_product_page(markdown: &str) -> Result<(String, String), String> {
     Ok((title, ds_number))
 }
 
+fn parse_direct_pdf_url(markdown: &str) -> Option<String> {
+    let re_pdf = Regex::new(
+        r#"(?i)\[PDF\]\((https://ww1\.microchip\.com/downloads/aemDocuments/documents/[^\s)]+\.pdf)\)"#,
+    )
+    .unwrap();
+    re_pdf
+        .captures(markdown)
+        .and_then(|cap| cap.get(1))
+        .map(|m| m.as_str().to_string())
+}
+
+fn revision_from_pdf_url(pdf_url: &str) -> Option<String> {
+    let re_rev = Regex::new(r"(?i)\b(DS\d{8}[A-Z])\.pdf\b").unwrap();
+    re_rev
+        .captures(pdf_url)
+        .and_then(|cap| cap.get(1))
+        .map(|m| m.as_str().to_uppercase())
+}
+
+fn datasheet_number_from_revision(revision: &str) -> Option<String> {
+    let re_number = Regex::new(r"(?i)\b(DS\d{8})[A-Z]\b").unwrap();
+    re_number
+        .captures(revision)
+        .and_then(|cap| cap.get(1))
+        .map(|m| m.as_str().to_uppercase())
+}
+
 // ---------------------------------------------------------------------------
 // Candidate URL generation
 // ---------------------------------------------------------------------------
@@ -285,7 +312,32 @@ pub fn resolve(part_number: &str) -> Result<DatasheetRef, String> {
     // 3. Parse title and DS number
     let (title, ds_number) = parse_product_page(&page_text)?;
 
-    // 4. Try candidate revisions — high-probability first (H→A), then I→Z.
+    // 4. Prefer the exact PDF URL already linked from the product page. This
+    // avoids brute-forcing 26 revision letters when Microchip has already
+    // published the final datasheet URL in the page content.
+    if let Some(pdf_url) = parse_direct_pdf_url(&page_text) {
+        if let Some(datasheet_revision) = revision_from_pdf_url(&pdf_url) {
+            let datasheet_number =
+                datasheet_number_from_revision(&datasheet_revision).unwrap_or(ds_number.clone());
+            log::info!(
+                "resolve: found direct datasheet URL for {} ({})",
+                part_upper,
+                datasheet_revision
+            );
+            let ds_ref = DatasheetRef {
+                part_number: part_upper.clone(),
+                product_url: product_url.clone(),
+                datasheet_title: title.clone(),
+                datasheet_number,
+                datasheet_revision,
+                pdf_url,
+            };
+            save_metadata(&ds_ref);
+            return Ok(ds_ref);
+        }
+    }
+
+    // 5. Try candidate revisions — high-probability first (H→A), then I→Z.
     //    Use a short timeout per probe to avoid hanging on slow proxy responses.
     let revisions = candidate_revisions(&ds_number, None);
     log::info!(
@@ -363,4 +415,39 @@ pub fn get_or_fetch_text(part_number: &str, pdf_url: &str) -> Result<String, Str
 
     let _ = fs::write(&path, &text);
     Ok(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{datasheet_number_from_revision, parse_direct_pdf_url, revision_from_pdf_url};
+
+    #[test]
+    fn extracts_direct_pdf_url_from_product_page_markdown() {
+        let markdown = r#"
+Data Sheet:
+
+[PDF](https://ww1.microchip.com/downloads/aemDocuments/documents/MCU16/ProductDocuments/DataSheets/dsPIC33EPXXXGP50X-dsPIC33EPXXXMC20X-50X-and-PIC24EPXXXGP-MC20X-Family-Data-Sheet-DS70000657J.pdf)
+
+[dsPIC33EPXXXGP50X, dsPIC33EPXXXMC20X/50X, and PIC24EPXXXGP/MC20X Data Sheet](https://ww1.microchip.com/downloads/aemDocuments/documents/MCU16/ProductDocuments/DataSheets/dsPIC33EPXXXGP50X-dsPIC33EPXXXMC20X-50X-and-PIC24EPXXXGP-MC20X-Family-Data-Sheet-DS70000657J.pdf)
+"#;
+
+        assert_eq!(
+            parse_direct_pdf_url(markdown).as_deref(),
+            Some("https://ww1.microchip.com/downloads/aemDocuments/documents/MCU16/ProductDocuments/DataSheets/dsPIC33EPXXXGP50X-dsPIC33EPXXXMC20X-50X-and-PIC24EPXXXGP-MC20X-Family-Data-Sheet-DS70000657J.pdf")
+        );
+    }
+
+    #[test]
+    fn extracts_revision_from_pdf_url() {
+        let pdf_url = "https://ww1.microchip.com/downloads/aemDocuments/documents/MCU16/ProductDocuments/DataSheets/dsPIC33EPXXXGP50X-dsPIC33EPXXXMC20X-50X-and-PIC24EPXXXGP-MC20X-Family-Data-Sheet-DS70000657J.pdf";
+        assert_eq!(revision_from_pdf_url(pdf_url).as_deref(), Some("DS70000657J"));
+    }
+
+    #[test]
+    fn extracts_datasheet_number_from_revision() {
+        assert_eq!(
+            datasheet_number_from_revision("DS70000657J").as_deref(),
+            Some("DS70000657")
+        );
+    }
 }

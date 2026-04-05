@@ -23,16 +23,30 @@ pub async fn find_datasheet(app: AppHandle, part_number: String) -> Result<Optio
     let app2 = app.clone();
 
     tokio::task::spawn_blocking(move || {
-        let emit = |msg: &str| {
-            let _ = app2.emit("verify-progress", msg);
+        let emit = |update: pinout_verifier::VerifyProgressUpdate| {
+            let _ = app2.emit("verify-progress", update);
         };
 
-        emit("Checking local files...");
+        emit(
+            pinout_verifier::VerifyProgressUpdate::new(
+                "datasheet.search",
+                0.06,
+                "Checking local datasheet cache",
+            )
+            .detail("pickle looks in its cache and nearby local files before downloading anything."),
+        );
         if let Some(path) = dfp_manager::find_local_datasheet(&pn) {
             let bytes =
                 fs::read(&path).map_err(|e| format!("Cannot read {}: {e}", path.display()))?;
             let name = file_name_or(&path, "datasheet.pdf");
-            emit(&format!("Found local: {name}"));
+            emit(
+                pinout_verifier::VerifyProgressUpdate::new(
+                    "datasheet.search",
+                    0.16,
+                    format!("Found cached datasheet: {name}"),
+                )
+                .detail("Using the local PDF avoids a download step."),
+            );
             return Ok(Some(serde_json::json!({
                 "path": path.display().to_string(),
                 "name": name,
@@ -41,7 +55,14 @@ pub async fn find_datasheet(app: AppHandle, part_number: String) -> Result<Optio
             })));
         }
 
-        emit("Resolving datasheet from Microchip...");
+        emit(
+            pinout_verifier::VerifyProgressUpdate::new(
+                "datasheet.resolve",
+                0.1,
+                "Resolving the datasheet on Microchip",
+            )
+            .detail("If no cached PDF is available, pickle looks up the right family datasheet revision."),
+        );
         info!(
             "find_datasheet: resolving {} from Microchip product page...",
             pn
@@ -54,12 +75,26 @@ pub async fn find_datasheet(app: AppHandle, part_number: String) -> Result<Optio
             }
         };
 
-        emit(&format!("Downloading {}...", ds_ref.datasheet_revision));
+        emit(
+            pinout_verifier::VerifyProgressUpdate::new(
+                "datasheet.download",
+                0.16,
+                format!("Downloading datasheet {}", ds_ref.datasheet_revision),
+            )
+            .detail("The PDF is cached locally after download so later runs can skip this step."),
+        );
         info!("find_datasheet: downloading PDF from {}", ds_ref.pdf_url);
         match datasheet_fetcher::get_or_download_pdf(&pn, &ds_ref.pdf_url) {
             Ok(bytes) => {
                 let name = format!("{}-{}.pdf", pn.to_uppercase(), ds_ref.datasheet_revision);
-                emit(&format!("Downloaded {name}"));
+                emit(
+                    pinout_verifier::VerifyProgressUpdate::new(
+                        "datasheet.download",
+                        0.2,
+                        format!("Downloaded {name}"),
+                    )
+                    .detail("Verification will use this cached PDF on later runs."),
+                );
                 return Ok(Some(serde_json::json!({
                     "name": name,
                     "base64": encode_base64(&bytes),
@@ -75,7 +110,14 @@ pub async fn find_datasheet(app: AppHandle, part_number: String) -> Result<Optio
             }
         }
 
-        emit("Trying text extraction fallback...");
+        emit(
+            pinout_verifier::VerifyProgressUpdate::new(
+                "datasheet.resolve",
+                0.18,
+                "Trying text extraction fallback",
+            )
+            .detail("Text-only fallback is kept for lookup diagnostics, but verification still requires the PDF."),
+        );
         match datasheet_fetcher::get_or_fetch_text(&pn, &ds_ref.pdf_url) {
             Ok(text) => {
                 let name = format!("{}-{}.md", pn.to_uppercase(), ds_ref.datasheet_revision);
@@ -100,7 +142,8 @@ pub async fn find_datasheet(app: AppHandle, part_number: String) -> Result<Optio
 #[tauri::command]
 pub async fn verify_pinout(
     app: AppHandle,
-    pdf_base64: String,
+    pdf_base64: Option<String>,
+    datasheet_text: Option<String>,
     part_number: String,
     package: Option<String>,
     api_key: Option<String>,
@@ -108,21 +151,52 @@ pub async fn verify_pinout(
     let app2 = app.clone();
 
     tokio::task::spawn_blocking(move || {
-        let emit = |msg: &str| {
-            let _ = app2.emit("verify-progress", msg);
+        let emit = |update: pinout_verifier::VerifyProgressUpdate| {
+            let _ = app2.emit("verify-progress", update);
         };
 
-        emit("Decoding PDF...");
-        info!("verify_pinout: decoding PDF for {}", part_number);
-        let pdf_bytes = base64::engine::general_purpose::STANDARD
-            .decode(&pdf_base64)
-            .map_err(|e| format!("Invalid base64: {e}"))?;
+        let pdf_bytes = if let Some(pdf_base64) = pdf_base64.as_deref() {
+            emit(
+                pinout_verifier::VerifyProgressUpdate::new(
+                    "datasheet.decode",
+                    0.24,
+                    "Decoding the datasheet PDF",
+                )
+                .detail("The PDF is prepared locally before pickle trims it to the relevant sections."),
+            );
+            info!("verify_pinout: decoding PDF for {}", part_number);
+            base64::engine::general_purpose::STANDARD
+                .decode(pdf_base64)
+                .map_err(|e| format!("Invalid base64: {e}"))?
+        } else {
+            Vec::new()
+        };
+
+        if pdf_bytes.is_empty() && datasheet_text.as_deref().unwrap_or("").is_empty() {
+            return Err("No datasheet input available for verification".to_string());
+        }
+        if pdf_bytes.is_empty() {
+            return Err(
+                "Verification requires a datasheet PDF. Text-only datasheet fallback is disabled."
+                    .to_string(),
+            );
+        }
+
         let size_mb = pdf_bytes.len() as f64 / 1_048_576.0;
         info!("verify_pinout: PDF size = {:.1} MB", size_mb);
 
-        dfp_manager::cache_datasheet(&part_number, &pdf_bytes);
+        if !pdf_bytes.is_empty() {
+            dfp_manager::cache_datasheet(&part_number, &pdf_bytes);
+        }
 
-        emit("Loading device data...");
+        emit(
+            pinout_verifier::VerifyProgressUpdate::new(
+                "device.load",
+                0.3,
+                "Loading the selected device and package data",
+            )
+            .detail("pickle compares the datasheet against the currently loaded package pin map."),
+        );
         let device = dfp_manager::load_device(&part_number)
             .ok_or_else(|| format!("Device {} not found", part_number))?;
 
@@ -138,18 +212,49 @@ pub async fn verify_pinout(
             "pins": resolved_pins,
         });
 
-        emit(&format!(
-            "Sending {:.1} MB PDF to LLM — this takes 30–90s...",
-            size_mb
-        ));
+        if !pdf_bytes.is_empty() {
+            emit(
+                pinout_verifier::VerifyProgressUpdate::new(
+                    "datasheet.ready",
+                    0.34,
+                    format!("Prepared {:.1} MB datasheet for verification", size_mb),
+                )
+                .detail("pickle will reduce the family datasheet before it uploads anything to the provider."),
+            );
+        } else {
+            emit(
+                pinout_verifier::VerifyProgressUpdate::new(
+                    "datasheet.ready",
+                    0.34,
+                    "Prepared extracted datasheet text",
+                ),
+            );
+        }
         info!("verify_pinout: calling LLM API...");
-        let result = pinout_verifier::verify_pinout(&pdf_bytes, &device_dict, api_key.as_deref())?;
+        let app_progress = app2.clone();
+        let progress = move |update: pinout_verifier::VerifyProgressUpdate| {
+            let _ = app_progress.emit("verify-progress", update);
+        };
+        let result = pinout_verifier::verify_pinout(
+            &pdf_bytes,
+            datasheet_text.as_deref(),
+            &device_dict,
+            api_key.as_deref(),
+            Some(&progress),
+        )?;
         info!(
             "verify_pinout: LLM response received, {} packages found",
             result.packages.len()
         );
 
-        emit("Processing results...");
+        emit(
+            pinout_verifier::VerifyProgressUpdate::new(
+                "result.done",
+                1.0,
+                "Verification complete",
+            )
+            .detail("The extracted package data and any discrepancies are ready to review."),
+        );
         serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
     })
     .await

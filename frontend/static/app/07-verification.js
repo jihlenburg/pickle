@@ -228,6 +228,170 @@ function wireVerificationResultInteractions(output) {
     });
 }
 
+const VERIFY_PROGRESS_STEPS = [
+    { id: 'datasheet', label: 'Get datasheet' },
+    { id: 'device', label: 'Load device' },
+    { id: 'reduce', label: 'Trim pages' },
+    { id: 'upload', label: 'Upload' },
+    { id: 'analyze', label: 'AI analysis' },
+    { id: 'process', label: 'Process result' },
+];
+
+const VERIFY_STAGE_TO_STEP = {
+    'datasheet.search': 'datasheet',
+    'datasheet.resolve': 'datasheet',
+    'datasheet.download': 'datasheet',
+    'datasheet.decode': 'datasheet',
+    'datasheet.ready': 'datasheet',
+    'device.load': 'device',
+    'provider.select': 'device',
+    'datasheet.reduce': 'reduce',
+    'provider.render': 'reduce',
+    'provider.upload': 'upload',
+    'provider.analyze': 'analyze',
+    'result.cached': 'process',
+    'result.process': 'process',
+    'result.done': 'process',
+};
+
+const VERIFY_STAGE_PROGRESS = {
+    'datasheet.search': 0.06,
+    'datasheet.resolve': 0.1,
+    'datasheet.download': 0.16,
+    'datasheet.decode': 0.24,
+    'datasheet.ready': 0.34,
+    'device.load': 0.3,
+    'provider.select': 0.36,
+    'datasheet.reduce': 0.44,
+    'provider.render': 0.62,
+    'provider.upload': 0.58,
+    'provider.analyze': 0.76,
+    'result.cached': 0.95,
+    'result.process': 0.94,
+    'result.done': 1.0,
+};
+
+function normalizeVerifyProgress(payload) {
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+        const stage = String(payload.stage || 'legacy');
+        return {
+            stage,
+            label: String(payload.label || payload.message || 'Working...'),
+            detail: payload.detail ? String(payload.detail) : '',
+            progress: typeof payload.progress === 'number'
+                ? payload.progress
+                : (VERIFY_STAGE_PROGRESS[stage] || 0.1),
+            indeterminate: !!payload.indeterminate,
+            provider: payload.provider ? String(payload.provider) : '',
+        };
+    }
+
+    return {
+        stage: 'legacy',
+        label: String(payload || 'Working...'),
+        detail: '',
+        progress: 0.1,
+        indeterminate: false,
+        provider: '',
+    };
+}
+
+function verifyProgressHint(progress) {
+    if (progress.stage === 'datasheet.reduce') {
+        return 'pickle uploads only the pinout and CLC sections instead of the full family datasheet.';
+    }
+    if (progress.stage === 'provider.render') {
+        return 'The PDF path needed a retry, so pickle is rendering only the selected datasheet pages as 300 DPI PNGs.';
+    }
+    if (progress.stage === 'provider.analyze') {
+        return 'pickle is waiting for the provider to extract package tables and any CLC data before it can show the comparison.';
+    }
+    if (progress.stage === 'result.cached') {
+        return 'pickle found a cached verification result for this exact datasheet, so it skipped the provider call.';
+    }
+    if (progress.stage === 'result.done') {
+        return 'The extracted package data is ready to review and apply as an overlay if needed.';
+    }
+    return 'Verification time varies by provider and datasheet size. Large datasheets can take up to 3 minutes or more.';
+}
+
+function renderVerifyProgress(progress, elapsed) {
+    const normalized = normalizeVerifyProgress(progress);
+    const currentStep = VERIFY_STAGE_TO_STEP[normalized.stage] || 'datasheet';
+    const currentStepIndex = VERIFY_PROGRESS_STEPS.findIndex((step) => step.id === currentStep);
+    const percent = Math.max(6, Math.min(100, Math.round(normalized.progress * 100)));
+
+    const stepsHtml = VERIFY_PROGRESS_STEPS.map((step, index) => {
+        let state = 'pending';
+        if (index < currentStepIndex) {
+            state = 'done';
+        } else if (index === currentStepIndex) {
+            state = 'active';
+        }
+
+        return `
+            <div class="verify-progress-step is-${state}">
+                <div class="verify-progress-step-dot">${state === 'done' ? '\u2713' : index + 1}</div>
+                <div class="verify-progress-step-label">${escapeHtml(step.label)}</div>
+            </div>`;
+    }).join('');
+
+    const providerBadge = normalized.provider
+        ? `<div class="verify-progress-provider">${escapeHtml(normalized.provider)}</div>`
+        : '';
+    const detailHtml = normalized.detail
+        ? `<div class="verify-progress-detail">${escapeHtml(normalized.detail)}</div>`
+        : '';
+    const hint = verifyProgressHint(normalized);
+    const hintHtml = hint
+        ? `<div class="verify-progress-hint">${escapeHtml(hint)}</div>`
+        : '';
+
+    return `
+        <div class="verify-progress-card">
+            <div class="verify-progress-head">
+                <div class="verify-progress-copy">
+                    <div class="verify-progress-eyebrow">Datasheet Verification</div>
+                    <div class="verify-progress-text">${escapeHtml(normalized.label)}</div>
+                    ${detailHtml}
+                </div>
+                <div class="verify-progress-side">
+                    ${providerBadge}
+                    <div class="verify-progress-time">${elapsed}s</div>
+                </div>
+            </div>
+            <div class="verify-progress-bar-track">
+                <div class="verify-progress-bar-fill${normalized.indeterminate ? ' is-indeterminate' : ''}" style="width:${percent}%"></div>
+            </div>
+            ${hintHtml}
+            <div class="verify-progress-steps">${stepsHtml}</div>
+        </div>`;
+}
+
+function renderVerificationTimingNote() {
+    return `
+        <div class="verify-expectation">
+            pickle trims the datasheet to the pinout and CLC chapters before upload. Large datasheets can take up to 3 minutes or more, depending on the provider and family size.
+        </div>`;
+}
+
+function renderSyntheticPackageNotice() {
+    if (!deviceData || !isSyntheticPackage(deviceData.selected_package)) {
+        return '';
+    }
+
+    return `
+        <div class="verify-synthetic-notice">
+            <strong>${escapeHtml(displayPackageName(deviceData.selected_package, { long: true }))}</strong> is a fallback package from the EDC, not a real package name. Verify against the datasheet to import the actual package name and pin table.
+        </div>`;
+}
+
+function renderVerificationEmptyState() {
+    return `
+        ${renderSyntheticPackageNotice()}
+        <div class="verify-empty">Load a device and click <strong>Verify Pinout</strong> to cross-check pin assignments against the datasheet.</div>`;
+}
+
 /** Trigger pinout verification — auto-finds datasheet, falls back to file dialog. */
 async function verifyPinout() {
     if (!deviceData) {
@@ -247,20 +411,20 @@ async function verifyPinout() {
     let unlisten = null;
     let elapsed = 0;
     let timerInterval = null;
-    const renderProgress = (message) => {
-        output.innerHTML = `
-            <div class="verify-progress">
-                <div class="verify-spinner"></div>
-                <div class="verify-progress-text">${escapeHtml(message)}</div>
-                <div class="verify-progress-time">${elapsed}s</div>
-            </div>`;
+    let progressState = normalizeVerifyProgress({
+        stage: 'datasheet.search',
+        label: 'Looking for datasheet...',
+        progress: 0.06,
+    });
+    const renderProgress = (payload) => {
+        progressState = normalizeVerifyProgress(payload);
+        output.innerHTML = renderVerifyProgress(progressState, elapsed);
     };
     const startTimer = () => {
         timerInterval = setInterval(() => {
             elapsed++;
-            const timerText = output.querySelector('.verify-progress-time');
-            if (timerText) {
-                timerText.textContent = `${elapsed}s`;
+            if (progressState) {
+                output.innerHTML = renderVerifyProgress(progressState, elapsed);
             }
         }, 1000);
     };
@@ -279,10 +443,15 @@ async function verifyPinout() {
         }
 
         elapsed = 0;
-        renderProgress('Looking for datasheet...');
+        renderProgress({
+            stage: 'datasheet.search',
+            label: 'Looking for datasheet...',
+            progress: 0.06,
+        });
         startTimer();
 
         let pdfBase64 = null;
+        let datasheetText = null;
         let pdfName = null;
 
         setStatus('Looking for datasheet...');
@@ -294,6 +463,7 @@ async function verifyPinout() {
             const source = found.source === 'downloaded' ? 'downloaded' : 'cached';
             setStatus(`Found datasheet (${source}): ${found.name}`);
         } else if (found?.text) {
+            datasheetText = found.text;
             pdfName = found.name;
             setStatus(`Using text extraction: ${found.name}`);
         } else {
@@ -318,8 +488,17 @@ async function verifyPinout() {
             startTimer();
         }
 
-        if (!pdfBase64) {
-            setStatus('Could not obtain datasheet PDF');
+        if (!pdfBase64 && !datasheetText) {
+            setStatus('Could not obtain datasheet input');
+            switchRightTab('code');
+            if (unlisten) {
+                unlisten();
+            }
+            stopTimer();
+            return;
+        }
+        if (!pdfBase64 && datasheetText) {
+            setStatus('Verification requires a datasheet PDF; text-only fallback is disabled');
             switchRightTab('code');
             if (unlisten) {
                 unlisten();
@@ -328,12 +507,18 @@ async function verifyPinout() {
             return;
         }
 
-        renderProgress(`Analyzing ${pdfName}...`);
+        renderProgress({
+            stage: 'datasheet.ready',
+            label: `Prepared ${pdfName} for verification`,
+            detail: 'pickle will now trim the datasheet and send only the relevant pages to the provider.',
+            progress: 0.34,
+        });
         setStatus(`Verifying pinout from ${pdfName}...`);
 
         const storedKey = localStorage.getItem('pickle-api-key');
         verifyResult = await invoke('verify_pinout', {
-            pdfBase64,
+            pdfBase64: pdfBase64 || null,
+            datasheetText: datasheetText || null,
             partNumber: deviceData.part_number,
             package: deviceData.selected_package || null,
             apiKey: storedKey || null,
@@ -359,7 +544,7 @@ function renderVerifyResult(result) {
     }
 
     if (!result?.packages || Object.keys(result.packages).length === 0) {
-        output.innerHTML = '<div class="verify-error">No package data found in datasheet.</div>';
+        output.innerHTML = `${renderSyntheticPackageNotice()}<div class="verify-error">No package data found in datasheet.</div>`;
         return;
     }
 
@@ -371,6 +556,8 @@ function renderVerifyResult(result) {
     }
 
     let html = '';
+    html += renderSyntheticPackageNotice();
+    html += renderVerificationTimingNote();
     if (result.notes?.length) {
         html += '<div class="verify-notes">';
         result.notes.forEach((note) => {

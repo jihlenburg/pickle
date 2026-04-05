@@ -2,31 +2,150 @@
 //! using an LLM API (Anthropic or OpenAI). Provider is auto-selected based on
 //! which API key is available, with OpenAI preferred when both are present.
 
-use base64::Engine;
+use image::ImageFormat;
+use pdfium_auto::bind_pdfium_silent;
+use pdfium_render::prelude::PdfRenderConfig;
+use qpdf::{ObjectStreamMode, QPdf, StreamDataMode};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
+use std::io::Cursor;
 use std::path::PathBuf;
+use std::time::Instant;
+use tempfile::NamedTempFile;
 
 use crate::parser::dfp_manager::{dfp_cache_dir, pinouts_dir};
 
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_FILES_API_URL: &str = "https://api.anthropic.com/v1/files";
 const ANTHROPIC_API_VERSION: &str = "2023-06-01";
+const ANTHROPIC_FILES_API_BETA: &str = "files-api-2025-04-14";
+const ANTHROPIC_VERIFICATION_TOOL_NAME: &str = "submit_verification";
 const ANTHROPIC_MODEL_BYTES: &[u8] = &[
     99, 108, 97, 117, 100, 101, 45, 115, 111, 110, 110, 101, 116, 45, 52, 45, 54,
 ];
 
 const OPENAI_API_URL: &str = "https://api.openai.com/v1/responses";
+const OPENAI_FILES_API_URL: &str = "https://api.openai.com/v1/files";
 const OPENAI_MODEL: &str = "gpt-5.4";
+const OPENAI_REASONING_EFFORT: &str = "high";
+const PNG_IMAGE_MEDIA_TYPE: &str = "image/png";
 
 const MAX_TOKENS: u32 = 16384;
+const OPENAI_FILE_LIMIT_BYTES: usize = 50 * 1024 * 1024;
+const RENDER_DPI: f32 = 300.0;
+
+#[derive(Debug, Clone)]
+struct BookmarkEntry {
+    title: String,
+    page: u32,
+    depth: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PageSpan {
+    start: u32,
+    end: u32,
+}
+
+#[derive(Debug, Clone)]
+struct ReducedPdf {
+    bytes: Vec<u8>,
+    page_spans: Vec<PageSpan>,
+}
+
+impl ReducedPdf {
+    fn selected_pages(&self) -> u32 {
+        self.page_spans
+            .iter()
+            .map(|span| span.end.saturating_sub(span.start) + 1)
+            .sum()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RenderedPageImage {
+    page_number: u32,
+    bytes: Vec<u8>,
+}
 
 #[derive(Debug, Clone, Copy)]
 enum Provider {
     Anthropic,
     OpenAI,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+fn provider_name(provider: Provider) -> &'static str {
+    match provider {
+        Provider::Anthropic => "Anthropic",
+        Provider::OpenAI => "OpenAI",
+    }
+}
+
+fn provider_analysis_hint(provider: Provider) -> &'static str {
+    match provider {
+        Provider::Anthropic => {
+            "This is usually the slowest step. Large datasheets can take a couple of minutes or more."
+        }
+        Provider::OpenAI => {
+            "This is usually the slowest step. Large datasheets can take up to 3 minutes or more."
+        }
+    }
+}
+
+pub type ProgressCallback = dyn Fn(VerifyProgressUpdate) + Send + Sync;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct VerifyProgressUpdate {
+    pub stage: String,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    pub progress: f64,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub indeterminate: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+}
+
+impl VerifyProgressUpdate {
+    pub fn new(stage: &str, progress: f64, label: impl Into<String>) -> Self {
+        Self {
+            stage: stage.to_string(),
+            label: label.into(),
+            detail: None,
+            progress: progress.clamp(0.0, 1.0),
+            indeterminate: false,
+            provider: None,
+        }
+    }
+
+    pub fn detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+
+    pub fn indeterminate(mut self, indeterminate: bool) -> Self {
+        self.indeterminate = indeterminate;
+        self
+    }
+
+    fn provider(mut self, provider: Provider) -> Self {
+        self.provider = Some(provider_name(provider).to_string());
+        self
+    }
+}
+
+fn emit_progress(progress: Option<&ProgressCallback>, update: VerifyProgressUpdate) {
+    if let Some(progress) = progress {
+        progress(update);
+    }
 }
 
 fn get_env_key(var_name: &str) -> Option<String> {
@@ -70,8 +189,44 @@ fn get_env_key(var_name: &str) -> Option<String> {
     None
 }
 
+fn get_optional_env_value(var_name: &str) -> Option<String> {
+    std::env::var(var_name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 fn anthropic_model() -> &'static str {
     std::str::from_utf8(ANTHROPIC_MODEL_BYTES).expect("valid Anthropic model identifier")
+}
+
+fn openai_model() -> String {
+    get_optional_env_value("PICKLE_OPENAI_MODEL").unwrap_or_else(|| OPENAI_MODEL.to_string())
+}
+
+fn openai_reasoning_effort() -> String {
+    match get_optional_env_value("PICKLE_OPENAI_REASONING_EFFORT") {
+        Some(value) => match value.as_str() {
+            "minimal" | "low" | "medium" | "high" => value,
+            other => {
+                log::warn!(
+                    "verify_pinout: ignoring unsupported PICKLE_OPENAI_REASONING_EFFORT={}",
+                    other
+                );
+                OPENAI_REASONING_EFFORT.to_string()
+            }
+        },
+        None => OPENAI_REASONING_EFFORT.to_string(),
+    }
+}
+
+fn verify_cache_disabled() -> bool {
+    matches!(
+        get_optional_env_value("PICKLE_DISABLE_VERIFY_CACHE")
+            .as_deref()
+            .map(|value| value.to_ascii_lowercase()),
+        Some(ref value) if value == "1" || value == "true" || value == "yes"
+    )
 }
 
 pub fn get_api_key() -> Option<String> {
@@ -297,127 +452,351 @@ fn build_current_data_summary(device_data: &Value) -> String {
     lines.join("\n")
 }
 
-/// The VERIFY_PROMPT instructs the LLM to focus on the "Pin Diagrams" section,
-/// so we send the full PDF — no client-side page extraction needed.
-/// The supported providers both handle large PDFs within their context limits.
+fn build_provider_prompt(provider: Provider, base_prompt: &str, device_data: &Value) -> String {
+    match provider {
+        Provider::Anthropic => base_prompt.to_string(),
+        Provider::OpenAI => {
+            let pin_count = device_data
+                .get("pin_count")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0);
+            format!(
+                "{base_prompt}\n\nOpenAI-specific scope reduction:\n- Only extract packages whose pin_count matches the current device pin count ({pin_count}).\n- Ignore package tables for other pin counts.\n- If multiple package names share this pin count, include all of them.\n- Keep the CLC extraction task unchanged."
+            )
+        }
+    }
+}
+
+/// The verifier narrows the datasheet to bookmark-selected pinout and CLC
+/// sections before uploading it to the provider. If reduced-PDF handling fails,
+/// it falls back to rendered PNG page images.
 fn prepare_pdf(pdf_bytes: &[u8]) -> Vec<u8> {
     pdf_bytes.to_vec()
 }
 
-fn call_anthropic_api(pdf_bytes: &[u8], prompt: &str, api_key: &str) -> Result<String, String> {
-    let trimmed = prepare_pdf(pdf_bytes);
-    let pdf_b64 = base64::engine::general_purpose::STANDARD.encode(&trimmed);
+fn normalize_bookmark_title(title: &str) -> String {
+    let mut normalized = String::with_capacity(title.len());
+    let mut previous_was_space = false;
 
-    let payload = serde_json::json!({
-        "model": anthropic_model(),
-        "max_tokens": MAX_TOKENS,
-        "messages": [{
-            "role": "user",
-            "content": [
-                {
-                    "type": "document",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "application/pdf",
-                        "data": pdf_b64
-                    }
-                },
-                {
-                    "type": "text",
-                    "text": prompt
-                }
-            ]
-        }]
-    });
-
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(300))
-        .build()
-        .map_err(|e| format!("HTTP client error: {e}"))?;
-
-    let resp = client
-        .post(ANTHROPIC_API_URL)
-        .header("x-api-key", api_key)
-        .header("anthropic-version", ANTHROPIC_API_VERSION)
-        .header("content-type", "application/json")
-        .body(serde_json::to_vec(&payload).unwrap())
-        .send()
-        .map_err(|e| format!("API request error: {e}"))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().unwrap_or_default();
-        return Err(format!("Anthropic API error {}: {}", status, body));
-    }
-
-    let result: Value = resp.json().map_err(|e| format!("JSON parse error: {e}"))?;
-
-    let mut text_parts: Vec<String> = Vec::new();
-    if let Some(content) = result.get("content").and_then(|v: &Value| v.as_array()) {
-        for block in content {
-            if block.get("type").and_then(|v: &Value| v.as_str()) == Some("text") {
-                if let Some(text) = block.get("text").and_then(|v: &Value| v.as_str()) {
-                    text_parts.push(text.to_string());
-                }
-            }
+    for ch in title.chars() {
+        if ch.is_ascii_alphanumeric() {
+            normalized.push(ch.to_ascii_lowercase());
+            previous_was_space = false;
+        } else if !previous_was_space {
+            normalized.push(' ');
+            previous_was_space = true;
         }
     }
 
-    Ok(text_parts.join("\n"))
+    normalized.trim().to_string()
 }
 
-fn call_openai_api(pdf_bytes: &[u8], prompt: &str, api_key: &str) -> Result<String, String> {
-    let trimmed = prepare_pdf(pdf_bytes);
-    let pdf_b64 = base64::engine::general_purpose::STANDARD.encode(&trimmed);
-    let file_data = format!("data:application/pdf;base64,{}", pdf_b64);
+fn title_matches_pin_diagrams(title: &str) -> bool {
+    normalize_bookmark_title(title).contains("pin diagrams")
+}
 
-    // OpenAI Responses API with inline file input and high reasoning effort
-    // for complex pinout extraction from datasheet PDFs.
-    let payload = serde_json::json!({
-        "model": OPENAI_MODEL,
-        "instructions": "You are analyzing a Microchip dsPIC33/PIC24 datasheet to extract and verify pin mapping data. Return only valid JSON.",
-        "input": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_file",
-                        "filename": "datasheet.pdf",
-                        "file_data": file_data,
-                    },
-                    {
-                        "type": "input_text",
-                        "text": prompt
-                    }
-                ]
+fn title_matches_pinout_descriptions(title: &str) -> bool {
+    let normalized = normalize_bookmark_title(title);
+    normalized.contains("pinout io descriptions")
+        || normalized.contains("pinout i o descriptions")
+        || normalized.contains("pin function descriptions")
+}
+
+fn title_matches_table_of_contents(title: &str) -> bool {
+    normalize_bookmark_title(title).contains("table of contents")
+}
+
+fn title_matches_clc(title: &str) -> bool {
+    let normalized = normalize_bookmark_title(title);
+    normalized.contains("configurable logic cell") || normalized == "clc"
+}
+
+fn title_starts_numbered_chapter(title: &str) -> bool {
+    normalize_bookmark_title(title)
+        .chars()
+        .next()
+        .map(|ch| ch.is_ascii_digit())
+        .unwrap_or(false)
+}
+
+fn first_matching_bookmark(
+    bookmarks: &[BookmarkEntry],
+    matcher: fn(&str) -> bool,
+) -> Option<&BookmarkEntry> {
+    bookmarks
+        .iter()
+        .filter(|bookmark| matcher(&bookmark.title))
+        .min_by_key(|bookmark| (bookmark.page, bookmark.depth))
+}
+
+fn first_matching_page_after(
+    bookmarks: &[BookmarkEntry],
+    page: u32,
+    matcher: fn(&str) -> bool,
+) -> Option<u32> {
+    bookmarks
+        .iter()
+        .filter(|bookmark| bookmark.page > page)
+        .find(|bookmark| matcher(&bookmark.title))
+        .map(|bookmark| bookmark.page)
+}
+
+fn first_numbered_page_after_at_or_above_depth(
+    bookmarks: &[BookmarkEntry],
+    start: &BookmarkEntry,
+) -> Option<u32> {
+    bookmarks
+        .iter()
+        .filter(|bookmark| {
+            bookmark.page > start.page
+                && bookmark.depth <= start.depth
+                && title_starts_numbered_chapter(&bookmark.title)
+        })
+        .map(|bookmark| bookmark.page)
+        .min()
+}
+
+fn next_page_after_at_or_above_depth(bookmarks: &[BookmarkEntry], start: &BookmarkEntry) -> Option<u32> {
+    bookmarks
+        .iter()
+        .filter(|bookmark| bookmark.page > start.page && bookmark.depth <= start.depth)
+        .map(|bookmark| bookmark.page)
+        .min()
+}
+
+fn section_end_from_bookmarks(
+    bookmarks: &[BookmarkEntry],
+    start: &BookmarkEntry,
+    total_pages: u32,
+) -> u32 {
+    first_matching_page_after(bookmarks, start.page, title_matches_table_of_contents)
+        .map(|page| page.saturating_sub(1))
+        .or_else(|| {
+            first_numbered_page_after_at_or_above_depth(bookmarks, start)
+                .map(|page| page.saturating_sub(1))
+        })
+        .unwrap_or(total_pages)
+}
+
+fn merge_page_spans(mut spans: Vec<PageSpan>) -> Vec<PageSpan> {
+    spans.sort_unstable_by_key(|span| span.start);
+    let mut merged: Vec<PageSpan> = Vec::new();
+
+    for span in spans {
+        if let Some(last) = merged.last_mut() {
+            if span.start <= last.end.saturating_add(1) {
+                last.end = last.end.max(span.end);
+                continue;
             }
-        ],
-        "reasoning": { "effort": "high" }
-    });
-
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(600))
-        .build()
-        .map_err(|e| format!("HTTP client error: {e}"))?;
-
-    let resp = client
-        .post(OPENAI_API_URL)
-        .header("Authorization", format!("Bearer {}", api_key))
-        .header("content-type", "application/json")
-        .body(serde_json::to_vec(&payload).unwrap())
-        .send()
-        .map_err(|e| format!("API request error: {e}"))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().unwrap_or_default();
-        return Err(format!("OpenAI API error {}: {}", status, body));
+        }
+        merged.push(span);
     }
 
-    let result: Value = resp.json().map_err(|e| format!("JSON parse error: {e}"))?;
+    merged
+}
 
-    // Responses API: output[] contains "reasoning" and "message" items.
-    // We only want text from "message" items → content[].output_text.text
+fn select_reduced_page_spans(bookmarks: &[BookmarkEntry], total_pages: u32) -> Vec<PageSpan> {
+    let mut spans = Vec::new();
+
+    if let Some(pin_start) = first_matching_bookmark(bookmarks, title_matches_pin_diagrams) {
+        let pin_end = section_end_from_bookmarks(bookmarks, pin_start, total_pages);
+
+        if pin_end >= pin_start.page {
+            spans.push(PageSpan {
+                start: pin_start.page,
+                end: pin_end,
+            });
+        }
+    }
+
+    if let Some(pinout_start) = first_matching_bookmark(bookmarks, title_matches_pinout_descriptions) {
+        let pinout_end = section_end_from_bookmarks(bookmarks, pinout_start, total_pages);
+
+        if pinout_end >= pinout_start.page {
+            spans.push(PageSpan {
+                start: pinout_start.page,
+                end: pinout_end,
+            });
+        }
+    }
+
+    if let Some(clc_start) = first_matching_bookmark(bookmarks, title_matches_clc) {
+        let clc_end = next_page_after_at_or_above_depth(bookmarks, clc_start)
+            .map(|page| page.saturating_sub(1))
+            .unwrap_or(total_pages);
+
+        if clc_end >= clc_start.page {
+            spans.push(PageSpan {
+                start: clc_start.page,
+                end: clc_end,
+            });
+        }
+    }
+
+    merge_page_spans(spans)
+}
+
+fn collect_pdf_bookmarks(pdf_bytes: &[u8]) -> Result<(Vec<BookmarkEntry>, u32), String> {
+    let temp_pdf = NamedTempFile::new().map_err(|error| format!("Tempfile error: {error}"))?;
+    fs::write(temp_pdf.path(), pdf_bytes)
+        .map_err(|error| format!("Failed to write temporary PDF: {error}"))?;
+
+    let pdfium = bind_pdfium_silent().map_err(|error| format!("Failed to bind PDFium: {error}"))?;
+    let document = pdfium
+        .load_pdf_from_file(temp_pdf.path(), None)
+        .map_err(|error| format!("Failed to open PDF for bookmark scan: {error}"))?;
+
+    let total_pages = document.pages().len() as u32;
+    let mut bookmarks = Vec::new();
+
+    for bookmark in document.bookmarks().iter() {
+        let Some(title) = bookmark.title() else {
+            continue;
+        };
+        let Some(page) = bookmark
+            .destination()
+            .and_then(|destination| destination.page_index().ok())
+            .map(|page_index| page_index as u32 + 1)
+        else {
+            continue;
+        };
+
+        let mut depth = 0usize;
+        let mut current = bookmark.parent();
+        while let Some(parent) = current {
+            depth += 1;
+            current = parent.parent();
+        }
+
+        bookmarks.push(BookmarkEntry { title, page, depth });
+    }
+
+    Ok((bookmarks, total_pages))
+}
+
+fn relevant_page_spans_for_pdf(pdf_bytes: &[u8]) -> Result<(Vec<PageSpan>, u32), String> {
+    let (bookmarks, total_pages) = collect_pdf_bookmarks(pdf_bytes)?;
+    let page_spans = select_reduced_page_spans(&bookmarks, total_pages);
+    if page_spans.is_empty() {
+        return Err("No bookmark ranges found for pinout/CLC sections".to_string());
+    }
+
+    Ok((page_spans, total_pages))
+}
+
+fn reduce_pdf_with_bookmarks(pdf_bytes: &[u8]) -> Result<ReducedPdf, String> {
+    let (page_spans, _) = relevant_page_spans_for_pdf(pdf_bytes)?;
+    let input_pdf = NamedTempFile::new().map_err(|error| format!("Tempfile error: {error}"))?;
+    fs::write(input_pdf.path(), pdf_bytes)
+        .map_err(|error| format!("Failed to write temporary input PDF: {error}"))?;
+    let output_pdf = NamedTempFile::new().map_err(|error| format!("Tempfile error: {error}"))?;
+
+    let source = QPdf::read(input_pdf.path())
+        .map_err(|error| format!("qpdf failed to read datasheet: {error}"))?;
+    let pages = source
+        .get_pages()
+        .map_err(|error| format!("qpdf failed to enumerate pages: {error}"))?;
+    let sink = QPdf::empty();
+
+    for span in &page_spans {
+        for page_number in span.start..=span.end {
+            let page = pages
+                .get((page_number - 1) as usize)
+                .ok_or_else(|| format!("Selected page {page_number} is out of range"))?;
+            sink.add_page(page, false)
+                .map_err(|error| format!("qpdf failed to add page {page_number}: {error}"))?;
+        }
+    }
+
+    sink.writer()
+        .preserve_unreferenced_objects(false)
+        .object_stream_mode(ObjectStreamMode::Preserve)
+        .stream_data_mode(StreamDataMode::Preserve)
+        .compress_streams(true)
+        .write(output_pdf.path())
+        .map_err(|error| format!("qpdf failed to write reduced PDF: {error}"))?;
+
+    let bytes = fs::read(output_pdf.path())
+        .map_err(|error| format!("Failed to read reduced PDF: {error}"))?;
+
+    Ok(ReducedPdf { bytes, page_spans })
+}
+
+fn render_target_pixels(points: f32) -> i32 {
+    ((points / 72.0) * RENDER_DPI).round().max(1.0) as i32
+}
+
+fn render_pages_to_pngs(
+    pdf_bytes: &[u8],
+    page_spans: &[PageSpan],
+) -> Result<Vec<RenderedPageImage>, String> {
+    let temp_pdf = NamedTempFile::new().map_err(|error| format!("Tempfile error: {error}"))?;
+    fs::write(temp_pdf.path(), pdf_bytes)
+        .map_err(|error| format!("Failed to write temporary PDF: {error}"))?;
+
+    let pdfium = bind_pdfium_silent().map_err(|error| format!("Failed to bind PDFium: {error}"))?;
+    let document = pdfium
+        .load_pdf_from_file(temp_pdf.path(), None)
+        .map_err(|error| format!("Failed to open PDF for rendering: {error}"))?;
+
+    let mut rendered = Vec::new();
+    for span in page_spans {
+        for page_number in span.start..=span.end {
+            let page = document
+                .pages()
+                .get(
+                    u16::try_from(page_number - 1)
+                        .map_err(|_| format!("Page index {page_number} does not fit in u16"))?,
+                )
+                .map_err(|error| format!("Failed to access page {page_number}: {error}"))?;
+            let render_config = PdfRenderConfig::new()
+                .set_target_width(render_target_pixels(page.width().value))
+                .set_target_height(render_target_pixels(page.height().value));
+            let image = page
+                .render_with_config(&render_config)
+                .map_err(|error| format!("Failed to render page {page_number}: {error}"))?
+                .as_image();
+
+            let mut cursor = Cursor::new(Vec::new());
+            image
+                .write_to(&mut cursor, ImageFormat::Png)
+                .map_err(|error| format!("Failed to encode page {page_number} as PNG: {error}"))?;
+
+            rendered.push(RenderedPageImage {
+                page_number,
+                bytes: cursor.into_inner(),
+            });
+        }
+    }
+
+    Ok(rendered)
+}
+
+fn should_fallback_openai_to_images(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("context_length_exceeded")
+        || lower.contains("input_file")
+        || lower.contains("application/pdf")
+        || lower.contains("unsupported")
+        || lower.contains("invalid file")
+        || lower.contains("no text in openai response")
+}
+
+fn describe_page_spans(page_spans: &[PageSpan]) -> String {
+    page_spans
+        .iter()
+        .map(|span| {
+            if span.start == span.end {
+                span.start.to_string()
+            } else {
+                format!("{}-{}", span.start, span.end)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn extract_openai_text(result: &Value) -> Result<String, String> {
     let mut text_parts: Vec<String> = Vec::new();
     if let Some(output) = result.get("output").and_then(|v| v.as_array()) {
         for item in output {
@@ -443,16 +822,1025 @@ fn call_openai_api(pdf_bytes: &[u8], prompt: &str, api_key: &str) -> Result<Stri
     Ok(text_parts.join("\n"))
 }
 
+fn openai_client(timeout_secs: u64) -> Result<reqwest::blocking::Client, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| format!("HTTP client error: {e}"))?;
+
+    Ok(client)
+}
+
+fn anthropic_client(timeout_secs: u64) -> Result<reqwest::blocking::Client, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|error| format!("HTTP client error: {error}"))?;
+
+    Ok(client)
+}
+
+fn upload_anthropic_file(
+    client: &reqwest::blocking::Client,
+    api_key: &str,
+    bytes: &[u8],
+    filename: &str,
+    media_type: &str,
+) -> Result<String, String> {
+    let start = Instant::now();
+    let file_part = reqwest::blocking::multipart::Part::bytes(bytes.to_vec())
+        .file_name(filename.to_string())
+        .mime_str(media_type)
+        .map_err(|error| format!("Failed to prepare Anthropic upload part: {error}"))?;
+    let form = reqwest::blocking::multipart::Form::new().part("file", file_part);
+
+    let resp = client
+        .post(ANTHROPIC_FILES_API_URL)
+        .header("x-api-key", api_key)
+        .header("anthropic-version", ANTHROPIC_API_VERSION)
+        .header("anthropic-beta", ANTHROPIC_FILES_API_BETA)
+        .multipart(form)
+        .send()
+        .map_err(|error| format!("Anthropic file upload error: {error}"))?;
+    let elapsed_ms = start.elapsed().as_millis();
+    log::info!(
+        "verify_pinout: Anthropic file upload completed filename={} size_bytes={} media_type={} status={} elapsed_ms={}",
+        filename,
+        bytes.len(),
+        media_type,
+        resp.status(),
+        elapsed_ms
+    );
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        return Err(format!("Anthropic file upload error {}: {}", status, body));
+    }
+
+    let result: Value = resp
+        .json()
+        .map_err(|error| format!("Anthropic upload JSON parse error: {error}"))?;
+    result
+        .get("id")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string())
+        .ok_or_else(|| format!("No file id in Anthropic upload response: {}", result))
+}
+
+fn delete_anthropic_files_best_effort(
+    client: &reqwest::blocking::Client,
+    api_key: &str,
+    file_ids: &[String],
+) {
+    for file_id in file_ids {
+        let start = Instant::now();
+        match client
+            .delete(format!("{}/{}", ANTHROPIC_FILES_API_URL, file_id))
+            .header("x-api-key", api_key)
+            .header("anthropic-version", ANTHROPIC_API_VERSION)
+            .header("anthropic-beta", ANTHROPIC_FILES_API_BETA)
+            .send()
+        {
+            Ok(response) if response.status().is_success() => {
+                log::info!(
+                    "verify_pinout: deleted Anthropic upload {} status={} elapsed_ms={}",
+                    file_id,
+                    response.status(),
+                    start.elapsed().as_millis()
+                );
+            }
+            Ok(response) => {
+                let status = response.status();
+                let body = response.text().unwrap_or_default();
+                log::warn!(
+                    "verify_pinout: failed to delete Anthropic upload {} ({}): {}",
+                    file_id,
+                    status,
+                    body
+                );
+            }
+            Err(error) => {
+                log::warn!(
+                    "verify_pinout: failed to delete Anthropic upload {}: {}",
+                    file_id,
+                    error
+                );
+            }
+        }
+    }
+}
+
+fn upload_openai_file(
+    client: &reqwest::blocking::Client,
+    api_key: &str,
+    bytes: &[u8],
+    filename: &str,
+    purpose: &str,
+    media_type: &str,
+) -> Result<String, String> {
+    let start = Instant::now();
+    let file_part = reqwest::blocking::multipart::Part::bytes(bytes.to_vec())
+        .file_name(filename.to_string())
+        .mime_str(media_type)
+        .map_err(|error| format!("Failed to prepare upload part: {error}"))?;
+    let form = reqwest::blocking::multipart::Form::new()
+        .text("purpose", purpose.to_string())
+        .part("file", file_part);
+
+    let resp = client
+        .post(OPENAI_FILES_API_URL)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .multipart(form)
+        .send()
+        .map_err(|error| format!("File upload error: {error}"))?;
+    let elapsed_ms = start.elapsed().as_millis();
+    log::info!(
+        "verify_pinout: OpenAI file upload completed filename={} size_bytes={} purpose={} media_type={} status={} elapsed_ms={}",
+        filename,
+        bytes.len(),
+        purpose,
+        media_type,
+        resp.status(),
+        elapsed_ms
+    );
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        return Err(format!("OpenAI file upload error {}: {}", status, body));
+    }
+
+    let result: Value = resp
+        .json()
+        .map_err(|error| format!("Upload JSON parse error: {error}"))?;
+    result
+        .get("id")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string())
+        .ok_or_else(|| format!("No file id in upload response: {}", result))
+}
+
+fn log_openai_response_metadata(result: &Value) {
+    log::info!(
+        "verify_pinout: OpenAI response id={} status={} usage={}",
+        result
+            .get("id")
+            .and_then(|value| value.as_str())
+            .unwrap_or("?"),
+        result
+            .get("status")
+            .and_then(|value| value.as_str())
+            .unwrap_or("?"),
+        result
+            .get("usage")
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "null".to_string())
+    );
+}
+
+fn send_openai_request(
+    client: &reqwest::blocking::Client,
+    payload: Value,
+    api_key: &str,
+) -> Result<String, String> {
+    let start = Instant::now();
+    let body = serde_json::to_vec(&payload).unwrap();
+    let model_name = payload
+        .get("model")
+        .and_then(|value| value.as_str())
+        .unwrap_or(OPENAI_MODEL);
+    let reasoning_effort = payload
+        .get("reasoning")
+        .and_then(|value| value.get("effort"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("default");
+    log::info!(
+        "verify_pinout: OpenAI request starting model={} reasoning={} request_bytes={}",
+        model_name,
+        reasoning_effort,
+        body.len()
+    );
+    let resp = client
+        .post(OPENAI_API_URL)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("content-type", "application/json")
+        .body(body)
+        .send()
+        .map_err(|e| format!("API request error: {e}"))?;
+    let elapsed_ms = start.elapsed().as_millis();
+    log::info!(
+        "verify_pinout: OpenAI responses call completed status={} elapsed_ms={}",
+        resp.status(),
+        elapsed_ms
+    );
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        return Err(format!("OpenAI API error {}: {}", status, body));
+    }
+
+    let result: Value = resp.json().map_err(|e| format!("JSON parse error: {e}"))?;
+    log_openai_response_metadata(&result);
+    extract_openai_text(&result)
+}
+
+fn send_anthropic_request(
+    client: &reqwest::blocking::Client,
+    payload: Value,
+    api_key: &str,
+) -> Result<Value, String> {
+    let start = Instant::now();
+    let resp = client
+        .post(ANTHROPIC_API_URL)
+        .header("x-api-key", api_key)
+        .header("anthropic-version", ANTHROPIC_API_VERSION)
+        .header("anthropic-beta", ANTHROPIC_FILES_API_BETA)
+        .header("content-type", "application/json")
+        .body(serde_json::to_vec(&payload).unwrap())
+        .send()
+        .map_err(|error| format!("API request error: {error}"))?;
+    let elapsed_ms = start.elapsed().as_millis();
+    log::info!(
+        "verify_pinout: Anthropic messages call completed status={} elapsed_ms={}",
+        resp.status(),
+        elapsed_ms
+    );
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        return Err(format!("Anthropic API error {}: {}", status, body));
+    }
+
+    resp.json()
+        .map_err(|error| format!("JSON parse error: {error}"))
+}
+
+fn anthropic_verification_tool() -> Value {
+    serde_json::json!({
+        "name": ANTHROPIC_VERIFICATION_TOOL_NAME,
+        "description": "Return the extracted package pin tables, discrepancy list, optional CLC input sources, and notes as structured verification data.",
+        "strict": true,
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "packages": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "package_name": { "type": "string" },
+                            "pin_count": { "type": "integer" },
+                            "pins": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "pin_number": { "type": "integer" },
+                                        "pad_name": { "type": "string" }
+                                    },
+                                    "required": ["pin_number", "pad_name"],
+                                    "additionalProperties": false
+                                }
+                            },
+                            "pin_functions": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "pad_name": { "type": "string" },
+                                        "functions": {
+                                            "type": "array",
+                                            "items": { "type": "string" }
+                                        }
+                                    },
+                                    "required": ["pad_name", "functions"],
+                                    "additionalProperties": false
+                                }
+                            }
+                        },
+                        "required": ["package_name", "pin_count", "pins", "pin_functions"],
+                        "additionalProperties": false
+                    }
+                },
+                "corrections": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "pin_position": { "type": "integer" },
+                            "package": { "type": "string" },
+                            "current_pad": { "type": "string" },
+                            "datasheet_pad": { "type": "string" },
+                            "type": { "type": "string" },
+                            "note": { "type": "string" }
+                        },
+                        "required": ["pin_position", "package", "current_pad", "datasheet_pad", "type", "note"],
+                        "additionalProperties": false
+                    }
+                },
+                "clc_input_sources": {
+                    "type": "array",
+                    "items": {
+                        "type": "array",
+                        "items": { "type": "string" }
+                    }
+                },
+                "notes": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                }
+            },
+            "required": ["packages", "corrections", "notes"],
+            "additionalProperties": false
+        }
+    })
+}
+
+fn normalize_anthropic_tool_input(input: &Value) -> Value {
+    let mut normalized = serde_json::Map::new();
+
+    let mut packages_out = serde_json::Map::new();
+    if let Some(packages) = input.get("packages").and_then(|value| value.as_array()) {
+        for package in packages {
+            let Some(package_name) = package.get("package_name").and_then(|value| value.as_str())
+            else {
+                continue;
+            };
+
+            let pin_count = package
+                .get("pin_count")
+                .cloned()
+                .unwrap_or_else(|| Value::Number(0u64.into()));
+
+            let mut pins = serde_json::Map::new();
+            if let Some(pin_items) = package.get("pins").and_then(|value| value.as_array()) {
+                for pin in pin_items {
+                    let Some(pin_number) = pin.get("pin_number").and_then(|value| value.as_u64())
+                    else {
+                        continue;
+                    };
+                    let Some(pad_name) = pin.get("pad_name").and_then(|value| value.as_str())
+                    else {
+                        continue;
+                    };
+                    pins.insert(pin_number.to_string(), Value::String(pad_name.to_string()));
+                }
+            }
+
+            let mut pin_functions = serde_json::Map::new();
+            if let Some(function_items) = package
+                .get("pin_functions")
+                .and_then(|value| value.as_array())
+            {
+                for function_item in function_items {
+                    let Some(pad_name) =
+                        function_item.get("pad_name").and_then(|value| value.as_str())
+                    else {
+                        continue;
+                    };
+                    let functions = function_item
+                        .get("functions")
+                        .and_then(|value| value.as_array())
+                        .cloned()
+                        .unwrap_or_default();
+                    pin_functions.insert(pad_name.to_string(), Value::Array(functions));
+                }
+            }
+
+            packages_out.insert(
+                package_name.to_string(),
+                Value::Object(
+                    [
+                        ("pin_count".to_string(), pin_count),
+                        ("pins".to_string(), Value::Object(pins)),
+                        ("pin_functions".to_string(), Value::Object(pin_functions)),
+                    ]
+                    .into_iter()
+                    .collect(),
+                ),
+            );
+        }
+    }
+    normalized.insert("packages".to_string(), Value::Object(packages_out));
+
+    normalized.insert(
+        "corrections".to_string(),
+        input.get("corrections")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new())),
+    );
+    normalized.insert(
+        "notes".to_string(),
+        input.get("notes")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new())),
+    );
+
+    if let Some(clc_input_sources) = input.get("clc_input_sources") {
+        normalized.insert("clc_input_sources".to_string(), clc_input_sources.clone());
+    }
+
+    Value::Object(normalized)
+}
+
+fn extract_anthropic_response_text(result: &Value) -> String {
+    let mut text_parts: Vec<String> = Vec::new();
+    if let Some(content) = result.get("content").and_then(|v: &Value| v.as_array()) {
+        for block in content {
+            if block.get("type").and_then(|v: &Value| v.as_str()) == Some("text") {
+                if let Some(text) = block.get("text").and_then(|v: &Value| v.as_str()) {
+                    text_parts.push(text.to_string());
+                }
+            }
+        }
+    }
+    text_parts.join("\n")
+}
+
+fn extract_anthropic_verification_output(result: &Value) -> Result<String, String> {
+    if let Some(content) = result.get("content").and_then(|value| value.as_array()) {
+        for block in content {
+            if block.get("type").and_then(|value| value.as_str()) != Some("tool_use") {
+                continue;
+            }
+            if block.get("name").and_then(|value| value.as_str())
+                != Some(ANTHROPIC_VERIFICATION_TOOL_NAME)
+            {
+                continue;
+            }
+            if let Some(input) = block.get("input") {
+                return serde_json::to_string(&normalize_anthropic_tool_input(input))
+                    .map_err(|error| format!("Failed to serialize Anthropic tool output: {error}"));
+            }
+        }
+    }
+
+    let text = extract_anthropic_response_text(result);
+    if text.is_empty() {
+        Err(format!("Anthropic response contained neither tool output nor text: {}", result))
+    } else {
+        Ok(text)
+    }
+}
+
+fn call_anthropic_api(
+    pdf_bytes: &[u8],
+    page_spans: &[PageSpan],
+    prompt: &str,
+    api_key: &str,
+    part_number: &str,
+    progress: Option<&ProgressCallback>,
+) -> Result<String, String> {
+    let trimmed = prepare_pdf(pdf_bytes);
+    let client = anthropic_client(300)?;
+    let filename = format!("{}-verification.pdf", part_number.to_uppercase());
+    emit_progress(
+        progress,
+        VerifyProgressUpdate::new(
+            "provider.upload",
+            0.58,
+            format!("Uploading reduced datasheet to {}", provider_name(Provider::Anthropic)),
+        )
+        .detail(format!(
+            "Uploading {} page(s) from the selected datasheet ranges: {}.",
+            page_spans
+                .iter()
+                .map(|span| span.end.saturating_sub(span.start) + 1)
+                .sum::<u32>(),
+            describe_page_spans(page_spans)
+        ))
+        .provider(Provider::Anthropic),
+    );
+    let file_id = upload_anthropic_file(&client, api_key, &trimmed, &filename, "application/pdf")?;
+    let uploaded_file_ids = vec![file_id.clone()];
+    emit_progress(
+        progress,
+        VerifyProgressUpdate::new(
+            "provider.analyze",
+            0.76,
+            "Anthropic is analyzing the reduced datasheet",
+        )
+        .detail(provider_analysis_hint(Provider::Anthropic))
+        .indeterminate(true)
+        .provider(Provider::Anthropic),
+    );
+
+    let payload = serde_json::json!({
+        "model": anthropic_model(),
+        "max_tokens": MAX_TOKENS,
+        "tools": [anthropic_verification_tool()],
+        "tool_choice": {
+            "type": "tool",
+            "name": ANTHROPIC_VERIFICATION_TOOL_NAME
+        },
+        "messages": [{
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": format!(
+                        "{prompt}\n\nThe attached PDF was reduced to the relevant datasheet sections only. Included page ranges: {}.",
+                        describe_page_spans(page_spans)
+                    )
+                },
+                {
+                    "type": "document",
+                    "source": {
+                        "type": "file",
+                        "file_id": file_id
+                    }
+                }
+            ]
+        }]
+    });
+
+    let response = send_anthropic_request(&client, payload, api_key)
+        .and_then(|result| extract_anthropic_verification_output(&result));
+    delete_anthropic_files_best_effort(&client, api_key, &uploaded_file_ids);
+    response
+}
+
+fn call_anthropic_image_api(
+    pdf_bytes: &[u8],
+    page_spans: &[PageSpan],
+    prompt: &str,
+    api_key: &str,
+    progress: Option<&ProgressCallback>,
+) -> Result<String, String> {
+    emit_progress(
+        progress,
+        VerifyProgressUpdate::new(
+            "provider.render",
+            0.62,
+            "Rendering selected datasheet pages as 300 DPI PNGs",
+        )
+        .detail("Retrying with images because the reduced-PDF path was unavailable.")
+        .provider(Provider::Anthropic),
+    );
+    let rendered_images = render_pages_to_pngs(pdf_bytes, page_spans)?;
+    log::info!(
+        "verify_pinout: rendered {} fallback PNG pages at 300 DPI for Anthropic ({})",
+        rendered_images.len(),
+        describe_page_spans(page_spans)
+    );
+
+    let client = anthropic_client(300)?;
+    emit_progress(
+        progress,
+        VerifyProgressUpdate::new(
+            "provider.upload",
+            0.68,
+            "Uploading rendered datasheet pages to Anthropic",
+        )
+        .detail(format!(
+            "Retrying with {} PNG page(s) from the reduced datasheet ranges: {}.",
+            rendered_images.len(),
+            describe_page_spans(page_spans)
+        ))
+        .provider(Provider::Anthropic),
+    );
+    let mut content = Vec::with_capacity(rendered_images.len() + 1);
+    content.push(serde_json::json!({
+        "type": "text",
+        "text": format!(
+            "{prompt}\n\nThe datasheet was rendered as 300 DPI PNG images for these page ranges: {}.",
+            describe_page_spans(page_spans)
+        )
+    }));
+
+    let mut uploaded_file_ids = Vec::with_capacity(rendered_images.len());
+    for image in rendered_images {
+        let file_id = match upload_anthropic_file(
+            &client,
+            api_key,
+            &image.bytes,
+            &format!("datasheet-page-{:04}.png", image.page_number),
+            PNG_IMAGE_MEDIA_TYPE,
+        ) {
+            Ok(file_id) => file_id,
+            Err(error) => {
+                delete_anthropic_files_best_effort(&client, api_key, &uploaded_file_ids);
+                return Err(error);
+            }
+        };
+        uploaded_file_ids.push(file_id.clone());
+        content.push(serde_json::json!({
+            "type": "image",
+            "source": {
+                "type": "file",
+                "file_id": file_id
+            }
+        }));
+    }
+
+    let payload = serde_json::json!({
+        "model": anthropic_model(),
+        "max_tokens": MAX_TOKENS,
+        "tools": [anthropic_verification_tool()],
+        "tool_choice": {
+            "type": "tool",
+            "name": ANTHROPIC_VERIFICATION_TOOL_NAME
+        },
+        "messages": [{
+            "role": "user",
+            "content": content
+        }]
+    });
+    emit_progress(
+        progress,
+        VerifyProgressUpdate::new(
+            "provider.analyze",
+            0.8,
+            "Anthropic is analyzing the rendered datasheet pages",
+        )
+        .detail(provider_analysis_hint(Provider::Anthropic))
+        .indeterminate(true)
+        .provider(Provider::Anthropic),
+    );
+
+    let response = send_anthropic_request(&client, payload, api_key)
+        .and_then(|result| extract_anthropic_verification_output(&result));
+    delete_anthropic_files_best_effort(&client, api_key, &uploaded_file_ids);
+    response
+}
+
+fn call_openai_image_api(
+    pdf_bytes: &[u8],
+    page_spans: &[PageSpan],
+    prompt: &str,
+    api_key: &str,
+    part_number: &str,
+    progress: Option<&ProgressCallback>,
+) -> Result<String, String> {
+    let model_name = openai_model();
+    let reasoning_effort = openai_reasoning_effort();
+    emit_progress(
+        progress,
+        VerifyProgressUpdate::new(
+            "provider.render",
+            0.62,
+            "Rendering selected datasheet pages as 300 DPI PNGs",
+        )
+        .detail("Retrying with images because the reduced-PDF path was unavailable.")
+        .provider(Provider::OpenAI),
+    );
+    let rendered_images = render_pages_to_pngs(pdf_bytes, page_spans)?;
+    let total_png_bytes: usize = rendered_images.iter().map(|image| image.bytes.len()).sum();
+    log::info!(
+        "verify_pinout: rendered {} fallback PNG pages at 300 DPI for OpenAI ({}) total_png_mb={:.1}",
+        rendered_images.len(),
+        describe_page_spans(page_spans),
+        total_png_bytes as f64 / 1_048_576.0
+    );
+
+    let client = openai_client(600)?;
+    emit_progress(
+        progress,
+        VerifyProgressUpdate::new("provider.upload", 0.68, "Uploading rendered datasheet pages to OpenAI")
+            .detail(format!(
+                "Retrying with {} PNG page(s) from the reduced datasheet ranges: {}.",
+                rendered_images.len(),
+                describe_page_spans(page_spans)
+            ))
+            .provider(Provider::OpenAI),
+    );
+    let mut content = Vec::with_capacity(rendered_images.len() + 1);
+    content.push(serde_json::json!({
+        "type": "input_text",
+        "text": format!(
+            "{prompt}\n\nThe datasheet was rendered as 300 DPI PNG images for these page ranges: {}.",
+            describe_page_spans(page_spans)
+        )
+    }));
+
+    for image in rendered_images {
+        let file_id = upload_openai_file(
+            &client,
+            api_key,
+            &image.bytes,
+            &format!(
+                "{}-page-{:04}.png",
+                part_number.to_uppercase(),
+                image.page_number
+            ),
+            "vision",
+            PNG_IMAGE_MEDIA_TYPE,
+        )?;
+        content.push(serde_json::json!({
+            "type": "input_image",
+            "file_id": file_id
+        }));
+    }
+
+    let payload = serde_json::json!({
+        "model": model_name,
+        "instructions": "You are analyzing rendered datasheet page images to extract and verify pin mapping data. Return only valid JSON.",
+        "input": [
+            {
+                "role": "user",
+                "content": content
+            }
+        ],
+        "reasoning": { "effort": reasoning_effort }
+    });
+    emit_progress(
+        progress,
+        VerifyProgressUpdate::new("provider.analyze", 0.8, "OpenAI is analyzing the rendered datasheet pages")
+            .detail(provider_analysis_hint(Provider::OpenAI))
+            .indeterminate(true)
+            .provider(Provider::OpenAI),
+    );
+
+    send_openai_request(&client, payload, api_key)
+}
+
+fn call_openai_api(
+    pdf_bytes: &[u8],
+    datasheet_text: Option<&str>,
+    prompt: &str,
+    api_key: &str,
+    part_number: &str,
+    progress: Option<&ProgressCallback>,
+) -> Result<String, String> {
+    let model_name = openai_model();
+    let reasoning_effort = openai_reasoning_effort();
+    if pdf_bytes.is_empty() {
+        let detail = if datasheet_text.is_some() {
+            " Text-only datasheet fallback is disabled."
+        } else {
+            ""
+        };
+        return Err(format!(
+            "Verification requires a datasheet PDF so pickle can send a reduced PDF or rendered page images.{detail}"
+        ));
+    }
+
+    emit_progress(
+        progress,
+        VerifyProgressUpdate::new(
+            "datasheet.reduce",
+            0.44,
+            "Trimming the datasheet to pinout and CLC pages",
+        )
+        .detail("pickle uploads only the relevant pages instead of the entire family datasheet."),
+    );
+    let (page_spans, source_pages) = relevant_page_spans_for_pdf(pdf_bytes)?;
+    let range_description = describe_page_spans(&page_spans);
+
+    let reduced_pdf = match reduce_pdf_with_bookmarks(pdf_bytes) {
+        Ok(reduced_pdf) => reduced_pdf,
+        Err(error) => {
+            log::warn!(
+                "verify_pinout: reduced PDF generation failed for OpenAI, falling back to rendered page images: {}",
+                error
+            );
+            return call_openai_image_api(
+                pdf_bytes,
+                &page_spans,
+                prompt,
+                api_key,
+                part_number,
+                progress,
+            );
+        }
+    };
+
+    log::info!(
+        "verify_pinout: reduced PDF from {} pages / {:.1} MB to {} pages / {:.1} MB using bookmarks ({})",
+        source_pages,
+        pdf_bytes.len() as f64 / 1_048_576.0,
+        reduced_pdf.selected_pages(),
+        reduced_pdf.bytes.len() as f64 / 1_048_576.0,
+        range_description
+    );
+
+    if reduced_pdf.bytes.len() > OPENAI_FILE_LIMIT_BYTES {
+        log::warn!(
+            "verify_pinout: reduced PDF is still {:.1} MB, falling back to rendered page images for OpenAI",
+            reduced_pdf.bytes.len() as f64 / 1_048_576.0
+        );
+        return call_openai_image_api(
+            pdf_bytes,
+            &page_spans,
+            prompt,
+            api_key,
+            part_number,
+            progress,
+        );
+    }
+
+    let client = openai_client(600)?;
+    let filename = format!("{}-verification.pdf", part_number.to_uppercase());
+    emit_progress(
+        progress,
+        VerifyProgressUpdate::new(
+            "provider.upload",
+            0.58,
+            format!("Uploading reduced datasheet to {}", provider_name(Provider::OpenAI)),
+        )
+        .detail(format!(
+            "Reduced {} pages / {:.1} MB to {} pages / {:.1} MB ({})",
+            source_pages,
+            pdf_bytes.len() as f64 / 1_048_576.0,
+            reduced_pdf.selected_pages(),
+            reduced_pdf.bytes.len() as f64 / 1_048_576.0,
+            range_description
+        ))
+        .provider(Provider::OpenAI),
+    );
+    let file_id = match upload_openai_file(
+        &client,
+        api_key,
+        &reduced_pdf.bytes,
+        &filename,
+        "user_data",
+        "application/pdf",
+    ) {
+        Ok(file_id) => file_id,
+        Err(error) => {
+            if should_fallback_openai_to_images(&error) {
+                log::warn!(
+                    "verify_pinout: OpenAI reduced PDF upload failed with file/path-specific error, falling back to rendered page images: {}",
+                    error
+                );
+                return call_openai_image_api(
+                    pdf_bytes,
+                    &page_spans,
+                    prompt,
+                    api_key,
+                    part_number,
+                    progress,
+                );
+            }
+            return Err(error);
+        }
+    };
+
+    let prompt_with_context = format!(
+        "{prompt}\n\nThe attached PDF was reduced to the relevant datasheet sections only. Included page ranges: {}.",
+        range_description
+    );
+    log::info!(
+        "verify_pinout: OpenAI prompt stats model={} reasoning={} prompt_chars={} prompt_lines={}",
+        model_name,
+        reasoning_effort,
+        prompt_with_context.chars().count(),
+        prompt_with_context.lines().count()
+    );
+    let payload = serde_json::json!({
+        "model": model_name,
+        "instructions": "You are analyzing a reduced Microchip dsPIC33/PIC24 datasheet PDF to extract and verify pin mapping data. Return only valid JSON.",
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_file",
+                        "file_id": file_id
+                    },
+                    {
+                        "type": "input_text",
+                        "text": prompt_with_context
+                    }
+                ]
+            }
+        ],
+        "reasoning": { "effort": reasoning_effort }
+    });
+    emit_progress(
+        progress,
+        VerifyProgressUpdate::new(
+            "provider.analyze",
+            0.76,
+            "OpenAI is analyzing the reduced datasheet",
+        )
+        .detail(provider_analysis_hint(Provider::OpenAI))
+        .indeterminate(true)
+        .provider(Provider::OpenAI),
+    );
+
+    match send_openai_request(&client, payload, api_key) {
+        Ok(response) => Ok(response),
+        Err(error) => {
+            if should_fallback_openai_to_images(&error) {
+                log::warn!(
+                    "verify_pinout: OpenAI reduced PDF request failed with file/path-specific error, falling back to rendered page images: {}",
+                    error
+                );
+                call_openai_image_api(
+                    pdf_bytes,
+                    &page_spans,
+                    prompt,
+                    api_key,
+                    part_number,
+                    progress,
+                )
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
 /// Dispatch to the appropriate API based on provider.
 fn call_llm_api(
     provider: Provider,
     pdf_bytes: &[u8],
+    datasheet_text: Option<&str>,
     prompt: &str,
     api_key: &str,
+    part_number: &str,
+    progress: Option<&ProgressCallback>,
 ) -> Result<String, String> {
     match provider {
-        Provider::Anthropic => call_anthropic_api(pdf_bytes, prompt, api_key),
-        Provider::OpenAI => call_openai_api(pdf_bytes, prompt, api_key),
+        Provider::Anthropic => {
+            if pdf_bytes.is_empty() {
+                let detail = if datasheet_text.is_some() {
+                    " Text-only datasheet fallback is disabled."
+                } else {
+                    ""
+                };
+                Err(format!(
+                    "Verification requires a datasheet PDF so pickle can send a reduced PDF or rendered page images.{detail}"
+                ))
+            } else {
+                emit_progress(
+                    progress,
+                    VerifyProgressUpdate::new(
+                        "datasheet.reduce",
+                        0.44,
+                        "Trimming the datasheet to pinout and CLC pages",
+                    )
+                    .detail(
+                        "pickle uploads only the relevant pages instead of the entire family datasheet.",
+                    ),
+                );
+                let (page_spans, source_pages) = relevant_page_spans_for_pdf(pdf_bytes)?;
+                let range_description = describe_page_spans(&page_spans);
+
+                match reduce_pdf_with_bookmarks(pdf_bytes) {
+                    Ok(reduced_pdf) => {
+                        log::info!(
+                            "verify_pinout: reduced PDF from {} pages / {:.1} MB to {} pages / {:.1} MB for Anthropic ({})",
+                            source_pages,
+                            pdf_bytes.len() as f64 / 1_048_576.0,
+                            reduced_pdf.selected_pages(),
+                            reduced_pdf.bytes.len() as f64 / 1_048_576.0,
+                            range_description
+                        );
+                        match call_anthropic_api(
+                            &reduced_pdf.bytes,
+                            &page_spans,
+                            prompt,
+                            api_key,
+                            part_number,
+                            progress,
+                        ) {
+                            Ok(response) => Ok(response),
+                            Err(error) => {
+                                log::warn!(
+                                    "verify_pinout: Anthropic reduced PDF request failed, falling back to rendered page images: {}",
+                                    error
+                                );
+                                call_anthropic_image_api(
+                                    pdf_bytes,
+                                    &page_spans,
+                                    prompt,
+                                    api_key,
+                                    progress,
+                                )
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "verify_pinout: reduced PDF generation failed for Anthropic, falling back to rendered page images: {}",
+                            error
+                        );
+                        call_anthropic_image_api(
+                            pdf_bytes,
+                            &page_spans,
+                            prompt,
+                            api_key,
+                            progress,
+                        )
+                    }
+                }
+            }
+        }
+        Provider::OpenAI => {
+            call_openai_api(
+                pdf_bytes,
+                datasheet_text,
+                prompt,
+                api_key,
+                part_number,
+                progress,
+            )
+        }
     }
 }
 
@@ -661,8 +2049,8 @@ fn parse_verifier_response(raw: &str, device_data: &Value) -> VerifyResult {
 }
 
 // ---------------------------------------------------------------------------
-// Verification result cache — keyed by PDF content hash so the same datasheet
-// (which may cover a whole device family) reuses results across devices.
+// Verification result cache — keyed by PDF content hash plus request scope so
+// provider/prompt variants do not leak across different device views.
 // ---------------------------------------------------------------------------
 
 fn verify_cache_dir() -> PathBuf {
@@ -671,8 +2059,8 @@ fn verify_cache_dir() -> PathBuf {
     d
 }
 
-/// Simple hash of PDF bytes for cache key (first 8 bytes of a basic hash).
-fn pdf_cache_key(pdf_bytes: &[u8]) -> String {
+/// Simple hash of PDF bytes and request scope for cache key.
+fn pdf_cache_key(pdf_bytes: &[u8], scope: &str) -> String {
     // Use a simple FNV-style hash — no crypto needed, just deduplication.
     let mut h: u64 = 0xcbf29ce484222325;
     for &b in pdf_bytes.iter().take(65536) {
@@ -682,18 +2070,24 @@ fn pdf_cache_key(pdf_bytes: &[u8]) -> String {
     // Also mix in the length for uniqueness
     h ^= pdf_bytes.len() as u64;
     h = h.wrapping_mul(0x100000001b3);
+    for &b in scope.as_bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h ^= scope.len() as u64;
+    h = h.wrapping_mul(0x100000001b3);
     format!("{:016x}", h)
 }
 
-fn load_cached_verify(pdf_bytes: &[u8]) -> Option<Value> {
-    let key = pdf_cache_key(pdf_bytes);
+fn load_cached_verify(pdf_bytes: &[u8], scope: &str) -> Option<Value> {
+    let key = pdf_cache_key(pdf_bytes, scope);
     let path = verify_cache_dir().join(format!("{}.json", key));
     let text = fs::read_to_string(&path).ok()?;
     serde_json::from_str(&text).ok()
 }
 
-fn save_cached_verify(pdf_bytes: &[u8], raw_json: &Value) {
-    let key = pdf_cache_key(pdf_bytes);
+fn save_cached_verify(pdf_bytes: &[u8], scope: &str, raw_json: &Value) {
+    let key = pdf_cache_key(pdf_bytes, scope);
     let path = verify_cache_dir().join(format!("{}.json", key));
     if let Ok(text) = serde_json::to_string_pretty(raw_json) {
         let _ = fs::write(&path, text);
@@ -702,45 +2096,90 @@ fn save_cached_verify(pdf_bytes: &[u8], raw_json: &Value) {
 
 pub fn verify_pinout(
     pdf_bytes: &[u8],
+    datasheet_text: Option<&str>,
     device_data: &Value,
     api_key: Option<&str>,
+    progress: Option<&ProgressCallback>,
 ) -> Result<VerifyResult, String> {
-    // Check cache first — the same datasheet PDF produces the same packages
-    // regardless of which family device we're comparing against.
-    if let Some(cached_json) = load_cached_verify(pdf_bytes) {
-        log::info!("verify_pinout: using cached LLM result");
-        return Ok(parse_verifier_response(
-            &serde_json::to_string(&cached_json).unwrap_or_default(),
-            device_data,
-        ));
-    }
-
     let (provider, key) = resolve_provider(api_key)?;
+    emit_progress(
+        progress,
+        VerifyProgressUpdate::new(
+            "provider.select",
+            0.36,
+            format!("Using {} for datasheet verification", provider_name(provider)),
+        )
+        .detail(provider_analysis_hint(provider))
+        .provider(provider),
+    );
 
     let current_summary = build_current_data_summary(device_data);
-    let prompt = VERIFY_PROMPT.replace("{current_data}", &current_summary);
+    let base_prompt = VERIFY_PROMPT.replace("{current_data}", &current_summary);
+    let prompt = build_provider_prompt(provider, &base_prompt, device_data);
+    let cache_scope = format!("provider={}|prompt={}", provider_name(provider), prompt);
 
-    let raw_response = call_llm_api(provider, pdf_bytes, &prompt, &key)?;
+    if !pdf_bytes.is_empty() && !verify_cache_disabled() {
+        if let Some(cached_json) = load_cached_verify(pdf_bytes, &cache_scope) {
+            log::info!("verify_pinout: using cached LLM result");
+            emit_progress(
+                progress,
+                VerifyProgressUpdate::new("result.cached", 0.95, "Using cached verification result")
+                    .detail("This datasheet was already verified earlier for the same provider and request scope, so no provider call was needed."),
+            );
+            return Ok(parse_verifier_response(
+                &serde_json::to_string(&cached_json).unwrap_or_default(),
+                device_data,
+            ));
+        }
+    } else if !pdf_bytes.is_empty() && verify_cache_disabled() {
+        log::info!("verify_pinout: verify cache disabled via PICKLE_DISABLE_VERIFY_CACHE");
+    }
+
+    let part_number = device_data
+        .get("part_number")
+        .and_then(|v| v.as_str())
+        .unwrap_or("UNKNOWN");
+
+    let raw_response = call_llm_api(
+        provider,
+        pdf_bytes,
+        datasheet_text,
+        &prompt,
+        &key,
+        part_number,
+        progress,
+    )?;
+    emit_progress(
+        progress,
+        VerifyProgressUpdate::new(
+            "result.process",
+            0.94,
+            "Processing the structured verification result",
+        )
+        .detail("Comparing extracted package data against the loaded device and preparing the overlay view."),
+    );
 
     // Cache the raw JSON response for future reuse
-    if let Ok(parsed) = serde_json::from_str::<Value>(&raw_response) {
-        save_cached_verify(pdf_bytes, &parsed);
-    } else {
-        // Try stripping markdown fencing before caching
-        let cleaned = raw_response.trim();
-        if cleaned.starts_with("```") {
-            let lines: Vec<&str> = cleaned.lines().collect();
-            let start = lines
-                .iter()
-                .position(|l| l.trim().starts_with('{'))
-                .unwrap_or(1);
-            let end = lines
-                .iter()
-                .rposition(|l| l.trim().starts_with('}'))
-                .unwrap_or(lines.len() - 1);
-            let json_str = lines[start..=end].join("\n");
-            if let Ok(parsed) = serde_json::from_str::<Value>(&json_str) {
-                save_cached_verify(pdf_bytes, &parsed);
+    if !pdf_bytes.is_empty() {
+        if let Ok(parsed) = serde_json::from_str::<Value>(&raw_response) {
+            save_cached_verify(pdf_bytes, &cache_scope, &parsed);
+        } else {
+            // Try stripping markdown fencing before caching
+            let cleaned = raw_response.trim();
+            if cleaned.starts_with("```") {
+                let lines: Vec<&str> = cleaned.lines().collect();
+                let start = lines
+                    .iter()
+                    .position(|l| l.trim().starts_with('{'))
+                    .unwrap_or(1);
+                let end = lines
+                    .iter()
+                    .rposition(|l| l.trim().starts_with('}'))
+                    .unwrap_or(lines.len() - 1);
+                let json_str = lines[start..=end].join("\n");
+                if let Ok(parsed) = serde_json::from_str::<Value>(&json_str) {
+                    save_cached_verify(pdf_bytes, &cache_scope, &parsed);
+                }
             }
         }
     }
@@ -795,4 +2234,99 @@ pub fn save_overlay(
     }
 
     Ok(overlay_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{select_reduced_page_spans, BookmarkEntry, PageSpan};
+
+    fn bookmark(title: &str, page: u32, depth: usize) -> BookmarkEntry {
+        BookmarkEntry {
+            title: title.to_string(),
+            page,
+            depth,
+        }
+    }
+
+    #[test]
+    fn bookmark_ranges_keep_pin_sections_through_table_of_contents_and_clc_chapter() {
+        let bookmarks = vec![
+            bookmark("dsPIC33AK128MC106 Product Family", 7, 0),
+            bookmark("Pin Diagrams", 9, 0),
+            bookmark("Pinout I/O Descriptions", 16, 0),
+            bookmark("Terminology Cross Reference", 21, 0),
+            bookmark("Table of Contents", 22, 0),
+            bookmark("1. Device Overview", 28, 0),
+            bookmark("Configurable Logic Cell (CLC)", 1292, 0),
+            bookmark("Peripheral Trigger Generator (PTG)", 1311, 0),
+        ];
+
+        let spans = select_reduced_page_spans(&bookmarks, 1528);
+
+        assert_eq!(
+            spans,
+            vec![
+                PageSpan { start: 9, end: 21 },
+                PageSpan {
+                    start: 1292,
+                    end: 1310
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn bookmark_ranges_fall_back_to_first_numbered_chapter_when_toc_is_missing() {
+        let bookmarks = vec![
+            bookmark("Pin Diagrams", 9, 0),
+            bookmark("Pinout I/O Descriptions", 16, 0),
+            bookmark("1. Device Overview", 28, 0),
+        ];
+
+        let spans = select_reduced_page_spans(&bookmarks, 300);
+
+        assert_eq!(spans, vec![PageSpan { start: 9, end: 27 }]);
+    }
+
+    #[test]
+    fn nested_bookmark_ranges_include_pinout_descriptions_after_pin_diagrams() {
+        let bookmarks = vec![
+            bookmark(
+                "dsPIC33EPXXXGP50X, dsPIC33EPXXXMC20X/50X and PIC24EPXXXGP/MC20X Product Families",
+                2,
+                0,
+            ),
+            bookmark("Pin Diagrams", 5, 1),
+            bookmark("Pin Diagrams (Continued)", 6, 1),
+            bookmark("Table of Contents", 24, 1),
+            bookmark("1.0 Device Overview", 27, 0),
+            bookmark("TABLE 1-1: Pinout I/O Descriptions", 28, 1),
+            bookmark(
+                "2.0 Guidelines for Getting Started with 16-Bit Digital Signal Controllers and Microcontrollers",
+                31,
+                0,
+            ),
+        ];
+
+        let spans = select_reduced_page_spans(&bookmarks, 546);
+
+        assert_eq!(
+            spans,
+            vec![PageSpan { start: 5, end: 23 }, PageSpan { start: 28, end: 30 }]
+        );
+    }
+
+    #[test]
+    fn nested_clc_bookmark_ends_at_next_sibling_or_parent_section() {
+        let bookmarks = vec![
+            bookmark("Specialized Peripherals", 190, 0),
+            bookmark("Configurable Logic Cell (CLC)", 200, 1),
+            bookmark("Register 1-1: CLC1CON", 201, 2),
+            bookmark("Comparator", 220, 1),
+        ];
+
+        let spans = select_reduced_page_spans(&bookmarks, 260);
+
+        assert_eq!(spans, vec![PageSpan { start: 200, end: 219 }]);
+    }
 }

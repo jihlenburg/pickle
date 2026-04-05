@@ -387,20 +387,34 @@ async function loadDevice(pkg, options = {}) {
     try {
         deviceData = await invoke('load_device', { partNumber: part, package: pkg || null });
 
-        // Populate package selector (only shown when multiple packages exist)
+        // Populate package selector. Keep it visible when a synthetic fallback
+        // package was hidden so the user can still see which real package is active.
         const pkgSelect = $('pkg-select');
-        const pkgNames = Object.keys(deviceData.packages);
-        if (pkgNames.length > 1) {
+        const allPkgNames = Object.keys(deviceData.packages);
+        const pkgNames = visiblePackageNames();
+        const syntheticHidden = allPkgNames.some((name) => isSyntheticPackage(name) && !pkgNames.includes(name));
+        if (pkgNames.length > 1 || syntheticHidden) {
             pkgSelect.innerHTML = '';
             for (const name of pkgNames) {
+                const meta = deviceData.packages[name];
                 const opt = document.createElement('option');
                 opt.value = name;
-                opt.textContent = `${name} (${deviceData.packages[name].pin_count}p)`;
+                opt.textContent = `${displayPackageName(name, { meta })} (${meta.pin_count}p)`;
+                if (isSyntheticPackage(name, meta)) {
+                    opt.title = 'Fallback package from the EDC. This is not a real package name; verify against the datasheet to import the actual package.';
+                }
                 if (name === deviceData.selected_package) opt.selected = true;
                 pkgSelect.appendChild(opt);
             }
+            pkgSelect.disabled = pkgNames.length <= 1;
+            pkgSelect.title = syntheticHidden
+                ? 'The synthetic EDC fallback package was hidden. This is the real datasheet-backed package currently in use.'
+                : isSyntheticPackage(deviceData.selected_package)
+                    ? 'Current package is a fallback from the EDC and not a real package name. Verify against the datasheet to import the actual package.'
+                    : '';
             showElement(pkgSelect);
         } else {
+            pkgSelect.disabled = false;
             hideElement(pkgSelect);
         }
 
@@ -429,7 +443,11 @@ async function loadDevice(pkg, options = {}) {
 
         renderCurrentEditorView();
         syncConfigDocumentAfterDeviceLoad({ preserveState, markDirty: options.markDirty });
-        setStatus(`${deviceData.part_number} — ${deviceData.selected_package}`);
+        if (isSyntheticPackage(deviceData.selected_package)) {
+            setStatus(`${deviceData.part_number} — ${displayPackageName(deviceData.selected_package, { long: true })}. Verify against the datasheet to import the actual package.`);
+        } else {
+            setStatus(`${deviceData.part_number} — ${deviceData.selected_package}`);
+        }
 
         // Update cached device set if this was a new download
         if (!isCached) {
@@ -464,12 +482,58 @@ function setStatus(msg) {
     el.dataset.tone = tone;
 }
 
+function packageMeta(name) {
+    if (!deviceData?.packages || !name) {
+        return null;
+    }
+    return deviceData.packages[name] || null;
+}
+
+function isSyntheticPackage(name, meta = packageMeta(name)) {
+    return !!(name && /^default$/i.test(String(name).trim()) && meta?.source === 'edc');
+}
+
+function displayPackageName(name, options = {}) {
+    const meta = options.meta || packageMeta(name);
+    if (!name) {
+        return '—';
+    }
+    if (!isSyntheticPackage(name, meta)) {
+        return name;
+    }
+    return options.long
+        ? `${name} [not a real package]`
+        : `${name} [not real]`;
+}
+
+function visiblePackageNames() {
+    if (!deviceData?.packages) {
+        return [];
+    }
+
+    const pkgNames = Object.keys(deviceData.packages);
+    const realPinCounts = new Set(
+        pkgNames
+            .filter((name) => !isSyntheticPackage(name))
+            .map((name) => deviceData.packages[name]?.pin_count)
+            .filter((pinCount) => typeof pinCount === 'number')
+    );
+
+    return pkgNames.filter((name) => {
+        const meta = deviceData.packages[name];
+        if (!isSyntheticPackage(name, meta)) {
+            return true;
+        }
+        return !realPinCounts.has(meta?.pin_count);
+    });
+}
+
 function renderDeviceSummary() {
     if (!deviceData) return;
     const rpPins = deviceData.pins.filter(pin => pin.rp_number !== null);
     setTextContent('sum-pins', deviceData.pin_count);
     setTextContent('sum-rp', rpPins.length);
-    setTextContent('sum-pkg', deviceData.selected_package);
+    setTextContent('sum-pkg', displayPackageName(deviceData.selected_package, { long: true }));
     showElement('summary');
 }
 

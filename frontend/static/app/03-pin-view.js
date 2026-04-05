@@ -362,7 +362,7 @@ function renderDipDiagramVertical(container, pins, half) {
 
     const sublabel = document.createElement('div');
     sublabel.className = 'chip-sublabel';
-    sublabel.textContent = deviceData.selected_package;
+    sublabel.textContent = displayPackageName(deviceData.selected_package);
     body.appendChild(sublabel);
 
     wrapper.appendChild(body);
@@ -411,7 +411,7 @@ function renderDipDiagramHorizontal(container, pins, half) {
 
     const sublabel = document.createElement('div');
     sublabel.className = 'chip-sublabel';
-    sublabel.textContent = deviceData.selected_package;
+    sublabel.textContent = displayPackageName(deviceData.selected_package);
     body.appendChild(sublabel);
 
     wrapper.appendChild(body);
@@ -476,7 +476,7 @@ function renderQfnDiagram(container) {
             body.style.width = `${bodySize}px`;
             body.style.height = `${bodySize}px`;
             body.innerHTML = `<div class="chip-label">${deviceData.part_number}</div>
-                              <div class="chip-sublabel">${deviceData.selected_package}</div>`;
+                              <div class="chip-sublabel">${displayPackageName(deviceData.selected_package)}</div>`;
             grid.appendChild(body);
         }
         if (rightPins[i]) grid.appendChild(makePinEl(rightPins[i], 'right'));

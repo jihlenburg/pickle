@@ -103,6 +103,14 @@ header h1 {
     border-color: var(--accent2);
 }
 
+#pkg-select:disabled {
+    color: var(--text);
+    opacity: 1;
+    cursor: default;
+    border-color: color-mix(in srgb, var(--accent2) 30%, var(--border));
+    background: color-mix(in srgb, var(--bg) 88%, var(--bg-card));
+}
+
 
 
 .main {
@@ -140,4 +148,3 @@ header h1 {
     margin-bottom: 12px;
     color: var(--accent2);
 }
-

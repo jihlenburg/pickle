@@ -258,9 +258,42 @@ fn parse_u32_keyed_map<T>(source: HashMap<String, T>) -> HashMap<u32, T> {
         .collect()
 }
 
+fn is_synthetic_package_name(name: &str) -> bool {
+    name.trim().eq_ignore_ascii_case("default")
+}
+
+fn synthetic_package_replacement<'a>(device: &'a DeviceData, requested: Option<&str>) -> Option<&'a str> {
+    let requested_name = requested.unwrap_or(&device.default_pinout);
+    if !is_synthetic_package_name(requested_name) {
+        return None;
+    }
+
+    let synthetic = device.pinouts.get(requested_name)?;
+    let mut candidates: Vec<&str> = device
+        .pinouts
+        .iter()
+        .filter_map(|(name, pinout)| {
+            if is_synthetic_package_name(name) || pinout.pin_count != synthetic.pin_count {
+                return None;
+            }
+            Some(name.as_str())
+        })
+        .collect();
+    candidates.sort_unstable();
+
+    if candidates.len() == 1 {
+        return candidates.into_iter().next();
+    }
+
+    None
+}
+
 fn selected_package<'a>(device: &'a DeviceData, package: Option<&'a str>) -> &'a str {
-    package
+    synthetic_package_replacement(device, package)
+        .or_else(|| {
+            package
         .filter(|pkg_name| device.pinouts.contains_key(*pkg_name))
+        })
         .unwrap_or(&device.default_pinout)
 }
 

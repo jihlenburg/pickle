@@ -15,6 +15,44 @@ use std::path::{Path, PathBuf};
 use crate::parser::edc_parser::{parse_edc_file, DeviceData, Pad, Pinout};
 use crate::parser::pack_index;
 
+fn is_synthetic_package_name(name: &str) -> bool {
+    name.trim().eq_ignore_ascii_case("default")
+}
+
+fn replace_redundant_default_pinout(device: &mut DeviceData) {
+    let default_name = device.default_pinout.clone();
+    if !is_synthetic_package_name(&default_name) {
+        return;
+    }
+
+    let Some(default_pinout) = device.pinouts.get(&default_name).cloned() else {
+        return;
+    };
+
+    let mut replacement_names: Vec<String> = device
+        .pinouts
+        .iter()
+        .filter_map(|(name, pinout)| {
+            if name.eq_ignore_ascii_case(&default_name) || is_synthetic_package_name(name) {
+                return None;
+            }
+            if pinout.pin_count != default_pinout.pin_count {
+                return None;
+            }
+            if pinout.pins != default_pinout.pins {
+                return None;
+            }
+            Some(name.clone())
+        })
+        .collect();
+    replacement_names.sort();
+
+    if let Some(replacement_name) = replacement_names.into_iter().next() {
+        device.pinouts.remove(&default_name);
+        device.default_pinout = replacement_name;
+    }
+}
+
 fn device_families() -> &'static Vec<(&'static str, &'static str)> {
     use once_cell::sync::Lazy;
     static FAMILIES: Lazy<Vec<(&str, &str)>> = Lazy::new(|| {
@@ -470,6 +508,8 @@ fn load_pinout_overlays(device: &mut DeviceData) {
                 );
             }
         }
+
+        replace_redundant_default_pinout(device);
     }
 }
 
@@ -846,6 +886,30 @@ pub fn cache_datasheet(part_number: &str, pdf_bytes: &[u8]) -> Option<PathBuf> {
 mod tests {
     use super::*;
 
+    fn test_device(default_name: &str, default_pinout: Pinout, extra_pinouts: Vec<(String, Pinout)>) -> DeviceData {
+        let mut pinouts = HashMap::new();
+        pinouts.insert(default_name.to_string(), default_pinout);
+        for (name, pinout) in extra_pinouts {
+            pinouts.insert(name, pinout);
+        }
+
+        DeviceData {
+            part_number: "TEST123".to_string(),
+            pads: HashMap::new(),
+            pinouts,
+            default_pinout: default_name.to_string(),
+            remappable_inputs: Vec::new(),
+            remappable_outputs: Vec::new(),
+            pps_input_mappings: Vec::new(),
+            pps_output_mappings: Vec::new(),
+            port_registers: HashMap::new(),
+            ansel_bits: HashMap::new(),
+            fuse_defs: Vec::new(),
+            clc_module_id: None,
+            clc_input_sources: None,
+        }
+    }
+
     #[test]
     fn pack_version_dir_is_parent_of_edc_file() {
         let pic = PathBuf::from(
@@ -866,5 +930,59 @@ mod tests {
             compiler_support_dir_for_pack_version(&pack),
             Some(pack.join("xc16"))
         );
+    }
+
+    #[test]
+    fn redundant_default_pinout_is_replaced_by_matching_real_package() {
+        let default_pinout = Pinout {
+            package: "default".to_string(),
+            pin_count: 2,
+            source: "edc".to_string(),
+            pins: HashMap::from([(1, "RA0".to_string()), (2, "RA1".to_string())]),
+        };
+        let real_pinout = Pinout {
+            package: "64-Pin VQFN-TQFP".to_string(),
+            pin_count: 2,
+            source: "overlay".to_string(),
+            pins: HashMap::from([(1, "RA0".to_string()), (2, "RA1".to_string())]),
+        };
+        let mut device = test_device(
+            "default",
+            default_pinout,
+            vec![("64-Pin VQFN-TQFP".to_string(), real_pinout)],
+        );
+
+        replace_redundant_default_pinout(&mut device);
+
+        assert_eq!(device.default_pinout, "64-Pin VQFN-TQFP");
+        assert!(!device.pinouts.contains_key("default"));
+        assert!(device.pinouts.contains_key("64-Pin VQFN-TQFP"));
+    }
+
+    #[test]
+    fn default_pinout_is_kept_when_real_package_differs() {
+        let default_pinout = Pinout {
+            package: "default".to_string(),
+            pin_count: 2,
+            source: "edc".to_string(),
+            pins: HashMap::from([(1, "RA0".to_string()), (2, "RA1".to_string())]),
+        };
+        let real_pinout = Pinout {
+            package: "64-Pin VQFN-TQFP".to_string(),
+            pin_count: 2,
+            source: "overlay".to_string(),
+            pins: HashMap::from([(1, "RA0".to_string()), (2, "RB1".to_string())]),
+        };
+        let mut device = test_device(
+            "default",
+            default_pinout,
+            vec![("64-Pin VQFN-TQFP".to_string(), real_pinout)],
+        );
+
+        replace_redundant_default_pinout(&mut device);
+
+        assert_eq!(device.default_pinout, "default");
+        assert!(device.pinouts.contains_key("default"));
+        assert!(device.pinouts.contains_key("64-Pin VQFN-TQFP"));
     }
 }
