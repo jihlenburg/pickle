@@ -16,15 +16,29 @@ pickle/
     index.html
     static/
       app/
-        config.js            Unified theme tokens, typography, and shell-level UI constants
-        model.js             Pure frontend state and normalization helpers
-        00-05*.js            Core state, rendering, interactions, workflow modules, and editors
-        06-shell.js          Shell event wiring, catalog freshness, and theme handling
-        07-verification.js   Datasheet verification flow and overlay application
-        08-bootstrap.js      Final startup orchestration, menu events, and tooltips
-      style.css              Import manifest for the split stylesheet modules
-      styles/                Foundation, component, verification, shell, and responsive CSS modules
-      pin_descriptions.js    Pattern-based descriptions and grouping helpers
+        config.js                Unified theme tokens, typography, and shell-level UI constants
+        model.js                 Pure frontend state and normalization helpers
+        00-core.js               Core device/editor state and device-load orchestration
+        01-reservation-policy.js Pure reservation/conflict policy helpers
+        01-reservations.js       Fuse-coupled reservation runtime and conflict highlighting
+        02-view-model.js         Shared pin-presentation helpers for left-panel renderers
+        02-peripheral-view.js    Peripheral-centric renderer built on the shared view model
+        03-pin-view.js           Pin table + package renderer built on the shared view model
+        04-editor-state.js       Shared mutation bookkeeping for undo/redraw/dirty flows
+        04-interactions.js       Interactive assignment handlers
+        05-codegen.js            Code generation, code tabs, clipboard copy, plain-text export
+        05-device-config.js      Oscillator/fuse UI state and hardware-reservation coupling
+        05-clc-model.js          Pure CLC state defaults, normalization, and register packing
+        05-clc-designer.js       CLC editor UI, register preview, and module orchestration
+        05-clc-schematic.js      Deterministic SVG schematic renderer and first-stage router
+        05-config-files.js       Config-document lifecycle, dirty state, save/load/rename flows
+        05-compile-check.js      Family-aware compiler discovery and compile-check workflows
+        06-shell.js              Shell action registry, view switching, catalog freshness, theme/shell chrome
+        07-verification.js       Datasheet verification flow and overlay application
+        08-bootstrap.js          Final startup orchestration, Tauri menu forwarding, and tooltips
+      style.css                  Import manifest for the split stylesheet modules
+      styles/                    Foundation, component, verification, shell, and responsive CSS modules
+      pin_descriptions.js        Pattern-based descriptions and grouping helpers
   src-tauri/
     src/
       main.rs                Tauri bootstrap, plugins, native menu wiring
@@ -80,6 +94,19 @@ Frontend collects assignments/settings
   -> frontend shows/exports the configured `<basename>.c` and `<basename>.h` pair
 ```
 
+### Config documents
+
+```text
+Frontend edit mutates device state
+  -> 05-config-files.js recomputes serialized JSON payload
+  -> configDocument dirty state updates title/header affordances
+
+User triggers Save
+  -> existing path: invoke("write_text_file_path")
+  -> first save / Save As / Rename: invoke("save_text_file_dialog")
+  -> Rename also invokes("delete_file_path") for the superseded path when possible
+```
+
 ### Verification
 
 ```text
@@ -105,6 +132,7 @@ The frontend keeps state in a few long-lived globals spread across ordered brows
 - `generatedFiles`: generated output keyed by filename
 - `appSettings`: persisted appearance/startup settings
 - `PickleConfig`: unified theme tokens and shell-level UI constants loaded before first paint
+- `configDocument`: current config-file path plus last-saved serialized contents
 
 The UI is intentionally imperative:
 
@@ -113,6 +141,15 @@ The UI is intentionally imperative:
 - native menu items are forwarded as Tauri events and handled in the same JS app
 - pure state helpers live in `frontend/static/app/model.js` so they can be tested in Node without a DOM
 - theme variables and shell copy live in `frontend/static/app/config.js` so CSS and JS do not drift independently
+- reservation/conflict policy and pin-presentation rules are split into pure helpers so the renderers and fuse runtime do not each carry their own rule copies
+- config-document state and editor-mutation bookkeeping are centralized so save/dirty/undo redraw behavior is not scattered across every feature module
+- CLC mode metadata, saved-state normalization, and register packing live in a pure helper so the designer and schematic renderer do not each own partial copies of the same logic
+- the CLC schematic renderer uses deterministic templates plus a constrained router; crossings are acceptable, but different nets must never share the same wire segment
+- shell buttons and forwarded native menu items route through a shared shell action registry instead of duplicating dispatch logic in multiple modules
+
+See [CLC](clc.md) for the full CLC subsystem contract, including the shared
+frontend/backend data shape, schematic-routing invariants, and generated-code
+behavior.
 
 ## Backend Modules
 
@@ -158,6 +195,7 @@ The Rust backend is covered by unit and integration tests in `src-tauri/tests` p
 
 ```bash
 ./scripts/validate.sh
+```
 
 ## Equivalent manual commands
 
@@ -166,6 +204,7 @@ cd src-tauri
 cargo test
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
+cd ..
 node --check frontend/static/pin_descriptions.js
 for file in frontend/static/app/*.js; do node --check "$file"; done
 node --test frontend/tests/*.test.js

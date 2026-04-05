@@ -139,8 +139,9 @@ function undo() {
     const state = undoStack.pop();
     assignments = state.assignments;
     signalNames = state.signalNames;
-    if (typeof renderActiveView === 'function') renderActiveView(); else renderDevice();
+    renderCurrentEditorView();
     checkConflicts();
+    markConfigDocumentDirty();
 }
 
 /** Re-apply the last undone state from the redo stack. */
@@ -153,12 +154,19 @@ function redo() {
     const state = redoStack.pop();
     assignments = state.assignments;
     signalNames = state.signalNames;
-    if (typeof renderActiveView === 'function') renderActiveView(); else renderDevice();
+    renderCurrentEditorView();
     checkConflicts();
+    markConfigDocumentDirty();
 }
 
-/** Global keyboard shortcut handler for undo (Cmd/Ctrl+Z) and redo (Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y). */
+/** Global keyboard shortcut handler for save (Cmd/Ctrl+S), undo, and redo. */
 document.addEventListener('keydown', (e) => {
+    const key = String(e.key || '').toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && key === 's') {
+        e.preventDefault();
+        void saveConfig();
+        return;
+    }
     if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
         undo();
@@ -365,7 +373,7 @@ function periphGroup(name) {
 /**
  * Load device data from the backend and render the UI.
  * @param {string} [pkg] - Optional package name. If omitted, loads default package.
- * @param {{preserveState?: boolean}} [options] - Preserve assignments/signal names when true.
+ * @param {{preserveState?: boolean, markDirty?: boolean}} [options] - Preserve assignments/signal names when true.
  *                                                Used for package switches and config restore.
  */
 async function loadDevice(pkg, options = {}) {
@@ -405,7 +413,7 @@ async function loadDevice(pkg, options = {}) {
         }
 
         // Show configuration panels
-        showElement('save-btn');
+        showElement('save-action-group', 'flex');
         showElement('load-btn-file');
         showElement('osc-config');
         hideElement('fuses-empty');
@@ -419,7 +427,8 @@ async function loadDevice(pkg, options = {}) {
         showElement('view-toggle');
         await checkCompiler(deviceData.part_number);
 
-        if (typeof renderActiveView === 'function') renderActiveView(); else renderDevice();
+        renderCurrentEditorView();
+        syncConfigDocumentAfterDeviceLoad({ preserveState, markDirty: options.markDirty });
         setStatus(`${deviceData.part_number} — ${deviceData.selected_package}`);
 
         // Update cached device set if this was a new download

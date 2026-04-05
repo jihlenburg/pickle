@@ -1,7 +1,7 @@
 # pickle
 
 <p align="center">
-  <img src="src-tauri/icons/pickle-icon.svg" width="128" height="128" alt="pickle logo — a pickle-shaped DIP IC chip">
+  <img src="src-tauri/icons/pickle-icon-master.png" width="128" height="128" alt="pickle logo — a kawaii pickle with SO-8 metallic pins">
 </p>
 
 **pickle** is a native desktop pin configurator for Microchip dsPIC33 and PIC24 devices. It parses Microchip Device Family Pack (`.atpack`) data, renders package-aware pin assignment views, and generates compiler-friendly initialization code for PPS, port direction, oscillator, fuse, and CLC setup.
@@ -15,14 +15,24 @@ The name is a pun on **PIC** — Microchip's microcontroller line.
 - PPS generation with explicit unlock/lock handling
 - Port-mode generation for `ANSELx` and `TRISx`
 - Optional oscillator pragma/init generation and dynamic fuse pragmas
-- CLC designer with register preview and generated `CLCn*` writes
+- CLC designer with schematic/register preview and generated `CLCn*` writes
 - Native open/save/export dialogs via Tauri
 - Optional family-aware compile checks (`xc16-gcc` for PIC24, `xc-dsc-gcc` for dsPIC33) using installed or cached device packs, plus LLM-assisted datasheet verification
+
+## Config Files
+
+The app treats saved pin configurations as normal documents:
+
+- `Save` writes back to the current path without reopening a dialog
+- first save falls back to the native save dialog
+- `Save As...` and `Rename...` are available from the split save menu and the native File menu
+- the header shows the current config name plus an unsaved-changes indicator
+- `Ctrl/Cmd+S` follows the same direct-save behavior as the toolbar/menu action
 
 ## Repo Layout
 
 - `frontend/`: static HTML/CSS/JS loaded directly by the Tauri webview
-- `frontend/static/app/`: unified frontend config, pure helper modules, split workflow/editor modules, and shell/verification/bootstrap scripts
+- `frontend/static/app/`: ordered browser modules for state, pure policy/view/model helpers, document lifecycle, codegen/CLC workflows, shell actions, and verification
 - `src-tauri/`: Rust backend, parser, code generator, settings, and Tauri shell
 - `docs/`: architecture notes, command contracts, code-generation behavior, and domain notes
 - `tests/fixtures/`: fixture device JSON used by integration tests
@@ -67,6 +77,7 @@ cd src-tauri
 cargo fmt --all -- --check
 cargo test
 cargo clippy --all-targets --all-features -- -D warnings
+cd ..
 
 node --check frontend/static/pin_descriptions.js
 for file in frontend/static/app/*.js; do node --check "$file"; done
@@ -98,6 +109,7 @@ See [`docs/`](docs/) for current implementation details:
 - [Tauri Commands](docs/commands.md): IPC contract between the frontend and Rust backend
 - [Code Generation](docs/codegen.md): emitted files, init order, PPS/port handling, oscillator/fuse/CLC generation
 - [Domain Knowledge](docs/domain.md): dsPIC33/PIC24 pin-routing concepts, fuses, oscillator behavior, overlays, and CLC notes
+- [CLC](docs/clc.md): CLC data model, designer behavior, schematic routing, persistence, and backend code generation
 
 ## License
 

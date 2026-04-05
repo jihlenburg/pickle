@@ -21,8 +21,8 @@ use crate::settings;
 pub use catalog::{index_status, list_devices, refresh_index};
 pub use devices::{generate_code, load_device};
 pub use dialogs::{
-    export_generated_files_dialog, open_binary_file_dialog, open_text_file_dialog,
-    save_text_file_dialog,
+    delete_file_path, export_generated_files_dialog, open_binary_file_dialog,
+    open_text_file_dialog, save_text_file_dialog, write_text_file_path,
 };
 pub use settings_state::{load_app_settings, remember_last_used_device, set_theme_mode};
 pub use toolchain::{compile_check, compiler_info};

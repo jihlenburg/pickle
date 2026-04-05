@@ -4,6 +4,10 @@
  * Owns the physical-pin-oriented view, including the package SVG/grid output
  * and the row-level controls shown for each resolved pin.
  */
+// Ordered browser scripts share one global scope, so keep file-local aliases
+// unique instead of redeclaring the same top-level `const` in multiple files.
+const pinViewModel = window.PickleViewModel;
+
 // =============================================================================
 // Pin Table Rendering
 // =============================================================================
@@ -15,18 +19,23 @@ function renderDevice() {
 
     releaseReservedJtagAssignments();
 
-    renderDeviceSummary();
-
-    renderPackageDiagram();
+    renderLeftPanelViewFrame();
 
     for (const pin of deviceData.pins) {
+        const presentation = pinViewModel.buildPinPresentation(pin, {
+            signalNames,
+            getAssignmentsAt,
+            isIcspPin,
+            isJtagPin,
+            getJtagFunction,
+        });
         const tr = document.createElement('tr');
         tr.className = 'pin-row';
         tr.id = `pin-row-${pin.position}`;
         if (pin.is_power) tr.classList.add('power');
-        if (isIcspPin(pin)) tr.classList.add('icsp');
-        if (isJtagPin(pin)) tr.classList.add('jtag');
-        if (assignments[pin.position]) tr.classList.add('assigned');
+        if (presentation.icsp) tr.classList.add('icsp');
+        if (presentation.jtag) tr.classList.add('jtag');
+        if (presentation.assigned) tr.classList.add('assigned');
 
         // Column: pin number
         const tdNum = document.createElement('td');
@@ -37,8 +46,7 @@ function renderDevice() {
         // Column: pin name (port label or pad name)
         const tdName = document.createElement('td');
         tdName.className = 'pin-name';
-        const portName = pin.port ? `R${pin.port}${pin.port_bit}` : pin.pad_name || pin.functions[0] || '—';
-        tdName.textContent = portName;
+        tdName.textContent = presentation.portLabel;
         tr.appendChild(tdName);
 
         // Column: available functions (as clickable colored tags)
@@ -47,9 +55,9 @@ function renderDevice() {
         funcDiv.className = 'pin-functions';
 
         const isPower = pin.is_power;
-        const isIcsp = isIcspPin(pin);
-        const isJtag = isJtagPin(pin);
-        const currentAssigns = getAssignmentsAt(pin.position);
+        const isIcsp = presentation.icsp;
+        const isJtag = presentation.jtag;
+        const currentAssigns = presentation.assignmentsAt;
         const hasNonFixed = currentAssigns.some(a => !a.fixed);
 
         for (const fn of pin.functions) {
@@ -171,23 +179,24 @@ function renderDevice() {
             input.className = 'signal-input';
             input.placeholder = 'e.g. UART1_TX';
             input.dataset.pinPos = pin.position;
-            if (signalNames[pin.position]) {
-                input.value = signalNames[pin.position];
+            if (presentation.signalName) {
+                input.value = presentation.signalName;
             }
-            if (isJtagPin(pin)) {
+            if (presentation.jtag) {
                 input.disabled = true;
                 input.title = 'Signal names are disabled while the pin is reserved by JTAG';
             }
             // Push undo snapshot when field gains focus (before user types)
             input.addEventListener('focus', () => pushUndo());
             input.addEventListener('input', (e) => {
-                const pos = parseInt(e.target.dataset.pinPos);
-                if (e.target.value.trim()) {
-                    signalNames[pos] = e.target.value.trim();
-                } else {
-                    delete signalNames[pos];
-                }
-                renderPackageDiagram();
+                applySignalNameMutation(() => {
+                    const pos = parseInt(e.target.dataset.pinPos, 10);
+                    if (e.target.value.trim()) {
+                        signalNames[pos] = e.target.value.trim();
+                    } else {
+                        delete signalNames[pos];
+                    }
+                });
             });
             tdSig.appendChild(input);
         }
@@ -196,8 +205,7 @@ function renderDevice() {
         tbody.appendChild(tr);
     }
 
-    updateSummary();
-    checkConflicts();
+    finalizeLeftPanelViewFrame();
 }
 
 // =============================================================================
@@ -210,17 +218,13 @@ function renderDevice() {
  * or the default port/pad name.
  */
 function pinLabel(pin) {
-    const pinAssigns = getAssignmentsAt(pin.position);
-    if (pinAssigns.length > 0) {
-        const sig = signalNames[pin.position];
-        if (sig) return sig;
-        // For multi-assignment, show comma-separated peripheral names
-        return pinAssigns.map(a => a.peripheral).join(', ');
-    }
-    if (isJtagPin(pin)) {
-        return getJtagFunction(pin) || 'JTAG';
-    }
-    return pin.port ? `R${pin.port}${pin.port_bit}` : pin.pad_name || pin.functions[0];
+    return pinViewModel.buildPinPresentation(pin, {
+        signalNames,
+        getAssignmentsAt,
+        isIcspPin,
+        isJtagPin,
+        getJtagFunction,
+    }).packageLabel;
 }
 
 /** Check if the current package uses QFN/QFP layout (vs DIP/SSOP). */
@@ -256,16 +260,23 @@ window.addEventListener('resize', (() => {
  * @returns {HTMLElement}
  */
 function makePinEl(pin, side) {
+    const presentation = pinViewModel.buildPinPresentation(pin, {
+        signalNames,
+        getAssignmentsAt,
+        isIcspPin,
+        isJtagPin,
+        getJtagFunction,
+    });
     const el = document.createElement('div');
     el.className = `pkg-pin pkg-pin-${side}`;
     el.id = `pkg-pin-${pin.position}`;
     el.onclick = () => scrollToPin(pin.position);
     if (pin.is_power) el.classList.add('power');
-    if (isIcspPin(pin)) el.classList.add('icsp');
-    if (isJtagPin(pin)) el.classList.add('jtag');
-    if (assignments[pin.position]) el.classList.add('assigned');
+    if (presentation.icsp) el.classList.add('icsp');
+    if (presentation.jtag) el.classList.add('jtag');
+    if (presentation.assigned) el.classList.add('assigned');
 
-    const name = pinLabel(pin);
+    const name = presentation.packageLabel;
     el.title = `${pin.position}: ${name}`;
 
     if (side === 'left') {

@@ -1,11 +1,13 @@
 # Code Generation
 
-pickle generates a two-file output set:
+pickle generates a two-file output set. By default the pair is:
 
 - `mcu_init.h`
 - `mcu_init.c`
 
-The basename is configurable through `settings.toml` under `[codegen].output_basename`.
+The basename is configurable through `settings.toml` under
+`[codegen].output_basename`, and the frontend code/export/compile-check flows
+all consume the configured names instead of assuming `mcu_init`.
 
 The generator lives in `src-tauri/src/codegen/generate.rs` and is driven by `generate_code` from the Tauri command layer.
 
@@ -181,6 +183,10 @@ This helper only enables the modules. Gain, routing, and other analog behavior r
 
 When the UI sends populated `ClcModuleConfig` entries, the generator emits `configure_clc()` and writes the packed register values for each configured module.
 
+See [CLC](clc.md) for the shared frontend/backend module shape and the exact
+bit-packing contract used by both the designer register preview and the Rust
+generator.
+
 Generated registers:
 
 | Register | Meaning |
@@ -203,6 +209,10 @@ The module is always written in two phases:
 - generates the normal header and source pair
 - replaces the generated local header include with `#include <xc.h>`
 - inlines generated signal macros so the Microchip family compiler can compile the result without a separate header file on disk
+
+The compile-check path still derives its temporary source/header filenames from
+the generated local header include before this rewrite step, so custom output
+basenames stay aligned across generation and compiler validation.
 
 ## Validation Coverage
 

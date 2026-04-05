@@ -4,6 +4,10 @@
  * Transforms the raw pin/device model into grouped peripheral instances and
  * renders the expandable peripheral assignment view.
  */
+// Ordered browser scripts share one global scope, so keep file-local aliases
+// unique instead of redeclaring the same top-level `const` in multiple files.
+const peripheralViewModel = window.PickleViewModel;
+
 // =============================================================================
 // Peripheral-Centric View — Data Layer
 // =============================================================================
@@ -195,10 +199,16 @@ function getAvailableRpPins(signalName, signalDirection) {
     const results = [];
     for (const pin of deviceData.pins) {
         if (pin.rp_number === null || pin.is_power) continue;
-        if (isIcspPin(pin)) continue;
-        if (isJtagPin(pin)) continue;
+        const presentation = peripheralViewModel.buildPinPresentation(pin, {
+            signalNames,
+            getAssignmentsAt,
+            isIcspPin,
+            isJtagPin,
+            getJtagFunction,
+        });
+        if (presentation.blocked) continue;
 
-        const portName = pin.port ? `R${pin.port}${pin.port_bit}` : pin.pad_name;
+        const portName = presentation.portLabel;
         const label = `Pin ${pin.position} — ${portName} (RP${pin.rp_number})`;
 
         let usedBy = null;
@@ -225,9 +235,7 @@ function renderPeripheralView() {
 
     if (!deviceData) return;
 
-    renderDeviceSummary();
-
-    renderPackageDiagram();
+    renderLeftPanelViewFrame();
 
     const instances = buildPeripheralInstances();
     const reverse = buildReverseAssignments();
@@ -270,8 +278,7 @@ function renderPeripheralView() {
         container.appendChild(renderPeriphCard(inst, reverse));
     }
 
-    updateSummary();
-    checkConflicts();
+    finalizeLeftPanelViewFrame();
 }
 
 /**
@@ -370,10 +377,19 @@ function renderPeriphCard(inst, reverse) {
         if (signal.fixed && signal.fixedPin) {
             // Fixed function — show pin label with assign toggle
             const pin = deviceData.pins.find(p => p.position === signal.fixedPin);
-            const portName = pin && pin.port ? `R${pin.port}${pin.port_bit}` : (pin ? pin.pad_name : '?');
-            const pinIsIcsp = pin && isIcspPin(pin);
-            const pinIsJtag = pin && isJtagPin(pin);
-            const pinBlocked = pinIsIcsp || pinIsJtag;
+            const presentation = pin
+                ? peripheralViewModel.buildPinPresentation(pin, {
+                    signalNames,
+                    getAssignmentsAt,
+                    isIcspPin,
+                    isJtagPin,
+                    getJtagFunction,
+                })
+                : null;
+            const portName = presentation ? presentation.portLabel : '?';
+            const pinIsIcsp = presentation ? presentation.icsp : false;
+            const pinIsJtag = presentation ? presentation.jtag : false;
+            const pinBlocked = presentation ? presentation.blocked : false;
 
             const wrapper = document.createElement('label');
             wrapper.className = 'periph-fixed-assign';
@@ -486,9 +502,7 @@ function renderPeriphCard(inst, reverse) {
         input.dataset.signal = signal.name;
 
         // If this signal is assigned to a pin, show the signal name from that pin
-        if (assignedPin !== undefined && signalNames[assignedPin]) {
-            input.value = signalNames[assignedPin];
-        }
+        input.value = peripheralViewModel.signalNameForAssignedPeripheral(signal.name, reverse, signalNames);
 
         input.addEventListener('focus', () => pushUndo());
         input.addEventListener('input', onPeriphSignalNameChange);

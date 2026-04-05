@@ -20,6 +20,8 @@ pickle exposes its desktop/backend API through `#[tauri::command]` handlers in `
 | `open_text_file_dialog` | Pick and read a text file |
 | `open_binary_file_dialog` | Pick and read a binary file as base64 |
 | `save_text_file_dialog` | Save a text file via native dialog |
+| `write_text_file_path` | Write text directly to a known path without opening a dialog |
+| `delete_file_path` | Delete a previously saved file path |
 | `export_generated_files_dialog` | Export multiple generated files into a folder |
 | `generate_code` | Generate the configured `<basename>.c` and `<basename>.h` pair |
 | `compiler_info` | Resolve the active family compiler and report version/path |
@@ -177,6 +179,11 @@ Response: none
 
 All dialog commands return `null` when the user cancels.
 
+The frontend uses these commands in two different ways:
+
+- first-save / save-as / rename flows go through `save_text_file_dialog`
+- direct save to an existing config path uses `write_text_file_path`
+
 ### `open_text_file_dialog`
 
 Request:
@@ -236,6 +243,43 @@ Response:
 }
 ```
 
+### `write_text_file_path`
+
+Writes text directly to a known path. This is what the normal `Save` action
+uses once a config file already has a path.
+
+Request:
+
+```json
+{
+  "path": "/Users/me/DSPIC33CK64MP102_SSOP-28.json",
+  "contents": "{...}"
+}
+```
+
+Response:
+
+```json
+{
+  "path": "/Users/me/DSPIC33CK64MP102_SSOP-28.json"
+}
+```
+
+### `delete_file_path`
+
+Deletes a file path if it exists. The current frontend rename flow writes the
+new file first, then removes the previous path with this command.
+
+Request:
+
+```json
+{
+  "path": "/Users/me/old-name.json"
+}
+```
+
+Response: none
+
 ### `export_generated_files_dialog`
 
 Request:
@@ -264,13 +308,33 @@ Response:
 }
 ```
 
+Config-file JSON written by the frontend save/load flow currently contains:
+
+```json
+{
+  "part_number": "DSPIC33CK64MP102",
+  "package": "SSOP-28",
+  "assignments": {},
+  "signal_names": {},
+  "reserved_assignments": {
+    "jtag": {},
+    "i2c": {}
+  },
+  "oscillator": null,
+  "fuses": { "selections": {} },
+  "clc": null
+}
+```
+
 ## Code Generation And Compile Checks
 
 ### `generate_code`
 
 Generates the source/header pair used by the code tab and export flow. The
 default basename is `mcu_init`, but the backend reads `[codegen].output_basename`
-from `settings.toml` and names both files from that value.
+from `settings.toml` and names both files from that value. The frontend save,
+export, and compile-check flows all consume those generated filenames instead of
+assuming a hard-coded basename.
 
 Request:
 
@@ -288,6 +352,9 @@ Request:
 If `request.oscillator` is present, clock-related fuse fields that it owns are
 still accepted in `request.fuses`, but they are ignored during emission so the
 generated source cannot contain duplicate `#pragma config` lines.
+
+See [CLC](clc.md) for the exact `ClcModuleConfig` field layout and the way the
+frontend normalizes/persists configured modules.
 
 Assignment entry shape:
 
@@ -338,6 +405,10 @@ Response:
 ### `compile_check`
 
 Writes the generated files into a temporary directory and invokes the configured family compiler with `-mdfp=<pack>/xc16` and `-mcpu=<part>`. The DFP is resolved from installed MPLAB X packs first, then from pickle's cached/downloaded `.atpack` files.
+
+When the generated source includes `#include "<basename>.h"`, the backend uses
+that include to choose the temporary source/header filenames. That keeps
+compile-check aligned with custom `[codegen].output_basename` values.
 
 Request:
 

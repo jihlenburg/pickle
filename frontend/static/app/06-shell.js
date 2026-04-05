@@ -9,6 +9,24 @@
 /** @type {Set<string>} Devices available locally (no download needed) */
 let cachedDevices = new Set();
 let shellEventsBound = false;
+let saveMenuBound = false;
+const shellActionHandlers = {
+    load: () => loadDevice(),
+    generate: () => generateCode(),
+    check: () => compileCheck(),
+    copy_code: () => copyCode(),
+    export: () => exportCode(),
+    verify: () => verifyPinout(),
+    pinlist: () => exportPinList(),
+    save: () => saveConfig(),
+    save_as: () => saveConfigAs(),
+    rename: () => renameConfig(),
+    open: () => openConfigDialog(),
+    refresh_index: () => refreshIndex(),
+    undo: () => undo(),
+    redo: () => redo(),
+    about: () => showAboutDialog(),
+};
 
 function bindClick(id, handler) {
     const element = $(id);
@@ -17,22 +35,90 @@ function bindClick(id, handler) {
     }
 }
 
+function runShellAction(action) {
+    const handler = shellActionHandlers[action];
+    if (!handler) {
+        return false;
+    }
+    void handler();
+    return true;
+}
+
+function bindShellAction(id, action) {
+    bindClick(id, () => {
+        runShellAction(action);
+    });
+}
+
+function closeSaveMenu() {
+    const menu = $('save-menu');
+    const button = $('save-menu-btn');
+    if (!menu || !button) {
+        return;
+    }
+    menu.hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+}
+
+function toggleSaveMenu() {
+    const menu = $('save-menu');
+    const button = $('save-menu-btn');
+    if (!menu || !button) {
+        return;
+    }
+    const willOpen = menu.hidden;
+    menu.hidden = !willOpen;
+    button.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+}
+
+function wireSaveMenu() {
+    if (saveMenuBound) {
+        return;
+    }
+    saveMenuBound = true;
+
+    bindClick('save-menu-btn', (event) => {
+        event.stopPropagation();
+        toggleSaveMenu();
+    });
+    bindClick('save-as-btn', () => {
+        closeSaveMenu();
+        runShellAction('save_as');
+    });
+    bindClick('rename-btn', () => {
+        closeSaveMenu();
+        runShellAction('rename');
+    });
+
+    document.addEventListener('click', (event) => {
+        if (!event.target.closest('.save-split')) {
+            closeSaveMenu();
+        }
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            closeSaveMenu();
+        }
+    });
+}
+
 function wireShellEventListeners() {
     if (shellEventsBound) {
         return;
     }
     shellEventsBound = true;
 
-    bindClick('load-btn', () => loadDevice());
-    bindClick('gen-btn', generateCode);
-    bindClick('check-btn', compileCheck);
-    bindClick('copy-btn', copyCode);
-    bindClick('export-btn', exportCode);
-    bindClick('verify-btn', verifyPinout);
-    bindClick('pinlist-btn', exportPinList);
-    bindClick('save-btn', saveConfig);
-    bindClick('load-btn-file', openConfigDialog);
-    bindClick('index-badge', refreshIndex);
+    bindShellAction('load-btn', 'load');
+    bindShellAction('gen-btn', 'generate');
+    bindShellAction('check-btn', 'check');
+    bindShellAction('copy-btn', 'copy_code');
+    bindShellAction('export-btn', 'export');
+    bindShellAction('verify-btn', 'verify');
+    bindShellAction('pinlist-btn', 'pinlist');
+    bindShellAction('save-btn', 'save');
+    bindShellAction('load-btn-file', 'open');
+    bindShellAction('index-badge', 'refresh_index');
+    wireSaveMenu();
 
     $('part-input')?.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {
@@ -41,7 +127,7 @@ function wireShellEventListeners() {
     });
 
     $('pkg-select')?.addEventListener('change', (event) => {
-        loadDevice(event.target.value);
+        void loadDevice(event.target.value, { preserveState: true, markDirty: true });
     });
 
     $('code-tabs')?.addEventListener('click', (event) => {
@@ -256,4 +342,64 @@ function setupTheme() {
             applyThemeMode('system');
         }
     });
+}
+
+// --- About dialog ---
+
+function showAboutDialog() {
+    const backdrop = $('about-backdrop');
+    if (!backdrop) return;
+
+    // Populate version lazily on first open
+    const versionEl = $('about-version');
+    if (versionEl && !versionEl.textContent) {
+        const tauriApp = window.__TAURI__?.app;
+        if (tauriApp?.getVersion) {
+            tauriApp.getVersion().then((v) => {
+                versionEl.textContent = `Version ${v}`;
+            }).catch(() => {
+                versionEl.textContent = 'Version —';
+            });
+        }
+    }
+
+    backdrop.hidden = false;
+    requestAnimationFrame(() => backdrop.classList.add('visible'));
+}
+
+function hideAboutDialog() {
+    const backdrop = $('about-backdrop');
+    if (!backdrop) return;
+    backdrop.classList.remove('visible');
+    backdrop.addEventListener('transitionend', () => {
+        backdrop.hidden = true;
+    }, { once: true });
+}
+
+function wireAboutDialog() {
+    const backdrop = $('about-backdrop');
+    if (!backdrop) return;
+    backdrop.addEventListener('click', (e) => {
+        if (e.target === backdrop) hideAboutDialog();
+    });
+    bindClick('about-close-btn', hideAboutDialog);
+    bindClick('about-github-btn', () => {
+        const opener = window.__TAURI__?.opener;
+        if (opener?.openUrl) {
+            opener.openUrl('https://github.com/jihlenburg/pickle');
+        }
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !backdrop.hidden) hideAboutDialog();
+    });
+}
+
+function initializeShellChrome() {
+    wireShellEventListeners();
+    wireAboutDialog();
+    initializeConfigDocumentUi();
+    const checkButton = $('check-btn');
+    if (checkButton) {
+        checkButton.textContent = appConfig.ui.compiler.buttonFallbackLabel;
+    }
 }

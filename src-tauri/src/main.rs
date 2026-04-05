@@ -8,29 +8,22 @@
 
 use log::info;
 use pickle_lib::commands;
-use tauri::menu::{
-    AboutMetadata, AboutMetadataBuilder, Menu, MenuBuilder, MenuItem, PredefinedMenuItem, Submenu,
-};
+use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{App, AppHandle, Emitter, Runtime};
 use tauri_plugin_log::{Target, TargetKind, TimezoneStrategy};
 
 const FORWARDED_MENU_ACTIONS: &[&str] = &[
     "open",
     "save",
+    "save_as",
+    "rename",
     "export",
     "undo",
     "redo",
     "generate",
     "copy_code",
+    "about",
 ];
-
-fn build_about_metadata() -> AboutMetadata<'static> {
-    AboutMetadataBuilder::new()
-        .name(Some("pickle"))
-        .version(Some(env!("CARGO_PKG_VERSION")))
-        .comments(Some("Pin configurator for Microchip dsPIC33 and PIC24"))
-        .build()
-}
 
 fn build_file_menu<R: Runtime>(app: &App<R>) -> tauri::Result<Submenu<R>> {
     Submenu::with_items(
@@ -39,7 +32,15 @@ fn build_file_menu<R: Runtime>(app: &App<R>) -> tauri::Result<Submenu<R>> {
         true,
         &[
             &MenuItem::with_id(app, "open", "Open...", true, Some("CmdOrCtrl+O"))?,
-            &MenuItem::with_id(app, "save", "Save...", true, Some("CmdOrCtrl+S"))?,
+            &MenuItem::with_id(app, "save", "Save", true, Some("CmdOrCtrl+S"))?,
+            &MenuItem::with_id(
+                app,
+                "save_as",
+                "Save As...",
+                true,
+                Some("CmdOrCtrl+Shift+S"),
+            )?,
+            &MenuItem::with_id(app, "rename", "Rename...", true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(
                 app,
@@ -94,11 +95,7 @@ fn build_help_menu<R: Runtime>(app: &App<R>) -> tauri::Result<Submenu<R>> {
         app,
         "Help",
         true,
-        &[&PredefinedMenuItem::about(
-            app,
-            None,
-            Some(build_about_metadata()),
-        )?],
+        &[&MenuItem::with_id(app, "about", "About pickle", true, None::<&str>)?],
     )
 }
 
@@ -158,6 +155,7 @@ fn main() {
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             info!("pickle v{} starting", env!("CARGO_PKG_VERSION"));
             log_runtime_paths();
@@ -176,6 +174,8 @@ fn main() {
             commands::dialogs::open_text_file_dialog,
             commands::dialogs::open_binary_file_dialog,
             commands::dialogs::save_text_file_dialog,
+            commands::dialogs::write_text_file_path,
+            commands::dialogs::delete_file_path,
             commands::dialogs::export_generated_files_dialog,
             commands::devices::generate_code,
             commands::toolchain::compiler_info,

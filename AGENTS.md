@@ -35,6 +35,11 @@ pickle/
       app/
         config.js        # Unified frontend theme tokens and shell-level UI constants
         model.js         # Pure frontend state/normalization helpers
+        01-reservation-policy.js # Pure reservation/conflict policy helpers
+        02-view-model.js # Shared pin-presentation helpers for left-panel renderers
+        04-editor-state.js # Shared mutation bookkeeping for undo/redraw/dirty flows
+        05-clc-model.js # Pure CLC defaults, normalization, and register packing
+        05-config-files.js # Config-document lifecycle and save/load/rename flows
         00-*.js          # Ordered browser scripts for state, views, workflows, bootstrap
       style.css              # CSS import manifest
       styles/                # Split stylesheet modules loaded by style.css
@@ -68,6 +73,10 @@ cargo tauri build                   # Production build
 - **Rust**: Edition 2021, all structs derive `Debug, Clone, Serialize, Deserialize`. Use `thiserror` or `String` for errors.
 - **Frontend**: Vanilla JS, no build step, no framework. All state in global variables. Uses `invoke()` instead of `fetch()`.
 - **Frontend config**: `frontend/static/app/config.js` is the source of truth for theme tokens, typography, shell copy, and UI timings. Do not add new hard-coded UI constants in random JS/CSS files when they belong there.
+- **Frontend orchestration**: keep shared hardware-policy logic in pure helpers (`01-reservation-policy.js`, `02-view-model.js`) and shared UI mutation bookkeeping in `04-editor-state.js` instead of copying those rules into renderers or event handlers.
+- **CLC model logic**: keep CLC defaults, mode metadata, saved-state normalization, and register packing in `frontend/static/app/05-clc-model.js`; the designer and schematic renderer should consume that model rather than fork it.
+- **Config-document behavior**: `Save` should write directly to an existing path; `Save As...` and `Rename...` should remain explicit actions layered on top of the native dialog commands instead of reintroducing prompt-on-every-save behavior.
+- **Documentation sync**: when module boundaries, Tauri commands, routing rules, save/document behavior, or CLC semantics change, update `README.md`, `docs/architecture.md`, `docs/commands.md`, `docs/clc.md`, and any affected domain/codegen notes in the same patch.
 - **CSS**: `style.css` is the stable entrypoint and should only coordinate the split `frontend/static/styles/*.css` files. Those modules should consume config-driven CSS variables instead of re-defining theme palettes inline. Peripheral colors still flow through tokens like UART=`--uart`, SPI=`--spi`, I2C=`--i2c`, PWM=`--pwm`.
 - **Code generation output**: MISRA C:2012 compliant C99. All register values use `U` suffix. Comments explain every write.
 - **No auto-commit**: Never commit or push without explicit user permission.
@@ -112,7 +121,7 @@ cargo tauri build                   # Production build
   - `frontend/static/app/05-config-files.js`: restore/load flows and config persistence boundaries
   - `frontend/static/app/05-clc-designer.js`: dense CLC state/rendering logic and register preview coupling
   - `frontend/static/app/05-compile-check.js`: toolchain detection, compiler UX, backend/UI contract
-  - `frontend/static/app/06-shell.js`: shell event wiring, catalog freshness state, theme/app-shell coupling
+  - `frontend/static/app/06-shell.js`: shell action registry, catalog freshness state, theme/app-shell coupling
   - `frontend/static/app/07-verification.js`: datasheet verification rendering, overlay application, verifier/UI contract
   - `frontend/static/app/08-bootstrap.js`: startup/menu/tooltip orchestration boundaries
 

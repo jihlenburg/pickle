@@ -10,7 +10,7 @@
  *   2. resolveActiveTraces()    — propagate activity flags
  *   3. renderClcSchematic()     — build/update SVG DOM
  *
- * Depends on globals from 05-clc-designer.js:
+ * Depends on globals from 05-clc-designer.js and 05-clc-model.js:
  *   clcConfig, clcActiveModule, getClcSourceLabel, CLC_MODES
  */
 

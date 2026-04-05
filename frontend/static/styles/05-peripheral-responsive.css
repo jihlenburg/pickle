@@ -341,6 +341,10 @@ option.periph-pin-used {
         flex-wrap: wrap;
     }
 
+    .save-action-group {
+        flex-wrap: wrap;
+    }
+
     #part-input {
         width: 100%;
     }

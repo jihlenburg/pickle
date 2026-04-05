@@ -15,29 +15,7 @@ function wireMenuActionListener() {
     menuEventsBound = true;
 
     window.__TAURI__.event.listen('menu-action', (event) => {
-        switch (event.payload) {
-            case 'open':
-                openConfigDialog();
-                break;
-            case 'save':
-                saveConfig();
-                break;
-            case 'export':
-                exportCode();
-                break;
-            case 'undo':
-                undo();
-                break;
-            case 'redo':
-                redo();
-                break;
-            case 'generate':
-                generateCode();
-                break;
-            case 'copy_code':
-                copyCode();
-                break;
-        }
+        runShellAction(event.payload);
     });
 }
 
@@ -86,10 +64,9 @@ function wireTooltipSystem() {
 
 // Initialize UI and load the configured startup device if one is available.
 async function initializeApp() {
-    wireShellEventListeners();
+    initializeShellChrome();
     wireMenuActionListener();
     wireTooltipSystem();
-    $('check-btn').textContent = appConfig.ui.compiler.buttonFallbackLabel;
 
     await loadAppSettings();
     setupTheme();

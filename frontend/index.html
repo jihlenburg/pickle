@@ -13,7 +13,7 @@
 <body>
     <header class="app-header">
         <div class="header-brand">
-            <img src="static/pickle-icon.svg" alt="pickle" class="brand-icon">
+            <img src="static/pickle-icon.png" alt="pickle" class="brand-icon">
             <h1>pickle</h1>
         </div>
 
@@ -30,8 +30,17 @@
 
             <div class="header-actions">
                 <button id="verify-btn" class="verify-btn" style="display:none" title="Cross-check pinout against the datasheet using the configured verifier">Verify Pinout</button>
-                <button id="save-btn" style="display:none">Save Config</button>
                 <button id="load-btn-file">Open Config</button>
+                <div id="save-action-group" class="save-action-group" style="display:none">
+                    <div class="save-split">
+                        <button id="save-btn" title="Save current configuration (Ctrl+S)">Save Config</button>
+                        <button id="save-menu-btn" type="button" class="save-menu-btn" aria-haspopup="menu" aria-expanded="false" title="More save actions">▾</button>
+                        <div id="save-menu" class="save-menu" hidden>
+                            <button id="save-as-btn" type="button" class="save-menu-item">Save As...</button>
+                            <button id="rename-btn" type="button" class="save-menu-item">Rename...</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -195,6 +204,33 @@
         </div>
     </div>
 
+    <!-- About dialog -->
+    <div id="about-backdrop" class="about-backdrop" hidden>
+        <div class="about-dialog" role="dialog" aria-label="About pickle">
+            <img src="static/pickle-icon.png" alt="pickle" class="about-icon">
+            <h2 class="about-title">pickle</h2>
+            <p class="about-subtitle">Pin Configurator</p>
+            <p class="about-version" id="about-version"></p>
+            <p class="about-desc">
+                Native desktop pin multiplexing configurator for Microchip
+                dsPIC33 and PIC24 devices. Parses Device Family Pack files,
+                presents an interactive pin assignment UI, and generates
+                MISRA&nbsp;C:2012 compliant initialization code.
+            </p>
+            <div class="about-tech">
+                <span class="about-tag">Rust</span>
+                <span class="about-tag">Tauri</span>
+                <span class="about-tag">dsPIC33</span>
+                <span class="about-tag">PIC24</span>
+            </div>
+            <div class="about-links">
+                <button class="about-link" id="about-github-btn">GitHub</button>
+            </div>
+            <p class="about-copy">&copy; 2026 J. Ihlenburg</p>
+            <button class="about-close" id="about-close-btn">Close</button>
+        </div>
+    </div>
+
     <footer class="status-bar">
         <span id="status">Ready</span>
     </footer>
@@ -202,12 +238,16 @@
     <script src="static/pin_descriptions.js"></script>
     <script src="static/app/model.js"></script>
     <script src="static/app/00-core.js"></script>
+    <script src="static/app/01-reservation-policy.js"></script>
     <script src="static/app/01-reservations.js"></script>
+    <script src="static/app/02-view-model.js"></script>
     <script src="static/app/02-peripheral-view.js"></script>
     <script src="static/app/03-pin-view.js"></script>
+    <script src="static/app/04-editor-state.js"></script>
     <script src="static/app/04-interactions.js"></script>
     <script src="static/app/05-codegen.js"></script>
     <script src="static/app/05-device-config.js"></script>
+    <script src="static/app/05-clc-model.js"></script>
     <script src="static/app/05-clc-designer.js"></script>
     <script src="static/app/05-clc-schematic.js"></script>
     <script src="static/app/05-config-files.js"></script>

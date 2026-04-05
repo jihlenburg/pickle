@@ -4,6 +4,7 @@
 //! higher-level device/codegen command handlers.
 
 use std::fs;
+use std::path::PathBuf;
 
 use tauri::AppHandle;
 use tauri_plugin_dialog::DialogExt;
@@ -86,6 +87,28 @@ pub async fn save_text_file_dialog(
     Ok(Some(SavedPathResponse {
         path: path.display().to_string(),
     }))
+}
+
+#[tauri::command]
+pub async fn write_text_file_path(
+    path: String,
+    contents: String,
+) -> Result<SavedPathResponse, String> {
+    let path = PathBuf::from(path);
+    write_text_file(&path, &contents)?;
+
+    Ok(SavedPathResponse {
+        path: path.display().to_string(),
+    })
+}
+
+#[tauri::command]
+pub async fn delete_file_path(path: String) -> Result<(), String> {
+    let path = PathBuf::from(path);
+    if !path.exists() {
+        return Ok(());
+    }
+    fs::remove_file(&path).map_err(|e| format!("Cannot delete {}: {e}", path.display()))
 }
 
 #[tauri::command]

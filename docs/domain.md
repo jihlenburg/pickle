@@ -86,6 +86,20 @@ Typical debug channel pairs:
 
 When `JTAGEN = ON`, JTAG-related pins (`TDI`, `TDO`, `TMS`, `TCK`) should also be treated as reserved. The frontend applies the reservation dynamically so assignment UI reflects the active fuse choice.
 
+## Fuse-Driven I2C Routing
+
+Some dsPIC33/PIC24 parts expose alternate fixed I2C pads controlled by
+configuration fuses such as `ALTI2C1` and `ALTI2C2`.
+
+Key points for pickle:
+
+- `SCLx` / `SDAx` and `ASCLx` / `ASDAx` are mutually exclusive routed aliases
+- the frontend hides inactive aliases from the normal assignment UI
+- when an `ALTI2Cx` fuse flips, pickle re-routes fixed I2C assignments to the
+  active pins when those pins exist on the current package
+- if the selected alternate route is not bonded out on the current package, the
+  affected assignments are stashed until the route becomes valid again
+
 ## Fuses
 
 Device configuration registers are programmed through Microchip XC-family `#pragma config` lines (`xc16-gcc` for PIC24, `xc-dsc-gcc` for dsPIC33).
@@ -186,6 +200,17 @@ Supported mode values in the UI/generator:
 | `5` | 2-input D flip-flop with R |
 | `6` | J-K flip-flop with R |
 | `7` | transparent latch with S/R |
+
+The per-gate true/complement inputs are independent literals. If both `DnT`
+and `DnN` are enabled for the same gate, pickle treats them as two distinct
+active input paths rather than collapsing them into one visual connection.
+
+The schematic preview uses ANSI-style orthogonal routing for those enabled
+literals. Different nets may cross when necessary, but they must never overlap
+on the same colinear wire segment.
+
+See [CLC](clc.md) for the full designer, persistence, routing, and codegen
+contract.
 
 ### Source mapping priority
 

@@ -6,7 +6,9 @@
   "permissions": [
     "core:default",
     "core:event:default",
+    "core:window:allow-set-title",
     "dialog:default",
+    "opener:default",
     "log:default"
   ]
 }

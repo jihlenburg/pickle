@@ -4,6 +4,8 @@
  * Owns the frontend logic that dynamically reserves or restores pins when
  * ICSP, JTAG, or alternate I2C routing settings change.
  */
+const reservationPolicy = window.PickleReservationPolicy;
+
 // =============================================================================
 // ICSP Pin Detection
 // =============================================================================
@@ -31,7 +33,7 @@ function isI2cAlternateRoutingEnabled(channel) {
 
 /** Check if a function name is one of the fuse-routed I2C pin aliases. */
 function isI2cRoutingFunction(fn) {
-    return /^(A?SCL[12]|A?SDA[12])$/.test(fn);
+    return reservationPolicy.isI2cRoutingFunction(fn);
 }
 
 /**
@@ -40,13 +42,7 @@ function isI2cRoutingFunction(fn) {
  * @returns {{channel:number, role:string, alternate:boolean}|null}
  */
 function parseI2cRoutingFunction(fn) {
-    const match = fn.match(/^(A?)(SCL|SDA)([12])$/);
-    if (!match) return null;
-    return {
-        alternate: Boolean(match[1]),
-        role: match[2],
-        channel: parseInt(match[3], 10),
-    };
+    return reservationPolicy.parseI2cRoutingFunction(fn);
 }
 
 /** Return whether the given routed I2C function is active for the current fuse state. */
@@ -58,7 +54,7 @@ function isI2cRoutingFunctionActive(fn) {
 
 /** Build the routed I2C function name for a channel/role pair. */
 function getI2cRoutingFunctionName(channel, role, alternate) {
-    return `${alternate ? 'A' : ''}${role}${channel}`;
+    return reservationPolicy.getI2cRoutingFunctionName(channel, role, alternate);
 }
 
 /** Find the current package pin that carries a given fixed function. */
@@ -272,11 +268,7 @@ function isJtagEnabled() {
  * @returns {boolean}
  */
 function isIcspPin(pin) {
-    const pair = getIcsPair();
-    return pin.functions.some(fn =>
-        /^MCLR$/.test(fn) ||
-        new RegExp(`^PGC${pair}$|^PGD${pair}$|^PGEC${pair}$|^PGED${pair}$`).test(fn)
-    );
+    return reservationPolicy.isPinInIcspPair(pin, getIcsPair());
 }
 
 /**
@@ -285,14 +277,12 @@ function isIcspPin(pin) {
  * @returns {boolean}
  */
 function isIcspFunction(fn) {
-    const pair = getIcsPair();
-    return /^MCLR$/.test(fn) ||
-        new RegExp(`^PGC${pair}$|^PGD${pair}$|^PGEC${pair}$|^PGED${pair}$`).test(fn);
+    return reservationPolicy.isIcspFunctionForPair(fn, getIcsPair());
 }
 
 /** Check if a function belongs to the fixed JTAG interface. */
 function isJtagFunction(fn) {
-    return /^(TCK|TMS|TDI|TDO)$/.test(fn);
+    return reservationPolicy.isJtagFunction(fn);
 }
 
 /** Return the JTAG role carried by this pin, if any. */
@@ -355,7 +345,7 @@ function applyFuseReservations() {
         restoreJtagAssignments();
     }
     if (deviceData) {
-        if (typeof renderActiveView === 'function') renderActiveView(); else renderDevice();
+        renderCurrentEditorView();
     }
 
     const warnings = updateFuseFieldWarnings();
@@ -400,6 +390,24 @@ function refreshIcspHighlight() {
 // Conflict Detection
 // =============================================================================
 
+function collectAssignmentConflicts() {
+    return reservationPolicy.analyzeAssignmentConflicts(assignments, {
+        isAnalogFunction,
+        isAnalogOutput,
+    });
+}
+
+function applyConflictHighlights(conflictPins) {
+    if (!deviceData) return;
+    for (const pin of deviceData.pins) {
+        const pkgEl = document.getElementById(`pkg-pin-${pin.position}`);
+        const rowEl = document.getElementById(`pin-row-${pin.position}`);
+        const isConflict = conflictPins.has(pin.position);
+        if (pkgEl) pkgEl.classList.toggle('conflict', isConflict);
+        if (rowEl) rowEl.classList.toggle('conflict', isConflict);
+    }
+}
+
 /**
  * Detect duplicate peripheral assignments and highlight conflicts on the
  * package diagram and pin table.
@@ -407,64 +415,9 @@ function refreshIcspHighlight() {
  */
 function checkConflicts() {
     const box = $('conflict-box');
-    const conflicts = [];
-    const conflictPins = new Set();
-
-    // 1. Cross-pin conflict: same peripheral+direction assigned to multiple pins
-    const used = {};
-    forEachAssignedPin((pinPos, list) => {
-        for (const assign of list) {
-            const key = `${assign.peripheral}_${assign.direction}`;
-            if (used[key]) {
-                conflicts.push(
-                    `${assign.peripheral} (${assign.direction}) assigned to both pin ${used[key]} and pin ${pinPos}`
-                );
-                conflictPins.add(parseInt(used[key]));
-                conflictPins.add(pinPos);
-            } else {
-                used[key] = pinPos;
-            }
-        }
-    });
-
-    // 2. Per-pin conflict: analog vs digital sharing on the same pin
-    forEachAssignedPin((pinPos, list) => {
-        if (list.length < 2) return;
-
-        const hasDigital = list.some(a => !isAnalogFunction(a.peripheral));
-        const hasAnalog = list.some(a => isAnalogFunction(a.peripheral));
-
-        if (hasDigital && hasAnalog) {
-            const digitalNames = list.filter(a => !isAnalogFunction(a.peripheral)).map(a => a.peripheral);
-            const analogNames = list.filter(a => isAnalogFunction(a.peripheral)).map(a => a.peripheral);
-            conflicts.push(
-                `Pin ${pinPos}: analog/digital conflict — ${analogNames.join(', ')} vs ${digitalNames.join(', ')}`
-            );
-            conflictPins.add(pinPos);
-        }
-
-        // Multiple analog outputs on the same pin is a conflict (both drive)
-        const analogOutputs = list.filter(a => isAnalogOutput(a.peripheral));
-        if (analogOutputs.length > 1) {
-            conflicts.push(
-                `Pin ${pinPos}: multiple analog outputs — ${analogOutputs.map(a => a.peripheral).join(', ')}`
-            );
-            conflictPins.add(pinPos);
-        }
-    });
-
-    box.textContent = conflicts.join('\n');
-
-    // Apply/remove conflict highlighting on diagram and table elements
-    if (deviceData) {
-        for (const pin of deviceData.pins) {
-            const pkgEl = document.getElementById(`pkg-pin-${pin.position}`);
-            const rowEl = document.getElementById(`pin-row-${pin.position}`);
-            const isConflict = conflictPins.has(pin.position);
-            if (pkgEl) pkgEl.classList.toggle('conflict', isConflict);
-            if (rowEl) rowEl.classList.toggle('conflict', isConflict);
-        }
-    }
+    const { messages, conflictPins } = collectAssignmentConflicts();
+    box.textContent = messages.join('\n');
+    applyConflictHighlights(conflictPins);
 
     return conflictPins;
 }

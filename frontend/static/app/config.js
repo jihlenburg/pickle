@@ -107,6 +107,18 @@
             fuses: {
                 oscillatorManagedNote: 'Managed by the oscillator configuration above.',
             },
+            configFiles: {
+                unsavedName: 'Unsaved config',
+                saveButton: 'Save Config',
+                saveAsButton: 'Save As...',
+                renameButton: 'Rename...',
+                moreActionsTitle: 'More save actions',
+                saveDialogTitle: 'Save Pin Configuration',
+                saveAsDialogTitle: 'Save Pin Configuration As',
+                renameDialogTitle: 'Rename Pin Configuration',
+                openDialogTitle: 'Open Pin Configuration',
+                saveShortcutHint: 'Save current configuration (Ctrl/Cmd+S)',
+            },
         },
         themes: {
             dark: {

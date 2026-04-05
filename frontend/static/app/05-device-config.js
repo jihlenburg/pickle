@@ -19,17 +19,30 @@ function setupOscUI() {
     const targetInput = document.getElementById('osc-target');
 
     source.addEventListener('change', () => {
-        const val = source.value;
-        const needsCrystal = val === 'pri' || val === 'pri_pll';
-        const needsTarget = val === 'frc_pll' || val === 'pri_pll';
-        crystalRow.style.display = needsCrystal ? '' : 'none';
-        targetRow.style.display = needsTarget ? '' : 'none';
-        updateFcyHint();
-        syncOscillatorManagedFuseFields();
+        applyEditorMutation(() => {
+            const val = source.value;
+            const needsCrystal = val === 'pri' || val === 'pri_pll';
+            const needsTarget = val === 'frc_pll' || val === 'pri_pll';
+            crystalRow.style.display = needsCrystal ? '' : 'none';
+            targetRow.style.display = needsTarget ? '' : 'none';
+            updateFcyHint();
+            syncOscillatorManagedFuseFields();
+        });
     });
 
-    targetInput.addEventListener('input', updateFcyHint);
-    poscmd.addEventListener('change', syncOscillatorManagedFuseFields);
+    targetInput.addEventListener('input', () => {
+        applyEditorMutation(() => {
+            updateFcyHint();
+        });
+    });
+    document.getElementById('osc-crystal').addEventListener('input', () => {
+        applyEditorMutation(() => {});
+    });
+    poscmd.addEventListener('change', () => {
+        applyEditorMutation(() => {
+            syncOscillatorManagedFuseFields();
+        });
+    });
 
     function updateFcyHint() {
         const val = parseFloat(targetInput.value);
@@ -137,11 +150,15 @@ function buildFuseUI(fuseDefs) {
             }
 
             select.addEventListener('change', () => {
-                const sel = select.options[select.selectedIndex];
-                select.dataset.tip = sel?.title || '';
-                if (!select.disabled) {
-                    select.title = select.dataset.tip;
-                }
+                applyEditorMutation(() => {
+                    const sel = select.options[select.selectedIndex];
+                    select.dataset.tip = sel?.title || '';
+                    if (!select.disabled) {
+                        select.title = select.dataset.tip;
+                    }
+                }, {
+                    markDirty: !select.disabled,
+                });
             });
 
             row.appendChild(select);
@@ -154,7 +171,7 @@ function buildFuseUI(fuseDefs) {
     if (icsSelect) {
         icsSelect.addEventListener('change', () => {
             if (deviceData) {
-                if (typeof renderActiveView === 'function') renderActiveView(); else renderDevice();
+                renderCurrentEditorView();
             }
         });
     }
