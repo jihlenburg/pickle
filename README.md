@@ -1,7 +1,7 @@
 # pickle
 
 <p align="center">
-  <img src="src-tauri/icons/pickle-icon-master.png" width="128" height="128" alt="pickle logo — a kawaii pickle with SO-8 metallic pins">
+  <img src="docs/pickle-icon-web.png" width="128" height="128" alt="pickle logo — a kawaii pickle with SO-8 metallic pins">
 </p>
 
 **pickle** is a native desktop pin configurator for Microchip dsPIC33 and PIC24 devices. It parses Microchip Device Family Pack (`.atpack`) data, renders package-aware pin assignment views, and generates compiler-friendly initialization code for PPS, port direction, oscillator, fuse, and CLC setup.
