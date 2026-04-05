@@ -12,9 +12,11 @@ The name is a pun on **PIC** — Microchip's microcontroller line.
 <!-- mandatory-readme-legal-start -->
 ## Legal Disclaimer
 
-pickle is an independent project and has no affiliation with, endorsement from, sponsorship from, or approval by Microchip Technology Inc.
+pickle is an independent project and is not affiliated with, endorsed by, sponsored by, or approved by Microchip Technology Inc.
 
-All Microchip intellectual property referenced by this project, including Microchip, dsPIC33, PIC24, and related product names, trademarks, and brand names, belongs to Microchip Technology Inc.
+pickle is built to use publicly available technical information together with user-supplied or separately downloaded device data. The repository and application distribution do not include or redistribute Microchip-owned datasheets, device packs, images, or other source materials.
+
+Microchip, dsPIC33, PIC24, and related product names, trademarks, logos, and brand names are the property of Microchip Technology Inc. All rights in that intellectual property remain with Microchip Technology Inc.
 <!-- mandatory-readme-legal-end -->
 
 ## What It Covers

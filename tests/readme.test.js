@@ -16,11 +16,23 @@ test('README keeps the required Microchip legal disclaimer', () => {
     assert.match(readme, /<!-- mandatory-readme-legal-end -->/);
     assert.match(
         readme,
-        /pickle is an independent project and has no affiliation with, endorsement from, sponsorship from, or approval by Microchip Technology Inc\./
+        /pickle is an independent project and is not affiliated with, endorsed by, sponsored by, or approved by Microchip Technology Inc\./
     );
     assert.match(
         readme,
-        /All Microchip intellectual property referenced by this project, including Microchip, dsPIC33, PIC24, and related product names, trademarks, and brand names, belongs to Microchip Technology Inc\./
+        /pickle is built to use publicly available technical information together with user-supplied or separately downloaded device data\./
+    );
+    assert.match(
+        readme,
+        /The repository and application distribution do not include or redistribute Microchip-owned datasheets, device packs, images, or other source materials\./
+    );
+    assert.match(
+        readme,
+        /Microchip, dsPIC33, PIC24, and related product names, trademarks, logos, and brand names are the property of Microchip Technology Inc\./
+    );
+    assert.match(
+        readme,
+        /All rights in that intellectual property remain with Microchip Technology Inc\./
     );
 });
 
