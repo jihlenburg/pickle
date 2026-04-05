@@ -8,6 +8,15 @@
 
 The name is a pun on **PIC** — Microchip's microcontroller line.
 
+<!-- Keep this disclaimer block intact; tests/readme.test.js validates it. -->
+<!-- mandatory-readme-legal-start -->
+## Legal Disclaimer
+
+pickle is an independent project and has no affiliation with, endorsement from, sponsorship from, or approval by Microchip Technology Inc.
+
+All Microchip intellectual property referenced by this project, including Microchip, dsPIC33, PIC24, and related product names, trademarks, and brand names, belongs to Microchip Technology Inc.
+<!-- mandatory-readme-legal-end -->
+
 ## What It Covers
 
 - Interactive pin-table and peripheral-centric assignment views
@@ -113,4 +122,4 @@ See [`docs/`](docs/) for current implementation details:
 
 ## License
 
-MIT
+GNU General Public License v3.0 (GPLv3). See [LICENSE](LICENSE).

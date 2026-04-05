@@ -27,4 +27,4 @@ for file in frontend/static/app/*.js; do
     node --check "$file"
 done
 
-node --test frontend/tests/*.test.js
+node --test frontend/tests/*.test.js tests/*.test.js
