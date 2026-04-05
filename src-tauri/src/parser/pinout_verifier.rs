@@ -30,12 +30,26 @@ enum Provider {
 }
 
 fn get_env_key(var_name: &str) -> Option<String> {
+    // 1. OS keychain (highest priority — user-managed via Settings dialog)
+    let provider = match var_name {
+        "OPENAI_API_KEY" => Some("openai"),
+        "ANTHROPIC_API_KEY" => Some("anthropic"),
+        _ => None,
+    };
+    if let Some(p) = provider {
+        if let Some(key) = crate::commands::keychain::get_keychain_key(p) {
+            return Some(key);
+        }
+    }
+
+    // 2. Environment variable
     if let Ok(key) = std::env::var(var_name) {
         if !key.is_empty() {
             return Some(key);
         }
     }
 
+    // 3. .env files in data roots
     for root in crate::parser::dfp_manager::read_roots() {
         let env_path = root.join(".env");
         if env_path.exists() {

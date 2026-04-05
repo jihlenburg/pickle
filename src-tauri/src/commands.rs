@@ -3,6 +3,7 @@
 pub mod catalog;
 pub mod devices;
 pub mod dialogs;
+pub mod keychain;
 pub mod settings_state;
 pub mod toolchain;
 pub mod verification;
@@ -26,6 +27,7 @@ pub use dialogs::{
 };
 pub use settings_state::{load_app_settings, remember_last_used_device, set_theme_mode};
 pub use toolchain::{compile_check, compiler_info};
+pub use keychain::{api_key_details, delete_api_key, save_api_key};
 pub use verification::{api_key_status, apply_overlay, find_datasheet, verify_pinout};
 
 // ---------------------------------------------------------------------------

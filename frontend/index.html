@@ -46,6 +46,7 @@
 
         <div class="header-meta">
             <button id="index-badge" type="button" class="index-badge" style="display:none" title="Click to refresh"></button>
+            <button id="settings-btn" type="button" class="header-btn" title="Settings (Cmd+,)">Settings</button>
             <button id="theme-toggle">System</button>
         </div>
     </header>
@@ -225,8 +226,76 @@
         <div class="about-links">
             <button class="about-link" id="about-github-btn">GitHub</button>
         </div>
-        <p class="about-copy">&copy; 2026 J. Ihlenburg</p>
+        <p class="about-copy">&copy; 2026 J. Ihlenburg &middot; GPLv3</p>
+        <p class="about-legal">
+            Not affiliated with, endorsed by, or approved by Microchip
+            Technology&nbsp;Inc. Microchip, dsPIC33, PIC24, and related names
+            are trademarks of Microchip Technology&nbsp;Inc.
+        </p>
         <button class="about-close" id="about-close-btn">Close</button>
+    </dialog>
+
+    <!-- Settings dialog ------------------------------------------------- -->
+    <!--
+        Extendable structure: each section is a <div data-section="id"> in
+        #settings-content, toggled by a matching <button data-section="id">
+        in #settings-nav.  To add a new section, add a nav button and a
+        content div — the JS section registry picks them up automatically.
+    -->
+    <dialog id="settings-dialog" class="settings-dialog" aria-label="Settings">
+        <div class="settings-layout">
+            <nav class="settings-nav" id="settings-nav">
+                <h2 class="settings-nav-title">Settings</h2>
+                <button class="settings-nav-btn active" data-section="api-keys">API Keys</button>
+                <!-- Future sections: add nav buttons here -->
+            </nav>
+
+            <div class="settings-content" id="settings-content">
+                <!-- ── API Keys section ──────────────────────────── -->
+                <div class="settings-section active" data-section="api-keys">
+                    <h3 class="settings-section-title">API Keys</h3>
+                    <p class="settings-section-desc">
+                        Keys are stored in your operating system's secure credential
+                        store (macOS&nbsp;Keychain, Windows&nbsp;Credential&nbsp;Manager,
+                        Linux&nbsp;Secret&nbsp;Service). Environment variables and
+                        <code>.env</code> files are still honoured as fallbacks.
+                    </p>
+
+                    <div class="key-row" data-provider="openai">
+                        <label class="key-label">OpenAI</label>
+                        <div class="key-field">
+                            <input type="password" class="key-input" id="key-input-openai"
+                                   placeholder="sk-proj-..." autocomplete="off" spellcheck="false">
+                            <button class="key-reveal" id="key-reveal-openai" title="Show / hide key">&#x1f441;</button>
+                        </div>
+                        <div class="key-actions">
+                            <button class="key-save" id="key-save-openai">Save</button>
+                            <button class="key-clear" id="key-clear-openai">Clear</button>
+                        </div>
+                        <div class="key-status" id="key-status-openai"></div>
+                    </div>
+
+                    <div class="key-row" data-provider="anthropic">
+                        <label class="key-label">Anthropic</label>
+                        <div class="key-field">
+                            <input type="password" class="key-input" id="key-input-anthropic"
+                                   placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
+                            <button class="key-reveal" id="key-reveal-anthropic" title="Show / hide key">&#x1f441;</button>
+                        </div>
+                        <div class="key-actions">
+                            <button class="key-save" id="key-save-anthropic">Save</button>
+                            <button class="key-clear" id="key-clear-anthropic">Clear</button>
+                        </div>
+                        <div class="key-status" id="key-status-anthropic"></div>
+                    </div>
+                </div>
+
+                <!-- Future sections: add content divs here -->
+            </div>
+        </div>
+        <div class="settings-footer">
+            <button class="settings-close" id="settings-close-btn">Done</button>
+        </div>
     </dialog>
 
     <footer class="status-bar">
@@ -250,6 +319,7 @@
     <script src="static/app/05-clc-schematic.js"></script>
     <script src="static/app/05-config-files.js"></script>
     <script src="static/app/05-compile-check.js"></script>
+    <script src="static/app/05-settings.js"></script>
     <script src="static/app/06-shell.js"></script>
     <script src="static/app/07-verification.js"></script>
     <script src="static/app/08-bootstrap.js"></script>

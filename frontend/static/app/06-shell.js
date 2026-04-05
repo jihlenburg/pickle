@@ -26,6 +26,7 @@ const shellActionHandlers = {
     undo: () => undo(),
     redo: () => redo(),
     about: () => showAboutDialog(),
+    settings: () => showSettingsDialog(),
 };
 
 function bindClick(id, handler) {
@@ -118,6 +119,7 @@ function wireShellEventListeners() {
     bindShellAction('save-btn', 'save');
     bindShellAction('load-btn-file', 'open');
     bindShellAction('index-badge', 'refresh_index');
+    bindShellAction('settings-btn', 'settings');
     wireSaveMenu();
 
     $('part-input')?.addEventListener('keydown', (event) => {
@@ -391,6 +393,7 @@ function wireAboutDialog() {
 function initializeShellChrome() {
     wireShellEventListeners();
     wireAboutDialog();
+    wireSettingsDialog();
     initializeConfigDocumentUi();
     const checkButton = $('check-btn');
     if (checkButton) {

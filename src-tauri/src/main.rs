@@ -23,6 +23,7 @@ const FORWARDED_MENU_ACTIONS: &[&str] = &[
     "generate",
     "copy_code",
     "about",
+    "settings",
 ];
 
 fn build_file_menu<R: Runtime>(app: &App<R>) -> tauri::Result<Submenu<R>> {
@@ -95,7 +96,17 @@ fn build_help_menu<R: Runtime>(app: &App<R>) -> tauri::Result<Submenu<R>> {
         app,
         "Help",
         true,
-        &[&MenuItem::with_id(app, "about", "About pickle", true, None::<&str>)?],
+        &[
+            &MenuItem::with_id(
+                app,
+                "settings",
+                "Settings...",
+                true,
+                Some("CmdOrCtrl+,"),
+            )?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "about", "About pickle", true, None::<&str>)?,
+        ],
     )
 }
 
@@ -184,6 +195,9 @@ fn main() {
             commands::verification::verify_pinout,
             commands::verification::apply_overlay,
             commands::verification::api_key_status,
+            commands::keychain::save_api_key,
+            commands::keychain::delete_api_key,
+            commands::keychain::api_key_details,
         ])
         .run(tauri::generate_context!())
         .expect("error running tauri application");
