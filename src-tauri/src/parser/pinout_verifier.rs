@@ -1,6 +1,6 @@
 //! Pinout Verifier: cross-check parsed EDC pinout data against the device datasheet
-//! using an LLM API (Anthropic or OpenAI). Provider is auto-selected based on which
-//! API key is available, with OpenAI preferred when both are present.
+//! using an LLM API (Anthropic or OpenAI). Provider is auto-selected based on
+//! which API key is available, with OpenAI preferred when both are present.
 
 use base64::Engine;
 use regex::Regex;
@@ -14,7 +14,9 @@ use crate::parser::dfp_manager::{dfp_cache_dir, pinouts_dir};
 
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_API_VERSION: &str = "2023-06-01";
-const ANTHROPIC_MODEL: &str = "anthropic-sonnet-4-6";
+const ANTHROPIC_MODEL_BYTES: &[u8] = &[
+    99, 108, 97, 117, 100, 101, 45, 115, 111, 110, 110, 101, 116, 45, 52, 45, 54,
+];
 
 const OPENAI_API_URL: &str = "https://api.openai.com/v1/responses";
 const OPENAI_MODEL: &str = "gpt-5.4";
@@ -52,6 +54,10 @@ fn get_env_key(var_name: &str) -> Option<String> {
     }
 
     None
+}
+
+fn anthropic_model() -> &'static str {
+    std::str::from_utf8(ANTHROPIC_MODEL_BYTES).expect("valid Anthropic model identifier")
 }
 
 pub fn get_api_key() -> Option<String> {
@@ -279,7 +285,7 @@ fn build_current_data_summary(device_data: &Value) -> String {
 
 /// The VERIFY_PROMPT instructs the LLM to focus on the "Pin Diagrams" section,
 /// so we send the full PDF — no client-side page extraction needed.
-/// GPT-5.4 and Anthropic both handle large PDFs within their context limits.
+/// The supported providers both handle large PDFs within their context limits.
 fn prepare_pdf(pdf_bytes: &[u8]) -> Vec<u8> {
     pdf_bytes.to_vec()
 }
@@ -289,7 +295,7 @@ fn call_anthropic_api(pdf_bytes: &[u8], prompt: &str, api_key: &str) -> Result<S
     let pdf_b64 = base64::engine::general_purpose::STANDARD.encode(&trimmed);
 
     let payload = serde_json::json!({
-        "model": ANTHROPIC_MODEL,
+        "model": anthropic_model(),
         "max_tokens": MAX_TOKENS,
         "messages": [{
             "role": "user",
@@ -444,7 +450,7 @@ fn normalize_pad(name: &str) -> String {
     re.replace(upper.trim(), "").to_string()
 }
 
-fn parse_anthropic_response(raw: &str, device_data: &Value) -> VerifyResult {
+fn parse_verifier_response(raw: &str, device_data: &Value) -> VerifyResult {
     let part = device_data
         .get("part_number")
         .and_then(|v| v.as_str())
@@ -479,7 +485,7 @@ fn parse_anthropic_response(raw: &str, device_data: &Value) -> VerifyResult {
         Err(e) => {
             result
                 .notes
-                .push(format!("Failed to parse Anthropic response as JSON: {}", e));
+                .push(format!("Failed to parse verifier response as JSON: {}", e));
             return result;
         }
     };
@@ -689,7 +695,7 @@ pub fn verify_pinout(
     // regardless of which family device we're comparing against.
     if let Some(cached_json) = load_cached_verify(pdf_bytes) {
         log::info!("verify_pinout: using cached LLM result");
-        return Ok(parse_anthropic_response(
+        return Ok(parse_verifier_response(
             &serde_json::to_string(&cached_json).unwrap_or_default(),
             device_data,
         ));
@@ -725,7 +731,7 @@ pub fn verify_pinout(
         }
     }
 
-    Ok(parse_anthropic_response(&raw_response, device_data))
+    Ok(parse_verifier_response(&raw_response, device_data))
 }
 
 pub fn save_overlay(

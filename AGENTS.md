@@ -1,4 +1,4 @@
-# pickle — Anthropic Code Guidelines
+# pickle — Repository Agent Guidelines
 
 ## Project Overview
 
@@ -134,7 +134,7 @@ cargo tauri build                   # Production build
 - Tauri IPC: frontend uses `invoke('command_name', {args})`, backend uses `#[tauri::command]`.
 - All HTTP calls happen in Rust (reqwest), not from the frontend.
 - CLC input source mapping (`clc_input_sources`) is device-specific and loaded from `clc_sources/*.json`. When not available locally, the LLM verification flow extracts it from the datasheet and saves it for future use.
-- LLM verification supports dual providers: Anthropic (Anthropic) and OpenAI. The `api_key_status` command reports which providers are configured, and the frontend lets the user choose.
+- LLM verification supports dual providers: Anthropic and OpenAI. The `api_key_status` command reports which providers are configured, and the frontend lets the user choose.
 
 ## Microchip dsPIC33 Domain Knowledge
 

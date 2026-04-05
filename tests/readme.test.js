@@ -45,3 +45,18 @@ test('README advertises the GPLv3 license and no longer claims MIT', () => {
     );
     assert.doesNotMatch(readme, /^MIT$/m);
 });
+
+test('README keeps the legal disclaimer at the bottom after the license section', () => {
+    const readme = readReadme();
+
+    const licenseIndex = readme.indexOf('## License');
+    const disclaimerIndex = readme.indexOf('## Legal Disclaimer');
+
+    assert.notEqual(licenseIndex, -1);
+    assert.notEqual(disclaimerIndex, -1);
+    assert.ok(disclaimerIndex > licenseIndex);
+    assert.equal(
+        readme.trimEnd().endsWith('<!-- mandatory-readme-legal-end -->'),
+        true
+    );
+});

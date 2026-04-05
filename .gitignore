@@ -26,8 +26,8 @@ pinouts/
 .env
 *.key
 
-# Anthropic Code
-.anthropic/
+# Local assistant settings
+.assistant/
 
 # Tauri build output
 src-tauri/target/
