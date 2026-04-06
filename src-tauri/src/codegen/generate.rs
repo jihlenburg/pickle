@@ -1188,6 +1188,7 @@ mod tests {
             fuse_defs: vec![],
             clc_module_id: None,
             clc_input_sources: None,
+            device_info: DeviceInfo::default(),
         }
     }
 

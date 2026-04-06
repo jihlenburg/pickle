@@ -45,6 +45,7 @@ pub fn load_device(part_number: String, package: Option<String>) -> Result<Value
         "port_registers": device.port_registers,
         "fuse_defs": device.fuse_defs,
         "clc_input_sources": device.clc_input_sources,
+        "device_info": device.device_info,
     }))
 }
 

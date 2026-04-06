@@ -438,6 +438,9 @@ async function loadDevice(pkg, options = {}) {
         updateClcTabState();
         renderClcDesigner();
 
+        // Populate Device Info tab
+        renderDeviceInfo();
+
         // Show the view toggle once a device is loaded
         showElement('view-toggle');
         await checkCompiler(deviceData.part_number);

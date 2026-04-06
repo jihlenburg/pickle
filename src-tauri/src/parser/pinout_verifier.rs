@@ -155,10 +155,10 @@ fn task_reduce_progress_detail(task: VerifyTask) -> &'static str {
 fn openai_instructions(task: VerifyTask) -> &'static str {
     match task {
         VerifyTask::Pinout => {
-            "You are analyzing a reduced Microchip dsPIC33/PIC24 datasheet PDF to extract and verify pin mapping data. Return only valid JSON."
+            "You are analyzing a Microchip dsPIC33/PIC24 datasheet PDF to extract and verify pin mapping data. Return only valid JSON."
         }
         VerifyTask::Clc => {
-            "You are analyzing a reduced Microchip dsPIC33/PIC24 datasheet PDF to extract CLC input source mappings. Return only valid JSON."
+            "You are analyzing a Microchip dsPIC33/PIC24 datasheet PDF to extract CLC input source mappings. Return only valid JSON."
         }
     }
 }
@@ -484,6 +484,8 @@ Return a JSON object with this exact structure (no markdown fencing, just raw JS
 - If the datasheet shows a package not in the current data, include it as a new entry
 - If pin data matches perfectly, say so in notes — don't invent corrections
 - Be precise: only flag actual discrepancies, not formatting differences
+- Do NOT flag function differences for PPS-remappable peripherals. Pins marked [RPn] in the current data can host ANY remappable peripheral via PPS registers. The datasheet pin table typically only shows the RPn number, while the current parsed data may list specific peripheral assignments (e.g., PWM8H, SDA3, SCK2, U1TX). These are NOT errors — they are runtime-configurable. Only flag missing or extra FIXED functions (analog channels, MCLR, INT0, CLKI, OSC1, etc.)
+- Treat minor naming variations as equivalent, not as corrections (e.g., DACOUT vs DACOUT1, CMP1 vs CMPC1)
 - For this pinout-only pass, always return "clc_input_sources": []
 "#;
 
@@ -1827,7 +1829,7 @@ fn call_anthropic_api(
             "provider.upload",
             0.58,
             format!(
-                "Uploading reduced {} to {}",
+                "Uploading {} to {}",
                 task_sections_label(task),
                 provider_name(Provider::Anthropic)
             ),
@@ -1850,7 +1852,7 @@ fn call_anthropic_api(
             "provider.analyze",
             0.76,
             format!(
-                "Anthropic is analyzing the reduced {}",
+                "Anthropic is analyzing the {}",
                 task_sections_label(task)
             ),
         )
@@ -1873,7 +1875,7 @@ fn call_anthropic_api(
                 {
                     "type": "text",
                     "text": format!(
-                        "{prompt}\n\nThe attached PDF was reduced to the relevant datasheet sections only. Included page ranges: {}.",
+                        "{prompt}\n\nThe attached PDF contains only the relevant datasheet sections. Included page ranges: {}.",
                         describe_page_spans(page_spans)
                     )
                 },
@@ -1912,7 +1914,7 @@ fn call_anthropic_image_api(
                 task_sections_label(task)
             ),
         )
-        .detail("Retrying with images because the reduced-PDF path was unavailable.")
+        .detail("Retrying with page images instead of PDF upload.")
         .provider(Provider::Anthropic),
     );
     let rendered_images = render_pages_to_pngs(pdf_bytes, page_spans)?;
@@ -1934,7 +1936,7 @@ fn call_anthropic_image_api(
             ),
         )
         .detail(format!(
-            "Retrying with {} PNG page(s) from the reduced datasheet ranges: {}.",
+            "Retrying with {} PNG page(s) from datasheet pages: {}.",
             rendered_images.len(),
             describe_page_spans(page_spans)
         ))
@@ -2029,7 +2031,7 @@ fn call_openai_image_api(
                 task_sections_label(task)
             ),
         )
-        .detail("Retrying with images because the reduced-PDF path was unavailable.")
+        .detail("Retrying with page images instead of PDF upload.")
         .provider(Provider::OpenAI),
     );
     let rendered_images = render_pages_to_pngs(pdf_bytes, page_spans)?;
@@ -2053,7 +2055,7 @@ fn call_openai_image_api(
             ),
         )
         .detail(format!(
-            "Retrying with {} PNG page(s) from the reduced datasheet ranges: {}.",
+            "Retrying with {} PNG page(s) from datasheet pages: {}.",
             rendered_images.len(),
             describe_page_spans(page_spans)
         ))
@@ -2137,7 +2139,7 @@ fn call_openai_api(
             ""
         };
         return Err(format!(
-            "Verification requires a datasheet PDF so pickle can send a reduced PDF or rendered page images.{detail}"
+            "Verification requires a datasheet PDF so pickle can send selected pages or rendered page images.{detail}"
         ));
     }
 
@@ -2208,16 +2210,16 @@ fn call_openai_api(
             "provider.upload",
             0.58,
             format!(
-                "Uploading reduced {} to {}",
+                "Uploading {} to {}",
                 task_sections_label(task),
                 provider_name(Provider::OpenAI)
             ),
         )
         .detail(format!(
-            "Reduced {} pages / {:.1} MB to {} pages / {:.1} MB ({})",
+            "Selected {} of {} pages ({:.1} MB → {:.1} MB, {})",
+            reduced_pdf.selected_pages(),
             source_pages,
             pdf_bytes.len() as f64 / 1_048_576.0,
-            reduced_pdf.selected_pages(),
             reduced_pdf.bytes.len() as f64 / 1_048_576.0,
             range_description
         ))
@@ -2253,7 +2255,7 @@ fn call_openai_api(
     };
 
     let prompt_with_context = format!(
-        "{prompt}\n\nThe attached PDF was reduced to the relevant datasheet sections only. Included page ranges: {}.",
+        "{prompt}\n\nThe attached PDF contains only the relevant datasheet sections. Included page ranges: {}.",
         range_description
     );
     log::info!(
@@ -2292,7 +2294,7 @@ fn call_openai_api(
             "provider.analyze",
             0.76,
             format!(
-                "OpenAI is analyzing the reduced {}",
+                "OpenAI is analyzing the {}",
                 task_sections_label(task)
             ),
         )
@@ -2345,7 +2347,7 @@ fn call_llm_api(
                     ""
                 };
                 Err(format!(
-                    "Verification requires a datasheet PDF so pickle can send a reduced PDF or rendered page images.{detail}"
+                    "Verification requires a datasheet PDF so pickle can send selected pages or rendered page images.{detail}"
                 ))
             } else {
                 emit_progress(
@@ -2432,6 +2434,40 @@ fn normalize_pad(name: &str) -> String {
     let re = Regex::new(r"_\d+$").unwrap();
     let upper = name.to_uppercase();
     re.replace(upper.trim(), "").to_string()
+}
+
+/// Check if any word in a correction note matches a PPS-remappable function pattern.
+fn note_words_match_pps(note: &str, re_pps: &Regex) -> bool {
+    // Split on common separators and check each token
+    note.split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .any(|word| re_pps.is_match(word))
+}
+
+/// Check if a correction is just a naming variation (e.g. DACOUT vs DACOUT1).
+fn is_naming_variant_correction(corr: &PinCorrection, re_variant: &Regex) -> bool {
+    let note = &corr.note;
+    // Look for pairs like DACOUT/DACOUT1 in the note text
+    let words: Vec<&str> = note
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    // If any two words in the note differ only by a trailing digit and both match
+    // the variant pattern, this is a naming-only difference.
+    for i in 0..words.len() {
+        if re_variant.is_match(words[i]) {
+            for j in (i + 1)..words.len() {
+                if re_variant.is_match(words[j]) {
+                    let a = words[i].trim_end_matches(|c: char| c.is_ascii_digit());
+                    let b = words[j].trim_end_matches(|c: char| c.is_ascii_digit());
+                    if a.eq_ignore_ascii_case(b) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 fn parse_verifier_response(raw: &str, device_data: &Value) -> VerifyResult {
@@ -2600,6 +2636,63 @@ fn parse_verifier_response(raw: &str, device_data: &Value) -> VerifyResult {
                 });
             }
         }
+    }
+
+    // Post-process: filter out false-positive corrections for PPS-remappable
+    // function differences. Pins with an RP number can host any remappable
+    // peripheral, so extra_functions / missing_functions on those pins are
+    // expected when the EDC lists specific peripheral assignments that the
+    // datasheet table omits (it only shows the RPn designator).
+    let rp_positions: std::collections::HashSet<u32> = device_data
+        .get("pins")
+        .and_then(|v| v.as_array())
+        .map(|pins| {
+            pins.iter()
+                .filter(|p| p.get("rp_number").and_then(|v| v.as_u64()).is_some())
+                .filter_map(|p| p.get("position").and_then(|v| v.as_u64()).map(|n| n as u32))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Regex for known PPS-remappable peripheral function names that should
+    // never be flagged as corrections on RP-capable pins.
+    let re_pps_func = Regex::new(
+        r"(?i)^(PWM\d+[HL]|U\d+(TX|RX|CTS|RTS)|SPI\d+(SDI|SDO|SCK|SS)|SDA\d*|SCL\d*|SCK\d*|SDI\d*|SDO\d*|SS\d*|CAN\d*(TX|RX)|REFCLKO?\d*|QE[AB]\d*|INDX\d*|HOME\d*|FLT\d*|SENT\d+|RP\d+)$"
+    ).unwrap();
+
+    // Also filter naming variations (DACOUT vs DACOUT1, etc.)
+    let re_naming_variant = Regex::new(
+        r"(?i)^(DACOUT\d*|CMP[A-Z]*\d*)$"
+    ).unwrap();
+
+    for pkg in result.packages.values_mut() {
+        pkg.corrections.retain(|corr| {
+            let is_func_type = corr.correction_type == "extra_functions"
+                || corr.correction_type == "missing_functions";
+
+            if !is_func_type {
+                return true; // keep non-function corrections
+            }
+
+            // Drop function corrections on RP-capable pins that mention
+            // PPS-remappable peripherals in the note text
+            if rp_positions.contains(&corr.pin_position) {
+                // Check if the note references a PPS-remappable function
+                let note_upper = corr.note.to_uppercase();
+                let mentions_pps = re_pps_func.find(&note_upper).is_some()
+                    || note_words_match_pps(&note_upper, &re_pps_func);
+                if mentions_pps {
+                    return false; // drop this correction
+                }
+            }
+
+            // Drop naming-variant corrections (e.g. DACOUT vs DACOUT1)
+            if is_naming_variant_correction(corr, &re_naming_variant) {
+                return false;
+            }
+
+            true
+        });
     }
 
     if let Some(notes) = data.get("notes").and_then(|v| v.as_array()) {

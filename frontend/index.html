@@ -104,24 +104,16 @@
 
         <div class="panel panel-right">
             <div class="right-tabs" id="right-tabs">
-                <button class="right-tab active" data-tab="code">Code</button>
+                <button class="right-tab active" data-tab="info">Info</button>
                 <button class="right-tab" data-tab="fuses">Fuses</button>
                 <button class="right-tab" data-tab="clc">CLC</button>
+                <button class="right-tab" data-tab="code">Code</button>
                 <button class="right-tab" data-tab="verify">Verification</button>
             </div>
 
-            <div class="right-tab-content active" data-tab="code">
-                <div class="code-shell">
-                    <div class="toolbar">
-                        <button id="gen-btn">Generate C Code</button>
-                        <button id="check-btn" style="display:none">Compiler Check</button>
-                        <button id="copy-btn">Copy</button>
-                        <button id="export-btn">Export Files</button>
-                    </div>
-                    <div id="compile-result" class="compile-result"></div>
-                    <div class="code-tabs" id="code-tabs" style="display:none"></div>
-                    <pre id="code-output">Load a device and assign peripherals to generate code.</pre>
-                </div>
+            <div class="right-tab-content active" data-tab="info">
+                <div id="device-info-content" class="device-info" style="display:none"></div>
+                <div id="device-info-empty" class="verify-empty">Load a device to view its information.</div>
             </div>
 
             <div class="right-tab-content fuses-tab-content" data-tab="fuses">
@@ -193,6 +185,20 @@
                     </div>
                 </div>
                 <div id="clc-empty" class="verify-empty">Load a device to configure CLC modules.</div>
+            </div>
+
+            <div class="right-tab-content" data-tab="code">
+                <div class="code-shell">
+                    <div class="toolbar">
+                        <button id="gen-btn">Generate C Code</button>
+                        <button id="check-btn" style="display:none">Compiler Check</button>
+                        <button id="copy-btn">Copy</button>
+                        <button id="export-btn">Export Files</button>
+                    </div>
+                    <div id="compile-result" class="compile-result"></div>
+                    <div class="code-tabs" id="code-tabs" style="display:none"></div>
+                    <pre id="code-output">Load a device and assign peripherals to generate code.</pre>
+                </div>
             </div>
 
             <div class="right-tab-content" data-tab="verify">
@@ -332,6 +338,7 @@
     <script src="static/app/05-clc-designer.js"></script>
     <script src="static/app/05-clc-schematic.js"></script>
     <script src="static/app/05-config-files.js"></script>
+    <script src="static/app/05-device-info.js"></script>
     <script src="static/app/05-compile-check.js"></script>
     <script src="static/app/05-settings.js"></script>
     <script src="static/app/06-shell.js"></script>

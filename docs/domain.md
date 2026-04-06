@@ -4,21 +4,276 @@ This page captures the device-level concepts that matter to pickle's parser and 
 
 ## Part Numbers
 
-Example:
+### Structure
 
 ```text
-DSPIC33CK64MP102T-E/M6VAO
-│       │  │   │ │ │ │  └── qualification / sales suffix
-│       │  │   │ │ │ └──── package code
-│       │  │   │ │ └────── temperature grade
-│       │  │   │ └──────── tape-and-reel suffix
-│       │  │   └────────── package / pin-count variant
-│       │  └────────────── sub-family
-│       └───────────────── flash size
-└───────────────────────── family
+dsPIC33  ff  mmmm  xx  r  pp  T/P
+│        │   │     │   │  │   └── temperature grade / package code
+│        │   │     │   │  └───── pin count
+│        │   │     │   └──────── feature set (unique family identifier)
+│        │   │     └──────────── type (application class)
+│        │   └────────────────── program memory size (KB)
+│        └────────────────────── performance family
+└─────────────────────────────── device family
 ```
 
-pickle normalizes lookup keys to the base part number such as `DSPIC33CK64MP102`.
+Example: `DSPIC33CK64MP102T-E/M6VAO`
+
+### ff — Performance Family
+
+| Code | Description |
+|------|-------------|
+| AK   | Up to 200 MHz, 32-bit Single Core, DP-FPU, 3.3V |
+| CH   | Up to 90+100 MHz, Dual Core, 3.3V |
+| CK   | Up to 100 MHz, Single Core, 3.3V |
+| CDVL | Up to 100 MHz, Single Core, 3.3V, Integrated MOSFET Driver and LIN Transceiver |
+| EDV  | Up to 70 MHz, Single Core, 3.3V, Integrated MOSFET Driver |
+| EV   | Up to 70 MHz, Single Core, 5V |
+| EP   | Up to 70 MHz, Single Core, 3.3V |
+
+### mmmm — Program Memory Size
+
+| Code | Size |
+|------|------|
+| 32   | 32 KB |
+| 64   | 64 KB |
+| 128  | 128 KB |
+| 256  | 256 KB |
+| 512  | 512 KB |
+| 1024 | 1024 KB |
+
+### xx — Type (Application Class)
+
+| Code   | Description |
+|--------|-------------|
+| MPT    | Motor Control, Power Supply, General Purpose and Robust Design with integrated Security |
+| MP/GS  | Motor Control, Power Supply, General Purpose and Robust Design |
+| MC/GM  | Motor Control, Cost-effective General Purpose and Robust Design |
+| GP     | Cost-effective General Purpose and Robust Design |
+| MU     | Motor Control, General Purpose and Robust Design with USB |
+
+### r — Feature Set
+
+Unique family identifier. Higher the number, richer the feature set.
+
+### pp — Pin Count
+
+| Code | Pins |
+|------|------|
+| 02   | 28 |
+| 03   | 36 |
+| 04   | 44 |
+| 05   | 48 |
+| 06   | 64 |
+| 08   | 80 |
+| 10   | 100 |
+| 14   | 144 |
+
+### T — Temperature Grade
+
+| Code | Range |
+|------|-------|
+| I    | Industrial (−40°C to +85°C) |
+| E    | Extended (−40°C to +125°C) |
+| H    | High (−40°C to +150°C) |
+
+### P — Package Code
+
+| Code | Package |
+|------|---------|
+| PT   | TQFP |
+| MM/MV/ML | QFN variants |
+| MR/MQ/M6/MX/M2 | QFN variants |
+| M5/M4 | QFN/uQFN/VQFN |
+| SS   | SSOP |
+| SO   | SOIC |
+
+pickle normalizes lookup keys to the base part number (up to and including
+the pin-count code), e.g. `DSPIC33CK64MP102`.
+
+### Sibling devices
+
+Devices sharing the same type+feature-set+pin-count suffix (e.g. `MC106`)
+have the same pinout and peripheral set. They differ only in flash size
+(`mmmm`) and performance family (`ff`). This means a datasheet for
+`dsPIC33CDVL64MC106` covers the pin table for `dsPIC33CDV128MC106` as well.
+
+Note from the selection guide: "Similar family of devices with fewer
+variations are grouped with the same color coding."
+
+## Product Family Overview
+
+Source: dsPIC33 DSC Product Selection Guide (DS30010244H, March 2026).
+
+### dsPIC33AK — High-Performance 32-bit
+
+- 200 MHz, 32-bit CPU with DP-FPU
+- Flash: 32–512 KB, RAM: up to 256 KB
+- Pin counts: 28–128
+- 12-bit ADC (up to 12 channels), 12-bit DAC
+- Hardware Safety Level: L5
+- CLC, PPS, PTG, DMA available
+
+### dsPIC33CH — Dual Core
+
+- Main core 90–100 MHz, Secondary core 24–72 MHz
+- Flash: 64–1024 KB (main), RAM: 16–128 KB
+- Pin counts: 28–80
+- Hardware Safety Level: L3–L4
+- CLC, PPS, PTG, DMA available
+
+### dsPIC33CK — Single Core
+
+- 100 MHz, single core
+- Flash: 32–512 KB, RAM: 8–64 KB
+- Pin counts: 28–100
+- Includes Secure DSC variant (dsPIC33CK512MPT608) with cryptographic
+  accelerator, CodeGuard Security, HSM
+- Hardware Safety Level: L4
+- CLC, PPS, PTG, DMA available
+
+### dsPIC33CDV/CDVL — Motor Control with Integrated MOSFET Gate Drivers
+
+- 100 MHz, single core
+- **CDV**: Integrated MOSFET Driver
+- **CDVL**: Integrated MOSFET Driver **and** LIN Transceiver
+- Flash: 64–256 KB, RAM: 8–32 KB
+- Pin count: 64
+- 16-bit PWM resolution for `CoxxMC` and `xxxMC` variants
+- Hardware Safety Level: L4
+- CLC, PPS, DMA available
+
+### dsPIC33EDV — Motor Control with Integrated MOSFET Gate Drivers (70 MHz)
+
+- 70 MHz, single core, 3.3V
+- Flash: 64 KB, RAM: 8 KB
+- Pin count: 52
+- PWM resolution: 7.14 ns
+- Hardware Safety Level: L2
+
+### dsPIC33EV — 5V Single Core
+
+- 70 MHz, single core, **5V operating voltage**
+- Flash: 32–256 KB, RAM: 4–16 KB
+- Pin counts: 28–64
+- Hardware Safety Level: L3
+- CLC, PPS, PTG, DMA available
+
+### dsPIC33EP — 3.3V Single Core
+
+- 70 MHz, single core, 3.3V
+- Flash: 16–512 KB, RAM: 2–52 KB
+- Pin counts: 28–144
+- Hardware Safety Level: L1–L2
+- CLC, PPS, PTG, DMA available
+- Includes USB (MU) variants
+
+## Hardware Safety Levels
+
+The selection guide groups safety features into progressive levels:
+
+| Level | Features |
+|-------|----------|
+| L1    | WDT, oscillator fail-safe, illegal opcode detect, TRAP, reset trace, register lock, frequency check, CodeGuard security, PWM lock* |
+| L2    | L1 + CRC |
+| L3    | L2 + Flash ECC and/or DMT |
+| L4    | L3 + RAM MBIST |
+| L5    | L4 + ECC RAM + IOIM |
+
+\*PWM lock available in devices with MC PWM/SMPS PWM peripheral (5V
+dsPIC33 DSCs with 5V operating voltage).
+
+## Peripheral Abbreviations
+
+Reference for the column headers in the dsPIC33 DSC Product Selection
+Guide and for understanding peripheral names in EDC data.
+
+### Integrated Analog
+
+| Abbreviation | Full Name | Description |
+|---|---|---|
+| ADC | Analog-to-Digital Converter | General-purpose ADC with up to 10-/12-bit resolution |
+| HS ADC | High-Speed ADC | High-speed SAR ADC with 12-bit resolution and sampling speed of 10 Msps |
+| DAC | Digital-to-Analog Converter | General-purpose DAC with resolution up to 16-bit |
+| ΔΣ DAC | Delta-Sigma DAC | Second-order digital bipolar, two output channel Delta-Sigma DAC with stereo operation support |
+| HS Comp | High-Speed Comparator | General-purpose rail-to-rail comparator with <1 ns response time |
+| OPA/PGA | Op Amp / Programmable Gain Amplifier | General-purpose op amp and PGAs for internal and external signal source conditioning |
+
+### Waveform Control
+
+| Abbreviation | Full Name | Description |
+|---|---|---|
+| SCCP | Single Capture/Compare/PWM | Multi-purpose 16-/32-bit input capture, output compare and PWM |
+| MCCP | Multiple Capture/Compare/PWM | Multi-purpose 16-/32-bit input capture, output compare and PWM with up to six outputs and an extended range of output control features |
+| PWM | Pulse Width Modulation | 16-bit PWM with up to nine independent time bases |
+| MC PWM | Motor Control PWM | Motor control 16-bit PWM with multiple synchronized pulse-width modulation, up to six outputs with four duty cycle generators and resolution up to 1 ns |
+| SMPS PWM | Power Supply Pulse Width Modulation | Power supply 16-bit PWM with multiple synchronized pulse-width modulation, up to eight outputs with four independent time bases and resolution up to 1 ns |
+| IC | Input Capture | Input capture with an independent timer base to capture an external event |
+| OC | Output Compare | Output compare with an independent time base to compare value with compare registers and generate a single output pulse, or a train of output pulses on a compare match event |
+
+### Timers and Interfaces
+
+| Abbreviation | Description |
+|---|---|
+| Host BiSS Interface | Host bidirectional Serial Synchronous (BiSS) digital interface for actuators used in position control |
+| 16-/32-bit Timer | General-purpose 16-/32-bit timer/counter with compare capability |
+| QEI | Quadrature Encoder Interface — increment encoders for obtaining mechanical position data |
+
+### Safety and Monitoring
+
+| Abbreviation | Description |
+|---|---|
+| ECC | Error Correction Code — detects single and double bit errors, corrects single bit error automatically |
+| RAM MBIST | RAM Memory Built-In Self-Test — tests functional correctness of all memory locations |
+| WDT | Watch Dog Timer — system supervisory circuit that generates a reset when software timing anomalies are detected within a configurable critical window |
+| DMT | Dead Man Timer — system supervisory circuit that generates a reset when instruction sequence anomalies are detected within a configurable critical window |
+| CRC | Cyclic Redundancy Check with Memory Scan — automatically calculates CRC checksum of Program/DataEE memory for NVM integrity and a general-purpose 16-bit CRC for use with memory and communications data |
+| Core Voltage Monitor | Hardware monitor that supervises the internal core voltage and flags abnormal conditions to support functional safety and system reliability |
+| IOIM | IO Integrity Monitors — validates the IO functionality in safety-critical applications by checking an output signal against a reference |
+| Hardware Safety Features | Flash error correction, RAM MBIST, backup system oscillator, WDT, DMT, CRC scan, etc. |
+| Functional Safety (ISO 26262 / IEC 61508) | Functional Ready Devices are ideal for automotive and industrial safety applications requiring ISO 26262 (ASIL B/C) and IEC 61508 (SIL 2/3) safety compliance |
+| IEC 60730 Class B Safety | Class B safety diagnostic libraries for designing household applications |
+
+### Communications
+
+| Abbreviation | Description |
+|---|---|
+| USB OTG | USB 2.0 full-speed (host and device), low-speed (host) and On-The-Go (OTG) support |
+| CAN/CAN FD | Controller Area Network — industrial- and automotive-centric communication bus |
+| UART | Universal Asynchronous Receiver Transmitter — full-duplex, 8-bit or 9-bit data serial communications with optional ISO 7816 Smart Card support |
+| LIN | Local Interconnect Network — industrial- and automotive-centric (support for LIN when using the EUSART) |
+| I²C | Inter-Integrated Circuit — general purpose 2-wire IC serial interface for communicating with other peripherals or microcontroller devices |
+| IIC | Improved Inter-Integrated Circuit — multi-controller serial data communication interface to communicate with the controller or the target |
+| SPI | Serial Peripheral Interface — general-purpose 4-wire synchronous serial interface with other peripherals or microcontroller devices |
+| I²S | Data Converter Interface — 3-wire synchronous half duplex serial interface to handle the stereo data |
+| SENT | Single-Edge Nibble Transmission — unidirectional, single-wire serial communications protocol designed for point-to-point transmission of signal values |
+
+### User Interface
+
+| Abbreviation | Description |
+|---|---|
+| Hardware Core Independent Touch Sensing | Hardware Core Independent Touch implemented using PTG and high-speed ADCs — enables the implementation of touch buttons, sliders, wheels, pads, etc. |
+
+### Security
+
+| Abbreviation | Description |
+|---|---|
+| Security Access Control | Secure boot, secure firmware update, secure debug access control, code protection and device locking |
+| Crypto Accelerator | Dedicated hardware engine to accelerate cryptographic operations, improving system security, performance, and reduced latency |
+| CodeGuard Security — Secure Boot | Allows devices to configure the boot segment as a read-only section of memory to protect the bootloader from modification via remote digital attacks |
+| Flash OTP by ICSP Write Inhibit | Flash OTP by ICSP Write Inhibit enables Flash to be configured as One-Time Programmable (OTP) memory with the ability to write and read protect the Flash memory |
+| HSM | Integrated Secure Subsystem — supports implementing secure boot, Message Authentication, trusted firmware updates, mutual node authentication and multiple key management protocols |
+
+### System Flexibility
+
+| Abbreviation | Description |
+|---|---|
+| Dual Partition Flash | Dual partition Flash operation, allowing the support of robust bootloader systems and fail-safe storage of application code, with options designed to enhance code security |
+| CLC | Configurable Logic Cell — integrated combinational and sequential logic with custom interconnection and re-routing of digital peripherals |
+| PPS | Peripheral Pin Select — I/O pin remapping of digital peripherals for greater design flexibility and improved EMI board layout |
+| PTG | Peripheral Trigger Generator — user-programmable sequencer, capable of generating complex trigger signal sequences to coordinate the operation of other peripherals |
+| DMA | Direct Memory Access — direct memory access for transfer of data between the CPU and its peripherals without CPU assistance |
+| IDLE, SLEEP and PMD | Low-power saving modes |
 
 ## Device Family Packs
 

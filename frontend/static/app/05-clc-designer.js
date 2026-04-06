@@ -55,7 +55,7 @@ function updateClcTabState() {
         : 'Configure CLC modules';
 
     if (disabled && tab.classList.contains('active') && typeof switchRightTab === 'function') {
-        switchRightTab('code');
+        switchRightTab('info');
     }
 }
 

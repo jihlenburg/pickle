@@ -12,7 +12,7 @@
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -114,6 +114,31 @@ pub struct ResolvedPin {
     pub is_power: bool,
 }
 
+/// Hardware peripheral counts and memory sizes extracted from the EDC XML.
+/// All fields are derived from SFR register patterns and memory-region
+/// elements — no external data sources are needed.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DeviceInfo {
+    pub ram_bytes: u32,
+    pub flash_bytes: u32,
+    pub adc_channels: u32,
+    pub adc_max_resolution: u8, // 0 if unknown, else 6/8/10/12
+    pub comparators: u32,
+    pub dac_channels: u32,
+    pub op_amps: u32,
+    pub pwm_generators: u32,
+    pub uarts: u32,
+    pub spis: u32,
+    pub i2c: u32,
+    pub can: u32,
+    pub clc: u32,
+    pub timers: u32,
+    pub sccp_mccp: u32,
+    pub sent: u32,
+    pub dma_channels: u32,
+    pub qei: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceData {
     pub part_number: String,
@@ -141,6 +166,9 @@ pub struct DeviceData {
     /// per-device overrides from `clc_sources/{PART}.json` or LLM extraction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clc_input_sources: Option<Vec<Vec<String>>>,
+    /// Hardware peripheral counts and memory sizes extracted from the EDC.
+    #[serde(default)]
+    pub device_info: DeviceInfo,
 }
 
 impl DeviceData {
@@ -455,6 +483,37 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
     let re_ansel = Regex::new(r"^ANSEL([A-Z])$").unwrap();
     let re_rp_field = Regex::new(r"^RP(\d+)R$").unwrap();
 
+    // Peripheral counting: regex patterns keyed by SFR cname
+    let re_uart = Regex::new(r"^U(\d+)MODE$").unwrap();
+    let re_spi = Regex::new(r"^SPI(\d+)CON$").unwrap();
+    let re_i2c = Regex::new(r"^I2C(\d+)CONL$").unwrap();
+    let re_can = Regex::new(r"^C(\d+)CONL$").unwrap();
+    let re_clc = Regex::new(r"^CLC(\d+)CONL$").unwrap();
+    let re_pwm = Regex::new(r"^PG(\d+)CONL$").unwrap();
+    let re_sccp = Regex::new(r"^CCP(\d+)CONL$").unwrap();
+    let re_timer = Regex::new(r"^T(\d+)CON$").unwrap();
+    let re_sent = Regex::new(r"^SENT(\d+)CON$").unwrap();
+    let re_dma = Regex::new(r"^DMACH(\d+)$").unwrap();
+    let re_qei = Regex::new(r"^QEI(\d+)CONL$").unwrap();
+    let re_dac = Regex::new(r"^DAC(\d+)CON$").unwrap();
+
+    let mut seen_uart: HashSet<u32> = HashSet::new();
+    let mut seen_spi: HashSet<u32> = HashSet::new();
+    let mut seen_i2c: HashSet<u32> = HashSet::new();
+    let mut seen_can: HashSet<u32> = HashSet::new();
+    let mut seen_clc_inst: HashSet<u32> = HashSet::new();
+    let mut seen_pwm: HashSet<u32> = HashSet::new();
+    let mut seen_sccp: HashSet<u32> = HashSet::new();
+    let mut seen_timer: HashSet<u32> = HashSet::new();
+    let mut seen_sent: HashSet<u32> = HashSet::new();
+    let mut seen_dma: HashSet<u32> = HashSet::new();
+    let mut seen_qei: HashSet<u32> = HashSet::new();
+    let mut seen_dac: HashSet<u32> = HashSet::new();
+    let mut adc_channels: HashSet<u32> = HashSet::new();
+    let mut comparator_channels: HashSet<u32> = HashSet::new();
+    let mut opamp_count: u32 = 0;
+    let mut has_shrres = false;
+
     let sfr_sector = root
         .descendants()
         .find(|n| n.tag_name().name() == "SFRDataSector");
@@ -559,8 +618,125 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
                     }
                 }
             }
+
+            // --- Peripheral instance counting ---
+            macro_rules! count_peripheral {
+                ($re:expr, $set:expr) => {
+                    if let Some(caps) = $re.captures(cname) {
+                        if let Ok(n) = caps.get(1).unwrap().as_str().parse::<u32>() {
+                            $set.insert(n);
+                        }
+                    }
+                };
+            }
+            count_peripheral!(re_uart, seen_uart);
+            count_peripheral!(re_spi, seen_spi);
+            count_peripheral!(re_i2c, seen_i2c);
+            count_peripheral!(re_can, seen_can);
+            count_peripheral!(re_clc, seen_clc_inst);
+            count_peripheral!(re_pwm, seen_pwm);
+            count_peripheral!(re_sccp, seen_sccp);
+            count_peripheral!(re_timer, seen_timer);
+            count_peripheral!(re_sent, seen_sent);
+            count_peripheral!(re_dma, seen_dma);
+            count_peripheral!(re_qei, seen_qei);
+            count_peripheral!(re_dac, seen_dac);
+
+            // Count ADC channels and comparators from interrupt vector names,
+            // op-amps from AMPEN field defs, and ADC resolution from SHRRES.
+            for fld in sfr
+                .descendants()
+                .filter(|n| n.is_element() && n.tag_name().name() == "SFRFieldDef")
+            {
+                let fname = get_edc_attr(&fld, "cname").unwrap_or("");
+                if let Some(rest) = fname.strip_prefix("AMPEN") {
+                    if rest.chars().all(|c| c.is_ascii_digit()) && !rest.is_empty() {
+                        opamp_count += 1;
+                    }
+                }
+                if fname == "SHRRES" {
+                    has_shrres = true;
+                }
+            }
         }
     }
+
+    // Count ADC channels and comparators from interrupt vector names.
+    // These live in `InterruptList` elements, not SFR registers.
+    let re_adcan = Regex::new(r"^ADCAN(\d+)Interrupt$").unwrap();
+    let re_cmp = Regex::new(r"^CMP(\d+)Interrupt$").unwrap();
+    for node in root.descendants().filter(|n| {
+        n.is_element() && n.tag_name().name() == "Interrupt"
+    }) {
+        let irq_name = get_edc_attr(&node, "cname")
+            .or_else(|| get_edc_attr(&node, "name"))
+            .unwrap_or("");
+        if let Some(caps) = re_adcan.captures(irq_name) {
+            if let Ok(n) = caps.get(1).unwrap().as_str().parse::<u32>() {
+                adc_channels.insert(n);
+            }
+        }
+        if let Some(caps) = re_cmp.captures(irq_name) {
+            if let Ok(n) = caps.get(1).unwrap().as_str().parse::<u32>() {
+                comparator_channels.insert(n);
+            }
+        }
+    }
+
+    // --- Memory region extraction ---
+    let mut ram_bytes: u32 = 0;
+    let mut flash_bytes: u32 = 0;
+
+    // RAM: DataSpace element with largest span (xbeginaddr..xendaddr)
+    for ds in root.descendants().filter(|n| {
+        n.is_element() && n.tag_name().name() == "DataSpace"
+    }) {
+        let begin = parse_int(get_edc_attr(&ds, "xbeginaddr").unwrap_or("0"));
+        let end = parse_int(get_edc_attr(&ds, "xendaddr").unwrap_or("0"));
+        if end > begin {
+            let size = end - begin;
+            if size > ram_bytes {
+                ram_bytes = size;
+            }
+        }
+    }
+
+    // Flash: CodeSector beginaddr..endaddr uses PC byte-addressing
+    // (each 24-bit instruction word occupies 2 PC addresses), so
+    // instruction words = (end - begin) / 2, each word = 3 bytes.
+    for cs in root.descendants().filter(|n| {
+        n.is_element() && n.tag_name().name() == "CodeSector"
+    }) {
+        let begin = parse_int(get_edc_attr(&cs, "beginaddr").unwrap_or("0"));
+        let end = parse_int(get_edc_attr(&cs, "endaddr").unwrap_or("0"));
+        if end > begin {
+            let size = (end - begin) / 2 * 3;
+            if size > flash_bytes {
+                flash_bytes = size;
+            }
+        }
+    }
+
+    let device_info = DeviceInfo {
+        ram_bytes,
+        flash_bytes,
+        adc_channels: adc_channels.len() as u32,
+        adc_max_resolution: if has_shrres { 12 } else { 0 },
+        comparators: comparator_channels.len() as u32,
+        dac_channels: seen_dac.len() as u32,
+        op_amps: opamp_count,
+        pwm_generators: seen_pwm.len() as u32,
+        uarts: seen_uart.len() as u32,
+        spis: seen_spi.len() as u32,
+        i2c: seen_i2c.len() as u32,
+        can: seen_can.len() as u32,
+        clc: seen_clc_inst.len() as u32,
+        timers: seen_timer.len() as u32,
+        sccp_mccp: seen_sccp.len() as u32,
+        sent: seen_sent.len() as u32,
+        dma_channels: seen_dma.len() as u32,
+        qei: seen_qei.len() as u32,
+    };
 
     // Third pass: parse DCR (Device Configuration Register) definitions from
     // `WORMHoleSector` to discover fuse registers, fields, and valid values.
@@ -684,6 +860,7 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
         fuse_defs,
         clc_module_id,
         clc_input_sources: None, // populated later by dfp_manager from static/file mapping
+        device_info,
     })
 }
 

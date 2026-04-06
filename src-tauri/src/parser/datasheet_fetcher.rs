@@ -68,6 +68,11 @@ pub struct DatasheetRef {
     pub datasheet_number: String,   // e.g. DS70005363
     pub datasheet_revision: String, // e.g. DS70005363E
     pub pdf_url: String,
+    /// When the datasheet was resolved from a sibling product page (e.g.
+    /// dsPIC33CDVL64MC106 for a dsPIC33CDV128MC106 query), this field
+    /// records the sibling part slug so the UI can inform the user.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sibling_source: Option<String>,
 }
 
 fn save_metadata(r: &DatasheetRef) {
@@ -177,7 +182,8 @@ fn parse_direct_pdf_url(markdown: &str) -> Option<String> {
 }
 
 fn revision_from_pdf_url(pdf_url: &str) -> Option<String> {
-    let re_rev = Regex::new(r"(?i)\b(DS\d{8}[A-Z])\.pdf\b").unwrap();
+    // Match with revision letter (DS70000657J) or bare number (DS70005539)
+    let re_rev = Regex::new(r"(?i)\b(DS\d{8}[A-Z]?)\.pdf\b").unwrap();
     re_rev
         .captures(pdf_url)
         .and_then(|cap| cap.get(1))
@@ -185,7 +191,8 @@ fn revision_from_pdf_url(pdf_url: &str) -> Option<String> {
 }
 
 fn datasheet_number_from_revision(revision: &str) -> Option<String> {
-    let re_number = Regex::new(r"(?i)\b(DS\d{8})[A-Z]\b").unwrap();
+    // Strip trailing revision letter if present; bare DS number is also valid
+    let re_number = Regex::new(r"(?i)\b(DS\d{8})[A-Z]?\b").unwrap();
     re_number
         .captures(revision)
         .and_then(|cap| cap.get(1))
@@ -224,7 +231,8 @@ fn slugify_title(title: &str) -> String {
 /// Generate candidate revision IDs: hinted first, then recent revisions
 /// down to older ones. Most Microchip datasheets are in the A–H range,
 /// so we search a small high-probability window first, then widen only
-/// if we don't find a hit.
+/// if we don't find a hit. Some datasheets have no revision letter at all
+/// (e.g. DS70005539.pdf), so the bare number is always included.
 fn candidate_revisions(base_number: &str, hint: Option<&str>) -> Vec<String> {
     let mut candidates = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -249,6 +257,9 @@ fn candidate_revisions(base_number: &str, hint: Option<&str>) -> Vec<String> {
         add(&format!("{}{}", base_number, letter));
     }
 
+    // Some datasheets have no revision letter (e.g. DS70005539)
+    add(base_number);
+
     candidates
 }
 
@@ -259,6 +270,35 @@ fn build_candidate_pdf_url(part: &str, title: &str, ds_id: &str) -> String {
         "https://ww1.microchip.com/downloads/aemDocuments/documents/{}/ProductDocuments/DataSheets/{}-{}.pdf",
         root, slug, ds_id
     )
+}
+
+// ---------------------------------------------------------------------------
+// Direct URL probing (bypasses Jina proxy for validation)
+// ---------------------------------------------------------------------------
+
+/// Check whether a PDF URL exists on the Microchip CDN via a HEAD request.
+/// This is much faster and more reliable than routing through the Jina proxy.
+fn probe_pdf_url(url: &str) -> bool {
+    let client = http_client();
+    match client
+        .head(url)
+        .timeout(Duration::from_secs(10))
+        .send()
+    {
+        Ok(resp) => {
+            let status = resp.status();
+            if status.is_success() {
+                // Verify it's actually a PDF (not a redirect to an error page)
+                if let Some(ct) = resp.headers().get("content-type") {
+                    return ct.to_str().unwrap_or("").contains("pdf");
+                }
+                // No content-type header but 200 — assume valid
+                return true;
+            }
+            false
+        }
+        Err(_) => false,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -291,11 +331,170 @@ fn looks_like_datasheet_preview(preview: &str, expected_title: &str, ds_id: &str
 }
 
 // ---------------------------------------------------------------------------
+// Sibling product page discovery via DuckDuckGo
+// ---------------------------------------------------------------------------
+
+const DDG_HTML_URL: &str = "https://html.duckduckgo.com/html/";
+
+/// Search DuckDuckGo for sibling Microchip product pages that may share the
+/// same family datasheet.  Returns up to `limit` product page URLs.
+fn search_sibling_product_pages(part: &str, limit: usize) -> Vec<String> {
+    let query = format!("{} datasheet site:microchip.com/en-us/product", part);
+    let client = http_client();
+    let resp = match client
+        .post(DDG_HTML_URL)
+        .form(&[("q", query.as_str())])
+        .timeout(Duration::from_secs(15))
+        .send()
+    {
+        Ok(r) => r,
+        Err(e) => {
+            log::warn!("sibling search failed: {e}");
+            return Vec::new();
+        }
+    };
+
+    let body = match resp.text() {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+
+    // Extract Microchip product URLs from DuckDuckGo result links
+    let re = Regex::new(
+        r"(?i)https?://www\.microchip\.com/en[/-]us/product/([a-z0-9]+)"
+    ).unwrap();
+
+    let mut seen = std::collections::HashSet::new();
+    let part_lower = part.to_lowercase();
+    let mut urls = Vec::new();
+
+    for cap in re.captures_iter(&body) {
+        let slug = cap[1].to_lowercase();
+        // Skip the exact part we already tried
+        if slug == part_lower {
+            continue;
+        }
+        if seen.insert(slug.clone()) {
+            urls.push(format!(
+                "https://www.microchip.com/en-us/product/{}",
+                slug
+            ));
+            if urls.len() >= limit {
+                break;
+            }
+        }
+    }
+
+    urls
+}
+
+// ---------------------------------------------------------------------------
+// Core resolution from a rendered product page
+// ---------------------------------------------------------------------------
+
+/// Try to build a DatasheetRef from rendered product page markdown.  Returns
+/// `None` if the page didn't contain parseable datasheet information.
+fn try_resolve_from_page(
+    part_upper: &str,
+    product_url: &str,
+    page_text: &str,
+) -> Option<DatasheetRef> {
+    let (title, ds_number) = match parse_product_page(page_text) {
+        Ok(v) => v,
+        Err(_) => return None,
+    };
+
+    // Prefer the exact PDF URL already linked from the product page
+    if let Some(pdf_url) = parse_direct_pdf_url(page_text) {
+        let datasheet_revision = revision_from_pdf_url(&pdf_url)
+            .unwrap_or_else(|| ds_number.clone());
+        let datasheet_number =
+            datasheet_number_from_revision(&datasheet_revision).unwrap_or(ds_number.clone());
+
+        if probe_pdf_url(&pdf_url) {
+            log::info!(
+                "resolve: found direct datasheet URL for {} ({})",
+                part_upper,
+                datasheet_revision
+            );
+            return Some(DatasheetRef {
+                part_number: part_upper.to_string(),
+                product_url: product_url.to_string(),
+                datasheet_title: title,
+                datasheet_number,
+                datasheet_revision,
+                pdf_url,
+                sibling_source: None,
+            });
+        }
+        log::warn!("resolve: direct PDF URL returned non-200: {}", pdf_url);
+    }
+
+    // Try candidate revisions via HEAD probes
+    let revisions = candidate_revisions(&ds_number, None);
+    log::info!(
+        "resolve: trying {} candidate revisions for {}",
+        revisions.len(),
+        part_upper
+    );
+
+    for (i, rev) in revisions.iter().enumerate() {
+        let pdf_url = build_candidate_pdf_url(part_upper, &title, rev);
+        if probe_pdf_url(&pdf_url) {
+            log::info!("resolve: HEAD hit for {} after {} probes", rev, i + 1);
+            return Some(DatasheetRef {
+                part_number: part_upper.to_string(),
+                product_url: product_url.to_string(),
+                datasheet_title: title.clone(),
+                datasheet_number: ds_number.clone(),
+                datasheet_revision: rev.clone(),
+                pdf_url,
+                sibling_source: None,
+            });
+        }
+    }
+
+    // Fallback: proxy-based preview validation
+    for (i, rev) in revisions.iter().enumerate() {
+        let pdf_url = build_candidate_pdf_url(part_upper, &title, rev);
+        let proxied_pdf = proxy_url(&pdf_url);
+
+        let preview = match fetch_text(&proxied_pdf, 8) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+
+        let preview_short = if preview.len() > 2000 {
+            &preview[..2000]
+        } else {
+            &preview
+        };
+
+        if looks_like_datasheet_preview(preview_short, &title, rev) {
+            log::info!("resolve: proxy hit for {} after {} probes", rev, i + 1);
+            return Some(DatasheetRef {
+                part_number: part_upper.to_string(),
+                product_url: product_url.to_string(),
+                datasheet_title: title.clone(),
+                datasheet_number: ds_number.clone(),
+                datasheet_revision: rev.clone(),
+                pdf_url,
+                sibling_source: None,
+            });
+        }
+    }
+
+    None
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Resolve the datasheet reference for a part number. Uses cache, then
+/// Resolve the datasheet reference for a part number.  Uses cache, then
 /// fetches the Microchip product page via proxy to discover the PDF URL.
+/// If the primary product page fails to render (common for JS-heavy pages),
+/// searches for sibling product pages from the same device family.
 pub fn resolve(part_number: &str) -> Result<DatasheetRef, String> {
     let part_upper = part_number.to_uppercase();
 
@@ -309,78 +508,56 @@ pub fn resolve(part_number: &str) -> Result<DatasheetRef, String> {
     let proxied = proxy_url(&product_url);
     let page_text = fetch_text(&proxied, 30)?;
 
-    // 3. Parse title and DS number
-    let (title, ds_number) = parse_product_page(&page_text)?;
-
-    // 4. Prefer the exact PDF URL already linked from the product page. This
-    // avoids brute-forcing 26 revision letters when Microchip has already
-    // published the final datasheet URL in the page content.
-    if let Some(pdf_url) = parse_direct_pdf_url(&page_text) {
-        if let Some(datasheet_revision) = revision_from_pdf_url(&pdf_url) {
-            let datasheet_number =
-                datasheet_number_from_revision(&datasheet_revision).unwrap_or(ds_number.clone());
-            log::info!(
-                "resolve: found direct datasheet URL for {} ({})",
-                part_upper,
-                datasheet_revision
-            );
-            let ds_ref = DatasheetRef {
-                part_number: part_upper.clone(),
-                product_url: product_url.clone(),
-                datasheet_title: title.clone(),
-                datasheet_number,
-                datasheet_revision,
-                pdf_url,
-            };
-            save_metadata(&ds_ref);
-            return Ok(ds_ref);
-        }
+    // 3. Try to resolve from the primary product page
+    if let Some(mut ds_ref) = try_resolve_from_page(&part_upper, &product_url, &page_text) {
+        ds_ref.part_number = part_upper.clone();
+        save_metadata(&ds_ref);
+        return Ok(ds_ref);
     }
 
-    // 5. Try candidate revisions — high-probability first (H→A), then I→Z.
-    //    Use a short timeout per probe to avoid hanging on slow proxy responses.
-    let revisions = candidate_revisions(&ds_number, None);
+    // 4. Primary page didn't render (JS-only shell).  Search DuckDuckGo for
+    //    sibling product pages from the same family — those often share the
+    //    same family datasheet PDF.
     log::info!(
-        "resolve: trying {} candidate revisions for {}",
-        revisions.len(),
+        "resolve: primary product page for {} did not contain datasheet info, trying siblings",
         part_upper
     );
+    let siblings = search_sibling_product_pages(&part_upper, 5);
+    log::info!("resolve: found {} sibling product pages", siblings.len());
 
-    for (i, rev) in revisions.iter().enumerate() {
-        let pdf_url = build_candidate_pdf_url(&part_upper, &title, rev);
-        let proxied_pdf = proxy_url(&pdf_url);
-
-        // Quick probe with short timeout — most misses fail fast
-        let preview = match fetch_text(&proxied_pdf, 8) {
+    for sibling_url in &siblings {
+        let proxied_sibling = proxy_url(sibling_url);
+        let sibling_text = match fetch_text(&proxied_sibling, 30) {
             Ok(t) => t,
-            Err(_) => continue,
+            Err(e) => {
+                log::warn!("resolve: sibling page fetch failed: {e}");
+                continue;
+            }
         };
 
-        let preview_short = if preview.len() > 2000 {
-            &preview[..2000]
-        } else {
-            &preview
-        };
-
-        if looks_like_datasheet_preview(preview_short, &title, rev) {
-            log::info!("resolve: found {} after {} probes", rev, i + 1);
-            let ds_ref = DatasheetRef {
-                part_number: part_upper.clone(),
-                product_url: product_url.clone(),
-                datasheet_title: title.clone(),
-                datasheet_number: ds_number.clone(),
-                datasheet_revision: rev.clone(),
-                pdf_url: pdf_url.clone(),
-            };
+        if let Some(mut ds_ref) = try_resolve_from_page(&part_upper, sibling_url, &sibling_text) {
+            // Extract the sibling part slug from the URL for user-facing messaging
+            let sibling_slug = sibling_url
+                .rsplit('/')
+                .next()
+                .unwrap_or(sibling_url)
+                .to_string();
+            log::info!(
+                "resolve: using sibling {} datasheet for {}",
+                sibling_slug,
+                part_upper
+            );
+            ds_ref.part_number = part_upper.clone();
+            ds_ref.sibling_source = Some(sibling_slug);
             save_metadata(&ds_ref);
             return Ok(ds_ref);
         }
     }
 
     Err(format!(
-        "Could not resolve datasheet for {} (tried {} revisions)",
+        "Could not resolve datasheet for {} (primary page unrenderable, tried {} siblings)",
         part_upper,
-        revisions.len()
+        siblings.len()
     ))
 }
 
@@ -419,7 +596,10 @@ pub fn get_or_fetch_text(part_number: &str, pdf_url: &str) -> Result<String, Str
 
 #[cfg(test)]
 mod tests {
-    use super::{datasheet_number_from_revision, parse_direct_pdf_url, revision_from_pdf_url};
+    use super::{
+        candidate_revisions, datasheet_number_from_revision, parse_direct_pdf_url,
+        revision_from_pdf_url,
+    };
 
     #[test]
     fn extracts_direct_pdf_url_from_product_page_markdown() {
@@ -438,16 +618,44 @@ Data Sheet:
     }
 
     #[test]
-    fn extracts_revision_from_pdf_url() {
+    fn extracts_revision_from_pdf_url_with_letter() {
         let pdf_url = "https://ww1.microchip.com/downloads/aemDocuments/documents/MCU16/ProductDocuments/DataSheets/dsPIC33EPXXXGP50X-dsPIC33EPXXXMC20X-50X-and-PIC24EPXXXGP-MC20X-Family-Data-Sheet-DS70000657J.pdf";
         assert_eq!(revision_from_pdf_url(pdf_url).as_deref(), Some("DS70000657J"));
     }
 
     #[test]
-    fn extracts_datasheet_number_from_revision() {
+    fn extracts_revision_from_pdf_url_without_letter() {
+        let pdf_url = "https://ww1.microchip.com/downloads/aemDocuments/documents/MCU16/ProductDocuments/DataSheets/dsPIC33AK128MC106-Family-Data-Sheet-DS70005539.pdf";
+        assert_eq!(revision_from_pdf_url(pdf_url).as_deref(), Some("DS70005539"));
+    }
+
+    #[test]
+    fn extracts_datasheet_number_from_revision_with_letter() {
         assert_eq!(
             datasheet_number_from_revision("DS70000657J").as_deref(),
             Some("DS70000657")
         );
+    }
+
+    #[test]
+    fn extracts_datasheet_number_from_bare_ds_number() {
+        assert_eq!(
+            datasheet_number_from_revision("DS70005539").as_deref(),
+            Some("DS70005539")
+        );
+    }
+
+    #[test]
+    fn candidate_revisions_includes_bare_number() {
+        let candidates = candidate_revisions("DS70005539", None);
+        assert!(candidates.contains(&"DS70005539".to_string()));
+        // Bare number should be last (after all lettered variants)
+        assert_eq!(candidates.last().unwrap(), "DS70005539");
+    }
+
+    #[test]
+    fn candidate_revisions_respects_hint() {
+        let candidates = candidate_revisions("DS70005539", Some("DS70005539C"));
+        assert_eq!(candidates[0], "DS70005539C");
     }
 }

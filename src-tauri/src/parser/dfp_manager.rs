@@ -533,8 +533,23 @@ fn extract_compiler_support_from_atpack(atpack_path: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Extract the dsPIC33 performance-family prefix (e.g. "CDV", "CDVL", "CK")
+/// from a part number string.  Returns `None` for non-dsPIC33 parts.
+fn dspic33_family(part: &str) -> Option<&str> {
+    let upper = part.strip_prefix("DSPIC33").or_else(|| part.strip_prefix("dsPIC33"))?;
+    // Longest match first: CDVL before CDV, EDV before EV/EP
+    for fam in &["CDVL", "CDV", "EDV", "AK", "CH", "CK", "EV", "EP"] {
+        if upper.starts_with(fam) {
+            return Some(&upper[..fam.len()]);
+        }
+    }
+    None
+}
+
 fn load_pinout_overlays(device: &mut DeviceData) {
     let re_suffix = Regex::new(r"_\d+$").unwrap();
+    let re_paren_device = Regex::new(r"\(([^)]+)\)").unwrap();
+    let device_family = dspic33_family(&device.part_number).map(|s| s.to_string());
 
     for root in read_roots() {
         let overlay_path = root
@@ -568,6 +583,21 @@ fn load_pinout_overlays(device: &mut DeviceData) {
                 }
                 if pkg_data.get("source").and_then(|s| s.as_str()) != Some("overlay") {
                     continue;
+                }
+
+                // When using a sibling-family datasheet the LLM may extract
+                // packages for multiple family variants (e.g. CDV *and* CDVL).
+                // Only keep packages whose parenthesized device belongs to the
+                // same performance family as the loaded device.
+                if let Some(ref dev_fam) = device_family {
+                    if let Some(caps) = re_paren_device.captures(pkg_name) {
+                        let inner = caps.get(1).unwrap().as_str();
+                        if let Some(pkg_fam) = dspic33_family(inner) {
+                            if pkg_fam != dev_fam.as_str() {
+                                continue;
+                            }
+                        }
+                    }
                 }
 
                 let mut pin_map: HashMap<u32, String> = HashMap::new();
@@ -623,7 +653,7 @@ fn load_pinout_overlays(device: &mut DeviceData) {
     }
 }
 
-pub fn get_cached_device(part_number: &str) -> Option<(DeviceData, bool)> {
+pub fn get_cached_device(part_number: &str) -> Option<(DeviceData, bool, bool)> {
     let filename = format!("{}.json", part_number.to_uppercase());
 
     for root in read_roots() {
@@ -632,8 +662,9 @@ pub fn get_cached_device(part_number: &str) -> Option<(DeviceData, bool)> {
         if json_path.exists() {
             if let Ok(text) = fs::read_to_string(&json_path) {
                 let has_clc_key = text.contains("\"clc_module_id\"");
+                let has_device_info = text.contains("\"device_info\"");
                 if let Ok(device) = DeviceData::from_json(&text) {
-                    return Some((device, has_clc_key));
+                    return Some((device, has_clc_key, has_device_info));
                 }
             }
         }
@@ -720,13 +751,13 @@ pub fn load_device(part_number: &str) -> Option<DeviceData> {
     //   - empty fuse_defs: predates DCR parsing pass
     //   - any field with empty values: predates range-field filtering
     //   - missing clc_module_id key: predates CLC module detection pass
-    if let Some((mut cached, has_clc_key)) = get_cached_device(&part_upper) {
+    if let Some((mut cached, has_clc_key, has_device_info)) = get_cached_device(&part_upper) {
         let fuse_stale = cached.fuse_defs.is_empty()
             || cached
                 .fuse_defs
                 .iter()
                 .any(|r| r.fields.iter().any(|f| f.values.is_empty()));
-        if !fuse_stale && has_clc_key {
+        if !fuse_stale && has_clc_key && has_device_info {
             load_pinout_overlays(&mut cached);
             load_clc_sources(&mut cached);
             return Some(cached);
@@ -1010,6 +1041,7 @@ pub fn cache_datasheet(part_number: &str, pdf_bytes: &[u8]) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::edc_parser::DeviceInfo;
 
     fn test_device(default_name: &str, default_pinout: Pinout, extra_pinouts: Vec<(String, Pinout)>) -> DeviceData {
         let mut pinouts = HashMap::new();
@@ -1032,6 +1064,7 @@ mod tests {
             fuse_defs: Vec::new(),
             clc_module_id: None,
             clc_input_sources: None,
+            device_info: DeviceInfo::default(),
         }
     }
 

@@ -7,6 +7,8 @@
 
 /** @type {Object|null} Last verification result */
 let verifyResult = null;
+/** @type {string|null} Sibling part slug when datasheet came from a related device */
+let verifySiblingSource = null;
 let clcVerifyJob = null;
 let clcVerifyPartNumber = null;
 
@@ -157,7 +159,7 @@ function renderVerificationTabs(pkgNames, loadedPackage, result) {
         const pkg = result.packages[name];
         const isLoaded = name.toUpperCase() === loadedPackage.toUpperCase();
         const correctionCount = (pkg.corrections || []).length;
-        const scoreText = isLoaded
+        const scoreText = pkg.match_score != null
             ? ` <span class="verify-score ${verificationScoreClass(pkg.match_score)}">${Math.round(pkg.match_score * 100)}%</span>`
             : '';
         const badge = correctionCount > 0 ? ` <span class="verify-corr-badge">${correctionCount}</span>` : '';
@@ -380,6 +382,22 @@ function renderVerificationTimingNote() {
         </div>`;
 }
 
+function renderSiblingDatasheetNotice() {
+    if (!verifySiblingSource || !deviceData) {
+        return '';
+    }
+    return `
+        <div class="verify-sibling-notice">
+            <strong>Note:</strong> No dedicated datasheet was found for
+            <strong>${escapeHtml(deviceData.part_number)}</strong>.
+            Verification is using the sibling family datasheet from
+            <strong>${escapeHtml(verifySiblingSource)}</strong>
+            (same pin-number suffix). Pin assignments should match,
+            but double-check against the official datasheet when it
+            becomes available.
+        </div>`;
+}
+
 function renderSyntheticPackageNotice() {
     if (!deviceData || !isSyntheticPackage(deviceData.selected_package)) {
         return '';
@@ -528,8 +546,13 @@ async function verifyPinout() {
         if (found?.base64) {
             pdfBase64 = found.base64;
             pdfName = found.name;
+            verifySiblingSource = found.sibling_source || null;
             const source = found.source === 'downloaded' ? 'downloaded' : 'cached';
-            setStatus(`Found datasheet (${source}): ${found.name}`);
+            if (verifySiblingSource) {
+                setStatus(`Using sibling family datasheet (${source}): ${found.datasheet_title || found.name}`);
+            } else {
+                setStatus(`Found datasheet (${source}): ${found.name}`);
+            }
         } else if (found?.text) {
             datasheetText = found.text;
             pdfName = found.name;
@@ -630,6 +653,7 @@ function renderVerifyResult(result) {
     }
 
     let html = '';
+    html += renderSiblingDatasheetNotice();
     html += renderSyntheticPackageNotice();
     html += renderVerificationTimingNote();
     if (result.notes?.length) {

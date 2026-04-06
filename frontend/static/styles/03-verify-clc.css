@@ -99,6 +99,45 @@
     line-height: 1.6;
 }
 
+/* --- Device Info tab --- */
+.device-info {
+    padding: 16px 20px;
+    overflow-y: auto;
+    max-height: 100%;
+}
+
+.info-section {
+    margin-bottom: 20px;
+}
+
+.info-section h2 {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--accent2);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 4px;
+}
+
+.info-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+
+.info-table td {
+    padding: 3px 8px 3px 0;
+    vertical-align: top;
+}
+
+.info-table .info-label {
+    color: var(--text-dim);
+    white-space: nowrap;
+    width: 130px;
+}
+
 /* --- CLC Designer --- */
 .clc-tab-content {
     gap: 0;
@@ -625,6 +664,21 @@
     color: var(--text-dim);
     font-size: 0.77rem;
     line-height: 1.55;
+}
+
+.verify-sibling-notice {
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    background: color-mix(in srgb, var(--accent2) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent2) 34%, transparent);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 0.77rem;
+    line-height: 1.55;
+}
+
+.verify-sibling-notice strong {
+    color: var(--accent2);
 }
 
 .verify-synthetic-notice {

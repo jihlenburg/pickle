@@ -75,13 +75,26 @@ pub async fn find_datasheet(app: AppHandle, part_number: String) -> Result<Optio
             }
         };
 
+        let sibling_note = if let Some(ref sibling) = ds_ref.sibling_source {
+            format!(
+                " (using sibling {} family datasheet — no dedicated datasheet found for {})",
+                sibling, pn
+            )
+        } else {
+            String::new()
+        };
+
         emit(
             pinout_verifier::VerifyProgressUpdate::new(
                 "datasheet.download",
                 0.16,
-                format!("Downloading datasheet {}", ds_ref.datasheet_revision),
+                format!("Downloading datasheet {}{}", ds_ref.datasheet_revision, sibling_note),
             )
-            .detail("The PDF is cached locally after download so later runs can skip this step."),
+            .detail(if ds_ref.sibling_source.is_some() {
+                "No product-specific datasheet was found. Using a sibling device's family datasheet with the same pin-number suffix."
+            } else {
+                "The PDF is cached locally after download so later runs can skip this step."
+            }),
         );
         info!("find_datasheet: downloading PDF from {}", ds_ref.pdf_url);
         match datasheet_fetcher::get_or_download_pdf(&pn, &ds_ref.pdf_url) {
@@ -91,7 +104,7 @@ pub async fn find_datasheet(app: AppHandle, part_number: String) -> Result<Optio
                     pinout_verifier::VerifyProgressUpdate::new(
                         "datasheet.download",
                         0.2,
-                        format!("Downloaded {name}"),
+                        format!("Downloaded {name}{}", sibling_note),
                     )
                     .detail("Verification will use this cached PDF on later runs."),
                 );
@@ -100,6 +113,8 @@ pub async fn find_datasheet(app: AppHandle, part_number: String) -> Result<Optio
                     "base64": encode_base64(&bytes),
                     "source": "downloaded",
                     "revision": ds_ref.datasheet_revision,
+                    "sibling_source": ds_ref.sibling_source,
+                    "datasheet_title": ds_ref.datasheet_title,
                 })));
             }
             Err(error) => {
