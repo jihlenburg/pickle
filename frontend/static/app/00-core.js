@@ -91,7 +91,7 @@ let indexCatalogState = {
     isStale: true,
 };
 
-/** @type {{appearance:{theme:string}, startup:{device:string, package:string}, toolchain:{fallback_compiler:string, family_compilers:{pic24:string, dspic33:string}}, codegen:{output_basename:string}, last_used:{part_number:string, package:string}}} */
+/** @type {{appearance:{theme:string}, startup:{device:string, package:string}, toolchain:{fallback_compiler:string, family_compilers:{pic24:string, dspic33:string}}, codegen:{output_basename:string}, verification:{provider:string}, last_used:{part_number:string, package:string}}} */
 let appSettings = defaultAppSettings();
 
 function defaultAppSettings() {
@@ -435,6 +435,7 @@ async function loadDevice(pkg, options = {}) {
 
         // Initialize CLC designer
         if (!preserveState) initClcConfig();
+        updateClcTabState();
         renderClcDesigner();
 
         // Show the view toggle once a device is loaded
@@ -576,6 +577,11 @@ async function loadAppSettings() {
             codegen: {
                 output_basename: model.normalizeOutputBasename(
                     settings.codegen?.output_basename || defaultAppSettings().codegen.output_basename
+                ),
+            },
+            verification: {
+                provider: model.normalizeVerificationProvider(
+                    settings.verification?.provider || defaultAppSettings().verification.provider
                 ),
             },
             last_used: {

@@ -36,6 +36,7 @@ pub fn load_device(part_number: String, package: Option<String>) -> Result<Value
         "selected_package": selected_pkg,
         "packages": device_packages(&device),
         "pin_count": pinout.pin_count,
+        "has_clc": device.clc_module_id.is_some(),
         "pins": resolved_pins,
         "remappable_inputs": device.remappable_inputs,
         "remappable_outputs": device.remappable_outputs,

@@ -25,7 +25,9 @@ pub use dialogs::{
     delete_file_path, export_generated_files_dialog, open_binary_file_dialog,
     open_text_file_dialog, save_text_file_dialog, write_text_file_path,
 };
-pub use settings_state::{load_app_settings, remember_last_used_device, set_theme_mode};
+pub use settings_state::{
+    load_app_settings, remember_last_used_device, set_theme_mode, set_verify_provider,
+};
 pub use toolchain::{compile_check, compiler_info};
 pub use keychain::{api_key_details, delete_api_key, save_api_key};
 pub use verification::{api_key_status, apply_overlay, find_datasheet, verify_pinout};

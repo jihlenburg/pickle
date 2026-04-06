@@ -29,6 +29,36 @@ let clcActiveModule = 1;
 const CLC_MODULE_COUNT = clcModel.MODULE_COUNT;
 const CLC_MODES = clcModel.MODES;
 
+function deviceHasClc() {
+    return !!deviceData?.has_clc;
+}
+
+function clcEmptyMessage() {
+    if (!deviceData) {
+        return 'Load a device to configure CLC modules.';
+    }
+    if (!deviceHasClc()) {
+        return 'This device has no CLC peripheral. The CLC editor and datasheet CLC lookup are disabled for this part.';
+    }
+    return 'CLC input sources are not available yet. Verify the datasheet to import them if needed.';
+}
+
+function updateClcTabState() {
+    const tab = document.querySelector('.right-tab[data-tab="clc"]');
+    if (!tab) return;
+
+    const disabled = !!deviceData && !deviceHasClc();
+    tab.disabled = disabled;
+    tab.classList.toggle('is-disabled', disabled);
+    tab.title = disabled
+        ? 'This device has no CLC peripheral.'
+        : 'Configure CLC modules';
+
+    if (disabled && tab.classList.contains('active') && typeof switchRightTab === 'function') {
+        switchRightTab('code');
+    }
+}
+
 /** Initialize CLC config state for all modules. */
 function initClcConfig() {
     clcConfig = clcModel.createDefaultConfig();
@@ -55,10 +85,20 @@ function hex16(val) {
 
 /** Render the full CLC designer panel for the active module. */
 function renderClcDesigner() {
-    if (!deviceData) return;
+    const designer = document.getElementById('clc-designer');
+    const empty = document.getElementById('clc-empty');
+    if (!designer || !empty) return;
 
-    document.getElementById('clc-designer').style.display = '';
-    document.getElementById('clc-empty').style.display = 'none';
+    if (!deviceData || !deviceHasClc()) {
+        designer.style.display = 'none';
+        empty.style.display = '';
+        empty.textContent = clcEmptyMessage();
+        return;
+    }
+
+    designer.style.display = '';
+    empty.style.display = 'none';
+    empty.textContent = clcEmptyMessage();
 
     renderClcModuleTabs();
     renderClcInputs();

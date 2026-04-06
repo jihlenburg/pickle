@@ -6,11 +6,14 @@
 //! split across multiple directories.
 
 use regex::Regex;
+use log::warn;
+use pdfium_auto::bind_pdfium_silent;
 use serde_json;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use tempfile::NamedTempFile;
 
 use crate::parser::edc_parser::{parse_edc_file, DeviceData, Pad, Pinout};
 use crate::parser::pack_index;
@@ -134,6 +137,113 @@ pub fn datasheets_dir() -> PathBuf {
     let dir = dfp_cache_dir().join("datasheets");
     let _ = fs::create_dir_all(&dir);
     dir
+}
+
+fn datasheet_family_markers(part_number: &str) -> Vec<String> {
+    let part_upper = part_number.trim().to_uppercase();
+    let mut markers = vec![part_upper.clone()];
+
+    let re = Regex::new(r"^((?:DSPIC|PIC)\d+[A-Z]+)").unwrap();
+    if let Some(family) = re
+        .captures(&part_upper)
+        .and_then(|caps| caps.get(1))
+        .map(|m| m.as_str().to_string())
+    {
+        if !markers.contains(&family) {
+            markers.push(family);
+        }
+    }
+
+    markers
+}
+
+fn summarize_probe_excerpt(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(3)
+        .collect::<Vec<_>>()
+        .join(" / ")
+}
+
+fn extract_datasheet_probe_text(pdf_bytes: &[u8]) -> Result<String, String> {
+    let temp_pdf = NamedTempFile::new().map_err(|error| format!("Tempfile error: {error}"))?;
+    fs::write(temp_pdf.path(), pdf_bytes)
+        .map_err(|error| format!("Failed to write temporary PDF: {error}"))?;
+
+    let pdfium = bind_pdfium_silent().map_err(|error| format!("Failed to bind PDFium: {error}"))?;
+    let document = pdfium
+        .load_pdf_from_file(temp_pdf.path(), None)
+        .map_err(|error| format!("Failed to open PDF: {error}"))?;
+
+    let page_count = document.pages().len().min(4);
+    let mut probe = String::new();
+    for index in 0..page_count {
+        let page = document
+            .pages()
+            .get(index as u16)
+            .map_err(|error| format!("Failed to access PDF page {}: {error}", index + 1))?;
+        let page_text = page
+            .text()
+            .map_err(|error| format!("Failed to extract text from PDF page {}: {error}", index + 1))?
+            .all();
+        if !page_text.trim().is_empty() {
+            probe.push_str(&page_text);
+            probe.push('\n');
+        }
+    }
+
+    Ok(probe)
+}
+
+pub fn datasheet_pdf_mismatch_reason(pdf_bytes: &[u8], part_number: &str) -> Option<String> {
+    let markers = datasheet_family_markers(part_number);
+    match extract_datasheet_probe_text(pdf_bytes) {
+        Ok(text) => {
+            if text.trim().is_empty() {
+                return None;
+            }
+
+            let uppercase_text = text.to_uppercase();
+            if markers.iter().any(|marker| uppercase_text.contains(marker)) {
+                return None;
+            }
+
+            let excerpt = summarize_probe_excerpt(&text);
+            Some(format!(
+                "Selected datasheet does not appear to match {}. Expected to find {} in the opening pages, but saw: {}",
+                part_number.to_uppercase(),
+                markers.join(" or "),
+                excerpt
+            ))
+        }
+        Err(error) => {
+            warn!(
+                "datasheet validation skipped for {} because PDF probing failed: {}",
+                part_number,
+                error
+            );
+            None
+        }
+    }
+}
+
+fn local_datasheet_matches_part(path: &Path, part_number: &str) -> bool {
+    let Ok(bytes) = fs::read(path) else {
+        return false;
+    };
+
+    if let Some(reason) = datasheet_pdf_mismatch_reason(&bytes, part_number) {
+        warn!(
+            "Ignoring local datasheet candidate {} for {}: {}",
+            path.display(),
+            part_number,
+            reason
+        );
+        return false;
+    }
+
+    true
 }
 
 pub fn pinouts_dir() -> PathBuf {
@@ -800,7 +910,7 @@ pub fn find_local_datasheet(part_number: &str) -> Option<PathBuf> {
         .join("datasheets")
         .join("pdf")
         .join(format!("{}.pdf", part_upper));
-    if fetcher_pdf.exists() {
+    if fetcher_pdf.exists() && local_datasheet_matches_part(&fetcher_pdf, &part_upper) {
         return Some(fetcher_pdf);
     }
 
@@ -820,7 +930,9 @@ pub fn find_local_datasheet(part_number: &str) -> Option<PathBuf> {
                     .to_string_lossy()
                     .to_uppercase();
                 if stem.contains(&part_upper) {
-                    return Some(path);
+                    if local_datasheet_matches_part(&path, &part_upper) {
+                        return Some(path);
+                    }
                 }
             }
         }
@@ -858,11 +970,15 @@ pub fn find_local_datasheet(part_number: &str) -> Option<PathBuf> {
                     .to_string_lossy()
                     .to_lowercase();
                 if name_lower.contains(&part_lower) {
-                    return Some(path);
+                    if local_datasheet_matches_part(&path, &part_upper) {
+                        return Some(path);
+                    }
                 }
                 if !family_lower.is_empty() && name_lower.contains(&family_lower) && best.is_none()
                 {
-                    best = Some(path);
+                    if local_datasheet_matches_part(&path, &part_upper) {
+                        best = Some(path);
+                    }
                 }
             }
             if best.is_some() {
@@ -876,6 +992,15 @@ pub fn find_local_datasheet(part_number: &str) -> Option<PathBuf> {
 
 /// Cache a datasheet PDF so future lookups find it without prompting.
 pub fn cache_datasheet(part_number: &str, pdf_bytes: &[u8]) -> Option<PathBuf> {
+    if let Some(reason) = datasheet_pdf_mismatch_reason(pdf_bytes, part_number) {
+        warn!(
+            "Skipping datasheet cache write for {} because the PDF does not match the selected part: {}",
+            part_number,
+            reason
+        );
+        return None;
+    }
+
     let dir = datasheets_dir();
     let path = dir.join(format!("{}.pdf", part_number.to_uppercase()));
     fs::write(&path, pdf_bytes).ok()?;
@@ -908,6 +1033,18 @@ mod tests {
             clc_module_id: None,
             clc_input_sources: None,
         }
+    }
+
+    #[test]
+    fn datasheet_family_markers_include_exact_part_and_family_prefix() {
+        assert_eq!(
+            datasheet_family_markers("DSPIC33CDV128MC106"),
+            vec!["DSPIC33CDV128MC106".to_string(), "DSPIC33CDV".to_string()]
+        );
+        assert_eq!(
+            datasheet_family_markers("PIC24EP128MC206"),
+            vec!["PIC24EP128MC206".to_string(), "PIC24EP".to_string()]
+        );
     }
 
     #[test]

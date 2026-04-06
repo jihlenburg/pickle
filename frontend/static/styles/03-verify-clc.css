@@ -47,6 +47,16 @@
     color: var(--accent2);
     border-bottom-color: var(--accent2);
 }
+.right-tab.is-disabled,
+.right-tab:disabled {
+    color: var(--text-dim);
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+.right-tab.is-disabled:hover,
+.right-tab:disabled:hover {
+    color: var(--text-dim);
+}
 .right-tab-content {
     display: none;
     flex-direction: column;

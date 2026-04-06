@@ -261,6 +261,20 @@
                         <code>.env</code> files are still honoured as fallbacks.
                     </p>
 
+                    <div class="key-row" data-setting="verification-provider">
+                        <label class="key-label" for="verify-provider-select">Verification Provider</label>
+                        <div class="key-field">
+                            <select class="key-input" id="verify-provider-select">
+                                <option value="auto">Auto (prefer OpenAI)</option>
+                                <option value="openai">OpenAI only</option>
+                                <option value="anthropic">Anthropic only</option>
+                            </select>
+                        </div>
+                        <div class="key-status" id="verify-provider-status">
+                            Choose which provider pickle should use for datasheet verification.
+                        </div>
+                    </div>
+
                     <div class="key-row" data-provider="openai">
                         <label class="key-label">OpenAI</label>
                         <div class="key-field">

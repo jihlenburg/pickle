@@ -44,12 +44,20 @@
         };
     }
 
+    function normalizeVerificationProvider(provider) {
+        const normalized = String(provider || '').trim().toLowerCase();
+        return ['auto', 'openai', 'anthropic'].includes(normalized)
+            ? normalized
+            : 'auto';
+    }
+
     function defaultAppSettings() {
         return {
             appearance: { theme: appConfig.defaults.themeMode },
             startup: { device: 'last-used', package: '' },
             toolchain: defaultToolchainSettings(),
             codegen: defaultCodegenSettings(),
+            verification: { provider: 'auto' },
             last_used: { part_number: '', package: '' },
         };
     }
@@ -259,6 +267,7 @@
         defaultAppSettings,
         defaultToolchainSettings,
         defaultCodegenSettings,
+        normalizeVerificationProvider,
         normalizeThemeMode,
         normalizeOutputBasename,
         resolveStartupTarget,

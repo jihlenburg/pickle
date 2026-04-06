@@ -150,6 +150,14 @@ function wireShellEventListeners() {
 
 // Right-panel tab switching (Code / Verification)
 function switchRightTab(tabName) {
+    const targetTab = document.querySelector(`.right-tab[data-tab="${tabName}"]`);
+    if (targetTab?.disabled || targetTab?.classList.contains('is-disabled')) {
+        if (tabName === 'clc' && typeof setStatus === 'function') {
+            setStatus('This device has no CLC peripheral.');
+        }
+        return;
+    }
+
     document.querySelectorAll('.right-tab').forEach((tab) => {
         tab.classList.toggle('active', tab.dataset.tab === tabName);
     });

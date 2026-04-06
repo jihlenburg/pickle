@@ -21,6 +21,13 @@ pub fn set_theme_mode(theme: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn set_verify_provider(provider: String) -> Result<(), String> {
+    let mut settings = settings::load()?;
+    settings.verification.provider = provider;
+    settings::save(&settings.normalized())
+}
+
+#[tauri::command]
 pub fn remember_last_used_device(
     part_number: String,
     package: Option<String>,

@@ -78,6 +78,7 @@ fn main() -> Result<(), String> {
 
     let mut args: Vec<String> = env::args().skip(1).collect();
     let mut api_key: Option<String> = None;
+    let mut task = "pinout".to_string();
     if let Some(arg) = args.first().cloned() {
         if let Some(provider) = arg.strip_prefix("--provider=") {
             let var_name = match provider {
@@ -86,6 +87,12 @@ fn main() -> Result<(), String> {
                 other => return Err(format!("unsupported provider override: {other}")),
             };
             api_key = Some(read_key_from_dotenv(var_name)?);
+            args.remove(0);
+        }
+    }
+    if let Some(arg) = args.first().cloned() {
+        if let Some(value) = arg.strip_prefix("--task=") {
+            task = value.to_string();
             args.remove(0);
         }
     }
@@ -135,13 +142,23 @@ fn main() -> Result<(), String> {
                 .unwrap_or_default()
         );
     };
-    let result = pinout_verifier::verify_pinout(
-        &pdf_bytes,
-        None,
-        &device_dict,
-        api_key.as_deref(),
-        Some(&progress),
-    )?;
+    let result = match task.as_str() {
+        "pinout" => pinout_verifier::verify_pinout(
+            &pdf_bytes,
+            None,
+            &device_dict,
+            api_key.as_deref(),
+            Some(&progress),
+        )?,
+        "clc" => pinout_verifier::verify_clc(
+            &pdf_bytes,
+            None,
+            &device_dict,
+            api_key.as_deref(),
+            Some(&progress),
+        )?,
+        other => return Err(format!("unsupported task: {other}")),
+    };
     eprintln!("stage=verify_done elapsed_ms={}", start.elapsed().as_millis());
 
     println!("part_number={}", result.part_number);

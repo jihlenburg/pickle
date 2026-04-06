@@ -93,6 +93,20 @@ impl Default for CodegenSettings {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VerificationSettings {
+    #[serde(default = "default_verification_provider")]
+    pub provider: String,
+}
+
+impl Default for VerificationSettings {
+    fn default() -> Self {
+        Self {
+            provider: default_verification_provider(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct LastUsedDevice {
     #[serde(default)]
@@ -111,6 +125,8 @@ pub struct AppSettings {
     pub toolchain: ToolchainSettings,
     #[serde(default)]
     pub codegen: CodegenSettings,
+    #[serde(default)]
+    pub verification: VerificationSettings,
     #[serde(default)]
     pub last_used: LastUsedDevice,
 }
@@ -137,6 +153,10 @@ pub fn default_dspic33_compiler() -> String {
 
 pub fn default_codegen_output_basename() -> String {
     "mcu_init".to_string()
+}
+
+pub fn default_verification_provider() -> String {
+    "auto".to_string()
 }
 
 fn normalize_theme(theme: &str) -> String {
@@ -201,6 +221,14 @@ fn normalize_output_basename(output_basename: &str) -> String {
     }
 }
 
+pub fn normalize_verification_provider(provider: &str) -> String {
+    match provider.trim().to_ascii_lowercase().as_str() {
+        "openai" => "openai".to_string(),
+        "anthropic" => "anthropic".to_string(),
+        _ => "auto".to_string(),
+    }
+}
+
 fn toml_string(value: &str) -> String {
     toml::Value::String(value.to_string()).to_string()
 }
@@ -218,6 +246,8 @@ impl AppSettings {
         self.toolchain.family_compilers.dspic33 =
             normalize_compiler(&self.toolchain.family_compilers.dspic33);
         self.codegen.output_basename = normalize_output_basename(&self.codegen.output_basename);
+        self.verification.provider =
+            normalize_verification_provider(&self.verification.provider);
         self.last_used.part_number = normalize_part_number(&self.last_used.part_number);
         self.last_used.package = normalize_package(&self.last_used.package);
         self
@@ -274,6 +304,10 @@ fn render_settings(settings: &AppSettings) -> String {
             "# Examples: \"mcu_init\" -> mcu_init.c / mcu_init.h\n",
             "output_basename = {}\n",
             "\n",
+            "[verification]\n",
+            "# Provider preference for datasheet verification: \"auto\", \"openai\", or \"anthropic\".\n",
+            "provider = {}\n",
+            "\n",
             "[last_used]\n",
             "# Updated automatically after every successful device load.\n",
             "part_number = {}\n",
@@ -286,6 +320,7 @@ fn render_settings(settings: &AppSettings) -> String {
         toml_string(&settings.toolchain.family_compilers.pic24),
         toml_string(&settings.toolchain.family_compilers.dspic33),
         toml_string(&settings.codegen.output_basename),
+        toml_string(&settings.verification.provider),
         toml_string(&settings.last_used.part_number),
         toml_string(&settings.last_used.package),
     )
@@ -337,6 +372,7 @@ mod tests {
         assert_eq!(settings.toolchain.family_compilers.pic24, "xc16-gcc");
         assert_eq!(settings.toolchain.family_compilers.dspic33, "xc-dsc-gcc");
         assert_eq!(settings.codegen.output_basename, "mcu_init");
+        assert_eq!(settings.verification.provider, "auto");
     }
 
     #[test]
@@ -359,6 +395,9 @@ mod tests {
             codegen: CodegenSettings {
                 output_basename: " MCU-Init.v2 ".to_string(),
             },
+            verification: VerificationSettings {
+                provider: " OPENAI ".to_string(),
+            },
             last_used: LastUsedDevice {
                 part_number: " dspic33ck64mp102 ".to_string(),
                 package: " tqfp-28 ".to_string(),
@@ -373,6 +412,7 @@ mod tests {
         assert_eq!(settings.toolchain.family_compilers.pic24, "xc16-gcc");
         assert_eq!(settings.toolchain.family_compilers.dspic33, "xc-dsc-gcc");
         assert_eq!(settings.codegen.output_basename, "mcu_init_v2");
+        assert_eq!(settings.verification.provider, "openai");
         assert_eq!(settings.last_used.part_number, "DSPIC33CK64MP102");
         assert_eq!(settings.last_used.package, "tqfp-28");
     }
@@ -387,6 +427,7 @@ mod tests {
         assert!(text.contains("pic24 = \"xc16-gcc\""));
         assert!(text.contains("dspic33 = \"xc-dsc-gcc\""));
         assert!(text.contains("output_basename = \"mcu_init\""));
+        assert!(text.contains("provider = \"auto\""));
     }
 
     #[test]
@@ -410,6 +451,9 @@ mod tests {
                 [codegen]
                 output_basename = " Board Init "
 
+                [verification]
+                provider = " invalid "
+
                 [last_used]
                 part_number = " dspic33ch128mp508 "
             "#,
@@ -423,6 +467,7 @@ mod tests {
         assert_eq!(parsed.toolchain.family_compilers.pic24, "xc16-gcc");
         assert_eq!(parsed.toolchain.family_compilers.dspic33, "xc-dsc-gcc");
         assert_eq!(parsed.codegen.output_basename, "board_init");
+        assert_eq!(parsed.verification.provider, "auto");
         assert_eq!(parsed.last_used.part_number, "DSPIC33CH128MP508");
         assert_eq!(parsed.last_used.package, "");
     }
@@ -462,6 +507,9 @@ mod tests {
             codegen: CodegenSettings {
                 output_basename: " MCU Init ".to_string(),
             },
+            verification: VerificationSettings {
+                provider: " ANTHROPIC ".to_string(),
+            },
             last_used: LastUsedDevice {
                 part_number: " dspic33ck64mp102 ".to_string(),
                 package: " ssop-28 ".to_string(),
@@ -475,6 +523,7 @@ mod tests {
         assert!(text.contains("pic24 = \"xc16-gcc\""));
         assert!(text.contains("dspic33 = \"xc-dsc-gcc\""));
         assert!(text.contains("output_basename = \"mcu_init\""));
+        assert!(text.contains("provider = \"anthropic\""));
         assert!(text.contains("part_number = \"DSPIC33CK64MP102\""));
         assert!(text.contains("package = \"ssop-28\""));
         assert!(!text.contains(" SYSTEM "));

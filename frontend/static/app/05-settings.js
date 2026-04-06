@@ -51,6 +51,12 @@ function switchSettingsSection(sectionId) {
 // ── API-key helpers ────────────────────────────────────────────────────
 
 const KEY_PROVIDERS = ['openai', 'anthropic'];
+const VERIFY_PROVIDERS = ['auto', 'openai', 'anthropic'];
+
+function normalizedVerificationProvider(provider) {
+    const normalized = String(provider || '').trim().toLowerCase();
+    return VERIFY_PROVIDERS.includes(normalized) ? normalized : 'auto';
+}
 
 /** Render a single provider's status badge + hint into its status div. */
 function renderKeyStatus(provider, status) {
@@ -80,6 +86,51 @@ async function refreshKeyStatuses() {
         }
     } catch (err) {
         console.error('Failed to load key status:', err);
+    }
+}
+
+function renderVerificationProviderStatus(provider) {
+    const el = $('verify-provider-status');
+    if (!el) return;
+
+    const normalized = normalizedVerificationProvider(provider);
+    if (normalized === 'openai') {
+        el.textContent = 'Only the OpenAI key will be used for datasheet verification. If no OpenAI key is configured, verification will fail.';
+        return;
+    }
+    if (normalized === 'anthropic') {
+        el.textContent = 'Only the Anthropic key will be used for datasheet verification. If no Anthropic key is configured, verification will fail.';
+        return;
+    }
+    el.textContent = 'Auto mode prefers OpenAI when both keys are configured, and falls back to Anthropic otherwise.';
+}
+
+function refreshVerificationProvider() {
+    const select = $('verify-provider-select');
+    if (!select) return;
+
+    const provider = normalizedVerificationProvider(appSettings?.verification?.provider);
+    select.value = provider;
+    renderVerificationProviderStatus(provider);
+}
+
+async function saveVerificationProvider() {
+    const select = $('verify-provider-select');
+    if (!select) return;
+
+    const provider = normalizedVerificationProvider(select.value);
+    try {
+        await invoke('set_verify_provider', { provider });
+        if (!appSettings.verification) {
+            appSettings.verification = { provider };
+        } else {
+            appSettings.verification.provider = provider;
+        }
+        renderVerificationProviderStatus(provider);
+        setStatus(`Verification provider set to ${provider}.`);
+        if (typeof checkApiKey === 'function') checkApiKey();
+    } catch (err) {
+        setStatus(`Failed to save verification provider: ${err}`);
     }
 }
 
@@ -122,6 +173,7 @@ function showSettingsDialog() {
     const dialog = $('settings-dialog');
     if (!dialog || dialog.open) return;
     refreshKeyStatuses();
+    refreshVerificationProvider();
     dialog.showModal();
 }
 
@@ -161,6 +213,11 @@ function wireSettingsDialog() {
             const btn = e.target.closest('.settings-nav-btn');
             if (btn?.dataset.section) switchSettingsSection(btn.dataset.section);
         });
+    }
+
+    const providerSelect = $('verify-provider-select');
+    if (providerSelect) {
+        providerSelect.addEventListener('change', () => void saveVerificationProvider());
     }
 
     // Per-provider key controls

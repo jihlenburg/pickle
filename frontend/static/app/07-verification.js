@@ -7,6 +7,8 @@
 
 /** @type {Object|null} Last verification result */
 let verifyResult = null;
+let clcVerifyJob = null;
+let clcVerifyPartNumber = null;
 
 /** Check if API key is configured. */
 async function checkApiKey() {
@@ -298,13 +300,13 @@ function normalizeVerifyProgress(payload) {
 
 function verifyProgressHint(progress) {
     if (progress.stage === 'datasheet.reduce') {
-        return 'pickle uploads only the pinout and CLC sections instead of the full family datasheet.';
+        return 'pickle uploads only the pinout pages in the main verification pass. CLC pages can be checked separately in the background.';
     }
     if (progress.stage === 'provider.render') {
         return 'The PDF path needed a retry, so pickle is rendering only the selected datasheet pages as 300 DPI PNGs.';
     }
     if (progress.stage === 'provider.analyze') {
-        return 'pickle is waiting for the provider to extract package tables and any CLC data before it can show the comparison.';
+        return 'pickle is waiting for the provider to extract the package tables before it can show the pinout comparison.';
     }
     if (progress.stage === 'result.cached') {
         return 'pickle found a cached verification result for this exact datasheet, so it skipped the provider call.';
@@ -369,9 +371,12 @@ function renderVerifyProgress(progress, elapsed) {
 }
 
 function renderVerificationTimingNote() {
+    const clcNote = deviceData?.has_clc
+        ? 'CLC input sources can be looked up in a second background pass if they are still missing after pinout verification.'
+        : 'This device has no CLC peripheral, so no background CLC lookup will be run.';
     return `
         <div class="verify-expectation">
-            pickle trims the datasheet to the pinout and CLC chapters before upload. Large datasheets can take up to 3 minutes or more, depending on the provider and family size.
+            pickle trims the datasheet to the pinout pages before upload. ${clcNote}
         </div>`;
 }
 
@@ -390,6 +395,69 @@ function renderVerificationEmptyState() {
     return `
         ${renderSyntheticPackageNotice()}
         <div class="verify-empty">Load a device and click <strong>Verify Pinout</strong> to cross-check pin assignments against the datasheet.</div>`;
+}
+
+async function verifyClcInBackground({ pdfBase64, datasheetText, pdfName, apiKey }) {
+    if (!deviceData?.part_number || !deviceData?.has_clc || deviceData.clc_input_sources) {
+        return;
+    }
+    if (clcVerifyJob && clcVerifyPartNumber === deviceData.part_number) {
+        return;
+    }
+
+    const partNumber = deviceData.part_number;
+    const packageName = deviceData.selected_package || null;
+    clcVerifyPartNumber = partNumber;
+
+    clcVerifyJob = (async () => {
+        try {
+            setStatus(`Pinout verified. Looking up CLC sources in background from ${pdfName}...`);
+            const clcResult = await invoke('verify_clc', {
+                pdfBase64: pdfBase64 || null,
+                datasheetText: datasheetText || null,
+                partNumber,
+                package: packageName,
+                apiKey: apiKey || null,
+            });
+
+            if (!deviceData || deviceData.part_number !== partNumber) {
+                return;
+            }
+
+            const notes = Array.isArray(clcResult?.notes) ? clcResult.notes : [];
+            if (verifyResult && notes.length) {
+                const existing = new Set(verifyResult.notes || []);
+                notes.forEach((note) => existing.add(note));
+                verifyResult.notes = Array.from(existing);
+            }
+
+            if (Array.isArray(clcResult?.clc_input_sources) && clcResult.clc_input_sources.length === 4) {
+                deviceData.clc_input_sources = clcResult.clc_input_sources;
+                if (verifyResult) {
+                    verifyResult.clc_input_sources = clcResult.clc_input_sources;
+                }
+                if (typeof renderClcDesigner === 'function') {
+                    renderClcDesigner();
+                }
+                if (verifyResult) {
+                    renderVerifyResult(verifyResult);
+                }
+                setStatus(`Pinout verified. CLC sources imported from ${pdfName}.`);
+            } else {
+                if (verifyResult) {
+                    renderVerifyResult(verifyResult);
+                }
+                setStatus('Pinout verified. Background CLC lookup found no CLC register data.');
+            }
+        } catch (error) {
+            if (deviceData?.part_number === partNumber) {
+                setStatus(`Pinout verified. Background CLC lookup failed: ${error.message || error}`);
+            }
+        } finally {
+            clcVerifyJob = null;
+            clcVerifyPartNumber = null;
+        }
+    })();
 }
 
 /** Trigger pinout verification — auto-finds datasheet, falls back to file dialog. */
@@ -525,6 +593,12 @@ async function verifyPinout() {
         });
         renderVerifyResult(verifyResult);
         setStatus(`Verification complete (${elapsed}s)`);
+        verifyClcInBackground({
+            pdfBase64,
+            datasheetText,
+            pdfName,
+            apiKey: storedKey,
+        });
     } catch (error) {
         output.innerHTML = `<div class="verify-error">Error: ${escapeHtml(String(error.message || error))}</div>`;
         setStatus('Verification error');

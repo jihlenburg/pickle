@@ -185,6 +185,10 @@ pub async fn verify_pinout(
         let size_mb = pdf_bytes.len() as f64 / 1_048_576.0;
         info!("verify_pinout: PDF size = {:.1} MB", size_mb);
 
+        if let Some(reason) = dfp_manager::datasheet_pdf_mismatch_reason(&pdf_bytes, &part_number) {
+            return Err(reason);
+        }
+
         if !pdf_bytes.is_empty() {
             dfp_manager::cache_datasheet(&part_number, &pdf_bytes);
         }
@@ -254,6 +258,136 @@ pub async fn verify_pinout(
                 "Verification complete",
             )
             .detail("The extracted package data and any discrepancies are ready to review."),
+        );
+        serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {e}"))?
+}
+
+#[tauri::command]
+pub async fn verify_clc(
+    app: AppHandle,
+    pdf_base64: Option<String>,
+    datasheet_text: Option<String>,
+    part_number: String,
+    package: Option<String>,
+    api_key: Option<String>,
+) -> Result<Value, String> {
+    let app2 = app.clone();
+
+    tokio::task::spawn_blocking(move || {
+        let emit = |update: pinout_verifier::VerifyProgressUpdate| {
+            let _ = app2.emit("verify-clc-progress", update);
+        };
+
+        let pdf_bytes = if let Some(pdf_base64) = pdf_base64.as_deref() {
+            emit(
+                pinout_verifier::VerifyProgressUpdate::new(
+                    "datasheet.decode",
+                    0.24,
+                    "Decoding the datasheet PDF",
+                )
+                .detail("The PDF is prepared locally before pickle trims it to the CLC chapter."),
+            );
+            info!("verify_clc: decoding PDF for {}", part_number);
+            base64::engine::general_purpose::STANDARD
+                .decode(pdf_base64)
+                .map_err(|e| format!("Invalid base64: {e}"))?
+        } else {
+            Vec::new()
+        };
+
+        if pdf_bytes.is_empty() && datasheet_text.as_deref().unwrap_or("").is_empty() {
+            return Err("No datasheet input available for CLC verification".to_string());
+        }
+        if pdf_bytes.is_empty() {
+            return Err(
+                "CLC verification requires a datasheet PDF. Text-only datasheet fallback is disabled."
+                    .to_string(),
+            );
+        }
+
+        let size_mb = pdf_bytes.len() as f64 / 1_048_576.0;
+        info!("verify_clc: PDF size = {:.1} MB", size_mb);
+
+        if let Some(reason) = dfp_manager::datasheet_pdf_mismatch_reason(&pdf_bytes, &part_number) {
+            return Err(reason);
+        }
+
+        if !pdf_bytes.is_empty() {
+            dfp_manager::cache_datasheet(&part_number, &pdf_bytes);
+        }
+
+        emit(
+            pinout_verifier::VerifyProgressUpdate::new(
+                "device.load",
+                0.3,
+                "Loading the selected device data",
+            )
+            .detail("pickle needs the device context so it can store any extracted CLC sources under the right part number."),
+        );
+        let device = dfp_manager::load_device(&part_number)
+            .ok_or_else(|| format!("Device {} not found", part_number))?;
+
+        if device.clc_module_id.is_none() {
+            let result = pinout_verifier::VerifyResult {
+                part_number: device.part_number.clone(),
+                packages: HashMap::new(),
+                notes: vec![
+                    "This device has no CLC peripheral, so background CLC verification was skipped."
+                        .to_string(),
+                ],
+                clc_input_sources: None,
+                raw_response: String::new(),
+            };
+            return serde_json::to_value(&result)
+                .map_err(|e| format!("Serialize error: {e}"));
+        }
+
+        let package_name = package.as_deref().unwrap_or(&device.default_pinout);
+        let pinout = device.get_pinout(Some(package_name));
+
+        let device_dict = serde_json::json!({
+            "part_number": device.part_number,
+            "selected_package": package_name,
+            "packages": device_packages(&device),
+            "pin_count": pinout.pin_count,
+            "pins": [],
+        });
+
+        emit(
+            pinout_verifier::VerifyProgressUpdate::new(
+                "datasheet.ready",
+                0.34,
+                format!("Prepared {:.1} MB datasheet for background CLC verification", size_mb),
+            )
+            .detail("pickle will now trim the datasheet to the CLC chapter and run a second provider pass in the background."),
+        );
+        info!("verify_clc: calling LLM API...");
+        let app_progress = app2.clone();
+        let progress = move |update: pinout_verifier::VerifyProgressUpdate| {
+            let _ = app_progress.emit("verify-clc-progress", update);
+        };
+        let result = pinout_verifier::verify_clc(
+            &pdf_bytes,
+            datasheet_text.as_deref(),
+            &device_dict,
+            api_key.as_deref(),
+            Some(&progress),
+        )?;
+
+        if let Some(ref clc_sources) = result.clc_input_sources {
+            let _ = pinout_verifier::save_clc_sources(&part_number, clc_sources)?;
+        }
+
+        emit(
+            pinout_verifier::VerifyProgressUpdate::new(
+                "result.done",
+                1.0,
+                "Background CLC verification complete",
+            )
+            .detail("Any extracted CLC source mapping has been cached for this device."),
         );
         serde_json::to_value(&result).map_err(|e| format!("Serialize error: {e}"))
     })
