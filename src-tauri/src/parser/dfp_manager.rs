@@ -6,55 +6,16 @@
 //! split across multiple directories.
 
 use regex::Regex;
-use log::warn;
-use pdfium_auto::bind_pdfium_silent;
-use serde_json;
-use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use tempfile::NamedTempFile;
 
-use crate::parser::edc_parser::{parse_edc_file, DeviceData, Pad, Pinout};
+use crate::parser::dfp_datasheet;
+use crate::parser::dfp_paths;
+use crate::parser::dfp_store;
+use crate::parser::edc_parser::{parse_edc_file, DeviceData};
 use crate::parser::pack_index;
-
-fn is_synthetic_package_name(name: &str) -> bool {
-    name.trim().eq_ignore_ascii_case("default")
-}
-
-fn replace_redundant_default_pinout(device: &mut DeviceData) {
-    let default_name = device.default_pinout.clone();
-    if !is_synthetic_package_name(&default_name) {
-        return;
-    }
-
-    let Some(default_pinout) = device.pinouts.get(&default_name).cloned() else {
-        return;
-    };
-
-    let mut replacement_names: Vec<String> = device
-        .pinouts
-        .iter()
-        .filter_map(|(name, pinout)| {
-            if name.eq_ignore_ascii_case(&default_name) || is_synthetic_package_name(name) {
-                return None;
-            }
-            if pinout.pin_count != default_pinout.pin_count {
-                return None;
-            }
-            if pinout.pins != default_pinout.pins {
-                return None;
-            }
-            Some(name.clone())
-        })
-        .collect();
-    replacement_names.sort();
-
-    if let Some(replacement_name) = replacement_names.into_iter().next() {
-        device.pinouts.remove(&default_name);
-        device.default_pinout = replacement_name;
-    }
-}
+use crate::part_profile::PartProfile;
 
 fn device_families() -> &'static Vec<(&'static str, &'static str)> {
     use once_cell::sync::Lazy;
@@ -80,174 +41,32 @@ fn device_families() -> &'static Vec<(&'static str, &'static str)> {
     &FAMILIES
 }
 
-fn project_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."))
-}
-
 pub fn read_roots() -> Vec<PathBuf> {
-    let mut roots = vec![project_root()];
-
-    let app_data = base_dir();
-    if !roots.contains(&app_data) {
-        roots.push(app_data);
-    }
-
-    roots
+    dfp_paths::read_roots()
 }
 
 pub fn base_dir() -> PathBuf {
-    // Use platform-standard app data directory:
-    //   macOS:   ~/Library/Application Support/pickle
-    //   Linux:   ~/.local/share/pickle
-    //   Windows: %APPDATA%/pickle
-    let dir = dirs::data_dir()
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-        .join("pickle");
-    let _ = fs::create_dir_all(&dir);
-    dir
-}
-
-fn preferred_write_root(subdir: &str) -> PathBuf {
-    // Keep writes colocated with the data the app is already reading. Otherwise
-    // the user can end up reading stale overlays from one root and writing new
-    // ones into another.
-    for root in [project_root()] {
-        if root.as_os_str().is_empty() {
-            continue;
-        }
-        if root.join(subdir).exists() {
-            return root;
-        }
-    }
-    base_dir()
+    dfp_paths::base_dir()
 }
 
 pub fn devices_dir() -> PathBuf {
-    preferred_write_root("devices").join("devices")
+    dfp_paths::devices_dir()
 }
 
 pub fn dfp_cache_dir() -> PathBuf {
-    preferred_write_root("dfp_cache").join("dfp_cache")
+    dfp_paths::dfp_cache_dir()
 }
 
 pub fn datasheets_dir() -> PathBuf {
-    let dir = dfp_cache_dir().join("datasheets");
-    let _ = fs::create_dir_all(&dir);
-    dir
-}
-
-fn datasheet_family_markers(part_number: &str) -> Vec<String> {
-    let part_upper = part_number.trim().to_uppercase();
-    let mut markers = vec![part_upper.clone()];
-
-    let re = Regex::new(r"^((?:DSPIC|PIC)\d+[A-Z]+)").unwrap();
-    if let Some(family) = re
-        .captures(&part_upper)
-        .and_then(|caps| caps.get(1))
-        .map(|m| m.as_str().to_string())
-    {
-        if !markers.contains(&family) {
-            markers.push(family);
-        }
-    }
-
-    markers
-}
-
-fn summarize_probe_excerpt(text: &str) -> String {
-    text.lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .take(3)
-        .collect::<Vec<_>>()
-        .join(" / ")
-}
-
-fn extract_datasheet_probe_text(pdf_bytes: &[u8]) -> Result<String, String> {
-    let temp_pdf = NamedTempFile::new().map_err(|error| format!("Tempfile error: {error}"))?;
-    fs::write(temp_pdf.path(), pdf_bytes)
-        .map_err(|error| format!("Failed to write temporary PDF: {error}"))?;
-
-    let pdfium = bind_pdfium_silent().map_err(|error| format!("Failed to bind PDFium: {error}"))?;
-    let document = pdfium
-        .load_pdf_from_file(temp_pdf.path(), None)
-        .map_err(|error| format!("Failed to open PDF: {error}"))?;
-
-    let page_count = document.pages().len().min(4);
-    let mut probe = String::new();
-    for index in 0..page_count {
-        let page = document
-            .pages()
-            .get(index as u16)
-            .map_err(|error| format!("Failed to access PDF page {}: {error}", index + 1))?;
-        let page_text = page
-            .text()
-            .map_err(|error| format!("Failed to extract text from PDF page {}: {error}", index + 1))?
-            .all();
-        if !page_text.trim().is_empty() {
-            probe.push_str(&page_text);
-            probe.push('\n');
-        }
-    }
-
-    Ok(probe)
+    dfp_paths::datasheets_dir()
 }
 
 pub fn datasheet_pdf_mismatch_reason(pdf_bytes: &[u8], part_number: &str) -> Option<String> {
-    let markers = datasheet_family_markers(part_number);
-    match extract_datasheet_probe_text(pdf_bytes) {
-        Ok(text) => {
-            if text.trim().is_empty() {
-                return None;
-            }
-
-            let uppercase_text = text.to_uppercase();
-            if markers.iter().any(|marker| uppercase_text.contains(marker)) {
-                return None;
-            }
-
-            let excerpt = summarize_probe_excerpt(&text);
-            Some(format!(
-                "Selected datasheet does not appear to match {}. Expected to find {} in the opening pages, but saw: {}",
-                part_number.to_uppercase(),
-                markers.join(" or "),
-                excerpt
-            ))
-        }
-        Err(error) => {
-            warn!(
-                "datasheet validation skipped for {} because PDF probing failed: {}",
-                part_number,
-                error
-            );
-            None
-        }
-    }
-}
-
-fn local_datasheet_matches_part(path: &Path, part_number: &str) -> bool {
-    let Ok(bytes) = fs::read(path) else {
-        return false;
-    };
-
-    if let Some(reason) = datasheet_pdf_mismatch_reason(&bytes, part_number) {
-        warn!(
-            "Ignoring local datasheet candidate {} for {}: {}",
-            path.display(),
-            part_number,
-            reason
-        );
-        return false;
-    }
-
-    true
+    dfp_datasheet::datasheet_pdf_mismatch_reason(pdf_bytes, part_number)
 }
 
 pub fn pinouts_dir() -> PathBuf {
-    preferred_write_root("pinouts").join("pinouts")
+    dfp_paths::pinouts_dir()
 }
 
 /// Returns (path, max_scan_depth) pairs. Cache directories get unlimited depth;
@@ -533,200 +352,16 @@ fn extract_compiler_support_from_atpack(atpack_path: &Path) -> Option<PathBuf> {
     }
 }
 
-/// Extract the dsPIC33 performance-family prefix (e.g. "CDV", "CDVL", "CK")
-/// from a part number string.  Returns `None` for non-dsPIC33 parts.
-fn dspic33_family(part: &str) -> Option<&str> {
-    let upper = part.strip_prefix("DSPIC33").or_else(|| part.strip_prefix("dsPIC33"))?;
-    // Longest match first: CDVL before CDV, EDV before EV/EP
-    for fam in &["CDVL", "CDV", "EDV", "AK", "CH", "CK", "EV", "EP"] {
-        if upper.starts_with(fam) {
-            return Some(&upper[..fam.len()]);
-        }
-    }
-    None
-}
-
-fn load_pinout_overlays(device: &mut DeviceData) {
-    let re_suffix = Regex::new(r"_\d+$").unwrap();
-    let re_paren_device = Regex::new(r"\(([^)]+)\)").unwrap();
-    let device_family = dspic33_family(&device.part_number).map(|s| s.to_string());
-
-    for root in read_roots() {
-        let overlay_path = root
-            .join("pinouts")
-            .join(format!("{}.json", device.part_number.to_uppercase()));
-        if !overlay_path.exists() {
-            continue;
-        }
-
-        let text = match fs::read_to_string(&overlay_path) {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
-
-        let overlay: serde_json::Value = match serde_json::from_str(&text) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
-        if let Some(packages) = overlay.get("packages").and_then(|p| p.as_object()) {
-            for (pkg_name, pkg_data) in packages {
-                // Overlays only add alternate packages missing from the base EDC.
-                // Case-insensitive check: the LLM may emit "28-PIN SSOP" while
-                // the EDC defines "28-pin SSOP".
-                let already_exists = device
-                    .pinouts
-                    .keys()
-                    .any(|k| k.eq_ignore_ascii_case(pkg_name));
-                if already_exists {
-                    continue;
-                }
-                if pkg_data.get("source").and_then(|s| s.as_str()) != Some("overlay") {
-                    continue;
-                }
-
-                // When using a sibling-family datasheet the LLM may extract
-                // packages for multiple family variants (e.g. CDV *and* CDVL).
-                // Only keep packages whose parenthesized device belongs to the
-                // same performance family as the loaded device.
-                if let Some(ref dev_fam) = device_family {
-                    if let Some(caps) = re_paren_device.captures(pkg_name) {
-                        let inner = caps.get(1).unwrap().as_str();
-                        if let Some(pkg_fam) = dspic33_family(inner) {
-                            if pkg_fam != dev_fam.as_str() {
-                                continue;
-                            }
-                        }
-                    }
-                }
-
-                let mut pin_map: HashMap<u32, String> = HashMap::new();
-                if let Some(pins) = pkg_data.get("pins").and_then(|p| p.as_object()) {
-                    for (pos_str, pad_val) in pins {
-                        if let (Ok(pos), Some(pad_name)) =
-                            (pos_str.parse::<u32>(), pad_val.as_str())
-                        {
-                            pin_map.insert(pos, pad_name.to_string());
-
-                            // Overlay packages can reference suffixed pad aliases such as
-                            // `VDD_2`. Clone the base pad metadata so downstream code can
-                            // still resolve functions and port bindings from the alias.
-                            if !device.pads.contains_key(pad_name) {
-                                let base = re_suffix.replace(pad_name, "").to_string();
-                                if let Some(src) = device.pads.get(&base).cloned() {
-                                    device.pads.insert(
-                                        pad_name.to_string(),
-                                        Pad {
-                                            name: pad_name.to_string(),
-                                            functions: src.functions,
-                                            rp_number: src.rp_number,
-                                            port: src.port,
-                                            port_bit: src.port_bit,
-                                            analog_channels: src.analog_channels,
-                                            is_power: src.is_power,
-                                        },
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-
-                let pin_count = pkg_data
-                    .get("pin_count")
-                    .and_then(|c| c.as_u64())
-                    .unwrap_or(pin_map.len() as u64) as u32;
-
-                device.pinouts.insert(
-                    pkg_name.clone(),
-                    Pinout {
-                        package: pkg_name.clone(),
-                        pin_count,
-                        source: "overlay".to_string(),
-                        pins: pin_map,
-                    },
-                );
-            }
-        }
-
-        replace_redundant_default_pinout(device);
-    }
-}
-
 pub fn get_cached_device(part_number: &str) -> Option<(DeviceData, bool, bool)> {
-    let filename = format!("{}.json", part_number.to_uppercase());
-
-    for root in read_roots() {
-        let dir = root.join("devices");
-        let json_path = dir.join(&filename);
-        if json_path.exists() {
-            if let Ok(text) = fs::read_to_string(&json_path) {
-                let has_clc_key = text.contains("\"clc_module_id\"");
-                let has_device_info = text.contains("\"device_info\"");
-                if let Ok(device) = DeviceData::from_json(&text) {
-                    return Some((device, has_clc_key, has_device_info));
-                }
-            }
-        }
-    }
-
-    None
+    dfp_store::get_cached_device(part_number)
 }
 
 pub fn save_cached_device(device: &DeviceData) -> Option<PathBuf> {
-    let dir = devices_dir();
-    fs::create_dir_all(&dir).ok()?;
-    let json_path = dir.join(format!("{}.json", device.part_number.to_uppercase()));
-    fs::write(&json_path, device.to_json()).ok()?;
-    Some(json_path)
+    dfp_store::save_cached_device(device)
 }
 
 pub fn list_cached_devices() -> Vec<String> {
-    let mut names = std::collections::BTreeSet::new();
-
-    for root in read_roots() {
-        let dir = root.join("devices");
-        if let Ok(entries) = fs::read_dir(&dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().map(|e| e == "json").unwrap_or(false) {
-                    if let Some(stem) = path.file_stem() {
-                        names.insert(stem.to_string_lossy().to_uppercase());
-                    }
-                }
-            }
-        }
-
-        let edc_dir = root.join("dfp_cache").join("edc");
-        if edc_dir.is_dir() {
-            if let Ok(entries) = fs::read_dir(&edc_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().map(|e| e == "PIC").unwrap_or(false) {
-                        if let Some(stem) = path.file_stem() {
-                            names.insert(stem.to_string_lossy().to_uppercase());
-                        }
-                    }
-                }
-            }
-        }
-
-        let po_dir = root.join("pinouts");
-        if po_dir.is_dir() {
-            if let Ok(entries) = fs::read_dir(&po_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().map(|e| e == "json").unwrap_or(false) {
-                        if let Some(stem) = path.file_stem() {
-                            names.insert(stem.to_string_lossy().to_uppercase());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    names.into_iter().collect()
+    dfp_store::list_cached_devices()
 }
 
 /// Merge locally cached devices with the remote pack index without letting a
@@ -744,22 +379,85 @@ pub fn list_all_known_devices() -> Vec<String> {
     all.into_iter().collect()
 }
 
+fn is_dspic33ak_part(part_number: &str) -> bool {
+    PartProfile::from_part_number(part_number).is_dspic33ak()
+}
+
+fn cached_device_needs_reparse(
+    part_number: &str,
+    cached: &DeviceData,
+    has_clc_key: bool,
+    has_device_info: bool,
+) -> bool {
+    let fuse_stale = cached.fuse_defs.is_empty()
+        || cached
+            .fuse_defs
+            .iter()
+            .any(|r| r.fields.iter().any(|f| f.values.is_empty()));
+    let pps_stale = (!cached.remappable_inputs.is_empty() || !cached.remappable_outputs.is_empty())
+        && cached.pps_input_mappings.is_empty()
+        && cached.pps_output_mappings.is_empty();
+    let ak_inventory_stale = is_dspic33ak_part(part_number)
+        && cached.device_info.uarts == 0
+        && cached.device_info.spis == 0
+        && cached.device_info.i2c == 0
+        && cached.device_info.pwm_generators == 0
+        && cached.device_info.clc == 0
+        && cached.device_info.qei == 0
+        && cached.device_info.dac_channels == 0
+        && cached.device_info.op_amps == 0;
+    let ak_backup_fuse_stale = is_dspic33ak_part(part_number) && {
+        let ficd_missing_bkbug = cached
+            .fuse_defs
+            .iter()
+            .find(|register| register.cname == "FICD")
+            .map(|register| {
+                let has_jtagen = register.fields.iter().any(|field| field.cname == "JTAGEN");
+                let has_bkbug = register.fields.iter().any(|field| field.cname == "BKBUG");
+                has_jtagen && !has_bkbug
+            })
+            .unwrap_or(false);
+        let fdevopt_missing_alti2c = cached
+            .fuse_defs
+            .iter()
+            .find(|register| register.cname == "FDEVOPT")
+            .map(|register| {
+                let has_bistdis = register.fields.iter().any(|field| field.cname == "BISTDIS");
+                let has_alti2c = register
+                    .fields
+                    .iter()
+                    .any(|field| field.cname.starts_with("ALTI2C"));
+                has_bistdis && cached.device_info.i2c > 0 && !has_alti2c
+            })
+            .unwrap_or(false);
+        ficd_missing_bkbug || fdevopt_missing_alti2c
+    };
+    let clc_stale = cached.has_clc()
+        && (cached.device_info.clc == 0 || cached.clc_module_id.is_none());
+
+    fuse_stale
+        || !has_clc_key
+        || !has_device_info
+        || pps_stale
+        || ak_inventory_stale
+        || ak_backup_fuse_stale
+        || clc_stale
+}
+
 pub fn load_device(part_number: &str) -> Option<DeviceData> {
     let part_upper = part_number.to_uppercase();
 
     // Fast path: parsed JSON cache. Re-parse if the cache is stale:
     //   - empty fuse_defs: predates DCR parsing pass
     //   - any field with empty values: predates range-field filtering
-    //   - missing clc_module_id key: predates CLC module detection pass
+    //   - empty PPS mappings despite remappable signals: predates PPS SFR parsing fixes
+    //   - dsPIC33AK inventories with zero major peripherals: predates 32-bit SFR support
+    //   - dsPIC33AK fuse caches missing backup-sector fields like ALTI2C1/BKBUG
+    //   - caches that expose CLC PPS endpoints but still report no CLC inventory/module ID
     if let Some((mut cached, has_clc_key, has_device_info)) = get_cached_device(&part_upper) {
-        let fuse_stale = cached.fuse_defs.is_empty()
-            || cached
-                .fuse_defs
-                .iter()
-                .any(|r| r.fields.iter().any(|f| f.values.is_empty()));
-        if !fuse_stale && has_clc_key && has_device_info {
-            load_pinout_overlays(&mut cached);
-            load_clc_sources(&mut cached);
+        if !cached_device_needs_reparse(&part_upper, &cached, has_clc_key, has_device_info) {
+            dfp_store::load_pinout_overlays(&mut cached);
+            dfp_store::load_clc_sources(&mut cached);
             return Some(cached);
         }
         // Stale cache — fall through to re-parse from the .PIC file.
@@ -799,8 +497,8 @@ pub fn load_device(part_number: &str) -> Option<DeviceData> {
     save_cached_device(&device);
     // Apply overlays and CLC source mappings after parsing/caching so cached
     // and freshly parsed devices expose the same data to the frontend.
-    load_pinout_overlays(&mut device);
-    load_clc_sources(&mut device);
+    dfp_store::load_pinout_overlays(&mut device);
+    dfp_store::load_clc_sources(&mut device);
 
     Some(device)
 }
@@ -833,97 +531,8 @@ pub fn find_compiler_support_dir(part_number: &str) -> Option<PathBuf> {
     extract_compiler_support_from_atpack(&atpack)
 }
 
-/// Known CLC input source MUX mappings keyed by the IP-block module ID
-/// extracted from the EDC `_modsrc` attribute.  Each entry is 4 groups (DS1–DS4)
-/// of 8 source labels matching the CLCxSEL register definition in the datasheet.
-///
-/// Source: DS70005363E §21.1, Register 21-3 (CLCxSEL) — dsPIC33CK64MP105 family.
-/// All 82 dsPIC33CK devices share the same CLC IP block.
-fn known_clc_sources(module_id: &str) -> Option<Vec<Vec<String>>> {
-    match module_id {
-        "DOS-01577_cla_clc_upb_v1.Module" => Some(vec![
-            // DS1[2:0] — page 373
-            vec![
-                "CLCINA".into(),
-                "Fcy".into(),
-                "CLC3OUT".into(),
-                "LPRC".into(),
-                "REFCLKO".into(),
-                "Reserved".into(),
-                "SCCP2 Aux".into(),
-                "SCCP4 Aux".into(),
-            ],
-            // DS2[2:0] — page 372
-            vec![
-                "CLCINB".into(),
-                "Reserved".into(),
-                "CMP1".into(),
-                "UART1 TX".into(),
-                "Reserved".into(),
-                "Reserved".into(),
-                "SCCP1 OC".into(),
-                "SCCP2 OC".into(),
-            ],
-            // DS3[2:0] — page 372
-            vec![
-                "CLCINC".into(),
-                "CLC1OUT".into(),
-                "CMP2".into(),
-                "SPI1 SDO".into(),
-                "UART1 RX".into(),
-                "CLC4OUT".into(),
-                "SCCP3 CEF".into(),
-                "SCCP4 CEF".into(),
-            ],
-            // DS4[2:0] — page 372
-            vec![
-                "PWM Event A".into(),
-                "CLC2OUT".into(),
-                "CMP3".into(),
-                "SPI1 SDI".into(),
-                "Reserved".into(),
-                "CLCIND".into(),
-                "SCCP1 Aux".into(),
-                "SCCP3 Aux".into(),
-            ],
-        ]),
-        _ => None,
-    }
-}
-
-/// Directory for CLC source mapping overrides (LLM-extracted or user-supplied).
 pub fn clc_sources_dir() -> PathBuf {
-    preferred_write_root("clc_sources").join("clc_sources")
-}
-
-/// Populate `device.clc_input_sources` from the best available source:
-/// 1. Per-device JSON override in `clc_sources/{PART}.json`
-/// 2. Hardcoded mapping for the device's `clc_module_id`
-fn load_clc_sources(device: &mut DeviceData) {
-    // 1. Check for per-device file override (from LLM extraction or manual edit)
-    let part_upper = device.part_number.to_uppercase();
-    for root in read_roots() {
-        let path = root
-            .join("clc_sources")
-            .join(format!("{}.json", part_upper));
-        if path.exists() {
-            if let Ok(text) = fs::read_to_string(&path) {
-                if let Ok(sources) = serde_json::from_str::<Vec<Vec<String>>>(&text) {
-                    if sources.len() == 4 && sources.iter().all(|g| g.len() == 8) {
-                        device.clc_input_sources = Some(sources);
-                        return;
-                    }
-                }
-            }
-        }
-    }
-
-    // 2. Fall back to hardcoded mapping by CLC module ID
-    if let Some(ref mod_id) = device.clc_module_id {
-        if let Some(sources) = known_clc_sources(mod_id) {
-            device.clc_input_sources = Some(sources);
-        }
-    }
+    dfp_store::clc_sources_dir_public()
 }
 
 /// Try to find a datasheet PDF locally. Searches:
@@ -933,117 +542,33 @@ fn load_clc_sources(device: &mut DeviceData) {
 ///
 /// Returns the path to the PDF if found, or None.
 pub fn find_local_datasheet(part_number: &str) -> Option<PathBuf> {
-    let part_upper = part_number.to_uppercase();
-    let part_lower = part_number.to_lowercase();
-
-    // 1. Check fetcher PDF cache (exact name)
-    let fetcher_pdf = dfp_cache_dir()
-        .join("datasheets")
-        .join("pdf")
-        .join(format!("{}.pdf", part_upper));
-    if fetcher_pdf.exists() && local_datasheet_matches_part(&fetcher_pdf, &part_upper) {
-        return Some(fetcher_pdf);
-    }
-
-    // 2. Check legacy datasheets dir
-    let ds_dir = datasheets_dir();
-    if let Ok(entries) = fs::read_dir(&ds_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path
-                .extension()
-                .map(|e| e.eq_ignore_ascii_case("pdf"))
-                .unwrap_or(false)
-            {
-                let stem = path
-                    .file_stem()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_uppercase();
-                if stem.contains(&part_upper) {
-                    if local_datasheet_matches_part(&path, &part_upper) {
-                        return Some(path);
-                    }
-                }
-            }
-        }
-    }
-
-    // 3. Search ~/Downloads (shallow, top-level only) for matching PDFs
-    // Derive a family prefix for broader matching (e.g. "dspic33ck" from "DSPIC33CK64MP102")
-    let family_lower = {
-        let re = Regex::new(r"^((?:DSPIC|PIC)\d+[A-Z]+)").unwrap();
-        re.captures(&part_upper)
-            .and_then(|c| c.get(1))
-            .map(|m| m.as_str().to_lowercase())
-            .unwrap_or_default()
-    };
-
-    if let Some(home) = dirs::home_dir() {
-        let downloads = home.join("Downloads");
-        if let Ok(entries) = fs::read_dir(&downloads) {
-            let mut best: Option<PathBuf> = None;
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if !path.is_file() {
-                    continue;
-                }
-                if !path
-                    .extension()
-                    .map(|e| e.eq_ignore_ascii_case("pdf"))
-                    .unwrap_or(false)
-                {
-                    continue;
-                }
-                let name_lower = path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_lowercase();
-                if name_lower.contains(&part_lower) {
-                    if local_datasheet_matches_part(&path, &part_upper) {
-                        return Some(path);
-                    }
-                }
-                if !family_lower.is_empty() && name_lower.contains(&family_lower) && best.is_none()
-                {
-                    if local_datasheet_matches_part(&path, &part_upper) {
-                        best = Some(path);
-                    }
-                }
-            }
-            if best.is_some() {
-                return best;
-            }
-        }
-    }
-
-    None
+    dfp_datasheet::find_local_datasheet(part_number)
 }
 
 /// Cache a datasheet PDF so future lookups find it without prompting.
 pub fn cache_datasheet(part_number: &str, pdf_bytes: &[u8]) -> Option<PathBuf> {
-    if let Some(reason) = datasheet_pdf_mismatch_reason(pdf_bytes, part_number) {
-        warn!(
-            "Skipping datasheet cache write for {} because the PDF does not match the selected part: {}",
-            part_number,
-            reason
-        );
-        return None;
-    }
-
-    let dir = datasheets_dir();
-    let path = dir.join(format!("{}.pdf", part_number.to_uppercase()));
-    fs::write(&path, pdf_bytes).ok()?;
-    Some(path)
+    dfp_datasheet::cache_datasheet(part_number, pdf_bytes)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::edc_parser::DeviceInfo;
+    use crate::parser::datasheet_fetcher;
+    use crate::parser::dfp_datasheet::{
+        datasheet_family_markers, datasheet_part_series_marker, datasheet_part_suffix,
+        datasheet_probe_matches_part, datasheet_probe_matches_resolved_reference,
+    };
+    use crate::parser::dfp_store::{
+        apply_package_display_name_overrides, replace_redundant_default_pinout,
+    };
+    use crate::parser::edc_parser::{DeviceInfo, Pinout};
+    use std::collections::HashMap;
 
-    fn test_device(default_name: &str, default_pinout: Pinout, extra_pinouts: Vec<(String, Pinout)>) -> DeviceData {
+    fn test_device(
+        default_name: &str,
+        default_pinout: Pinout,
+        extra_pinouts: Vec<(String, Pinout)>,
+    ) -> DeviceData {
         let mut pinouts = HashMap::new();
         pinouts.insert(default_name.to_string(), default_pinout);
         for (name, pinout) in extra_pinouts {
@@ -1081,6 +606,72 @@ mod tests {
     }
 
     #[test]
+    fn datasheet_part_suffix_extracts_final_feature_code() {
+        assert_eq!(
+            datasheet_part_suffix("DSPIC33AK64MC105").as_deref(),
+            Some("MC105")
+        );
+        assert_eq!(
+            datasheet_part_suffix("DSPIC33CK64MP105").as_deref(),
+            Some("MP105")
+        );
+    }
+
+    #[test]
+    fn datasheet_part_series_marker_keeps_the_family_level_feature_code() {
+        assert_eq!(
+            datasheet_part_series_marker("DSPIC33AK64MC105").as_deref(),
+            Some("MC10")
+        );
+        assert_eq!(
+            datasheet_part_series_marker("DSPIC33CK64MP105").as_deref(),
+            Some("MP10")
+        );
+    }
+
+    #[test]
+    fn datasheet_probe_matching_accepts_exact_part_or_same_family_series() {
+        assert!(datasheet_probe_matches_part(
+            "dsPIC33AK64MC105 Family Data Sheet",
+            "DSPIC33AK64MC105"
+        ));
+        assert!(datasheet_probe_matches_part(
+            "dsPIC33CDVL64MC106 Family Data Sheet",
+            "DSPIC33CDV128MC106"
+        ));
+        assert!(datasheet_probe_matches_part(
+            "dsPIC33AK128MC106 Family Data Sheet",
+            "DSPIC33AK64MC105"
+        ));
+        assert!(!datasheet_probe_matches_part(
+            "dsPIC33AK128MP106 Family Data Sheet",
+            "DSPIC33AK64MC105"
+        ));
+    }
+
+    #[test]
+    fn datasheet_probe_matching_accepts_resolved_family_pdf_by_ds_number() {
+        let resolved = datasheet_fetcher::DatasheetRef {
+            part_number: "DSPIC33AK256MPS205".to_string(),
+            product_url: "https://www.microchip.com/en-us/product/dspic33ak256mps205".to_string(),
+            datasheet_title: "dsPIC33AK512MPS512 Family Data Sheet".to_string(),
+            datasheet_number: "DS70005591".to_string(),
+            datasheet_revision: "DS70005591C".to_string(),
+            pdf_url: "https://ww1.microchip.com/downloads/aemDocuments/documents/MCU16/ProductDocuments/DataSheets/dsPIC33AK512MPS512-Family-Data-Sheet-DS70005591.pdf".to_string(),
+            sibling_source: None,
+        };
+
+        assert!(datasheet_probe_matches_resolved_reference(
+            "dsPIC33AK512MPS512 Family Data Sheet\nDS70005591C",
+            &resolved
+        ));
+        assert!(!datasheet_probe_matches_part(
+            "dsPIC33AK512MPS512 Family Data Sheet",
+            "DSPIC33AK256MPS205"
+        ));
+    }
+
+    #[test]
     fn pack_version_dir_is_parent_of_edc_file() {
         let pic = PathBuf::from(
             "/tmp/packs/Microchip/dsPIC33CK-MP_DFP/1.15.423/edc/DSPIC33CK64MP105.PIC",
@@ -1106,12 +697,14 @@ mod tests {
     fn redundant_default_pinout_is_replaced_by_matching_real_package() {
         let default_pinout = Pinout {
             package: "default".to_string(),
+            display_name: None,
             pin_count: 2,
             source: "edc".to_string(),
             pins: HashMap::from([(1, "RA0".to_string()), (2, "RA1".to_string())]),
         };
         let real_pinout = Pinout {
             package: "64-Pin VQFN-TQFP".to_string(),
+            display_name: None,
             pin_count: 2,
             source: "overlay".to_string(),
             pins: HashMap::from([(1, "RA0".to_string()), (2, "RA1".to_string())]),
@@ -1133,12 +726,14 @@ mod tests {
     fn default_pinout_is_kept_when_real_package_differs() {
         let default_pinout = Pinout {
             package: "default".to_string(),
+            display_name: None,
             pin_count: 2,
             source: "edc".to_string(),
             pins: HashMap::from([(1, "RA0".to_string()), (2, "RA1".to_string())]),
         };
         let real_pinout = Pinout {
             package: "64-Pin VQFN-TQFP".to_string(),
+            display_name: None,
             pin_count: 2,
             source: "overlay".to_string(),
             pins: HashMap::from([(1, "RA0".to_string()), (2, "RB1".to_string())]),
@@ -1154,5 +749,288 @@ mod tests {
         assert_eq!(device.default_pinout, "default");
         assert!(device.pinouts.contains_key("default"));
         assert!(device.pinouts.contains_key("64-Pin VQFN-TQFP"));
+    }
+
+    #[test]
+    fn package_display_name_overrides_apply_case_insensitively() {
+        let default_pinout = Pinout {
+            package: "STX04 (48-pin uQFN)".to_string(),
+            display_name: None,
+            pin_count: 48,
+            source: "edc".to_string(),
+            pins: HashMap::from([(1, "RA0".to_string())]),
+        };
+        let mut device = test_device("STX04 (48-pin uQFN)", default_pinout, Vec::new());
+
+        apply_package_display_name_overrides(
+            &mut device,
+            &HashMap::from([("stx04 (48-pin uqfn)".to_string(), "48-PIN VQFN".to_string())]),
+        );
+
+        assert_eq!(
+            device
+                .pinouts
+                .get("STX04 (48-pin uQFN)")
+                .and_then(|pinout| pinout.display_name.as_deref()),
+            Some("48-PIN VQFN")
+        );
+    }
+
+    #[test]
+    fn cache_reparse_detects_missing_pps_matrix() {
+        let default_pinout = Pinout {
+            package: "default".to_string(),
+            display_name: None,
+            pin_count: 1,
+            source: "edc".to_string(),
+            pins: HashMap::from([(1, "RA0".to_string())]),
+        };
+        let mut device = test_device("default", default_pinout, Vec::new());
+        device
+            .remappable_inputs
+            .push(crate::parser::edc_parser::RemappablePeripheral {
+                name: "U1RX".to_string(),
+                direction: "in".to_string(),
+                ppsval: None,
+            });
+
+        assert!(cached_device_needs_reparse(
+            "DSPIC33CK64MP102",
+            &device,
+            true,
+            true
+        ));
+    }
+
+    #[test]
+    fn cache_reparse_detects_sparse_dspic33ak_inventory() {
+        let default_pinout = Pinout {
+            package: "default".to_string(),
+            display_name: None,
+            pin_count: 1,
+            source: "edc".to_string(),
+            pins: HashMap::from([(1, "RA0".to_string())]),
+        };
+        let mut device = test_device("default", default_pinout, Vec::new());
+        device
+            .fuse_defs
+            .push(crate::parser::edc_parser::DcrRegister {
+                cname: "FICD".to_string(),
+                desc: String::new(),
+                addr: 0,
+                default_value: 0,
+                fields: vec![crate::parser::edc_parser::DcrField {
+                    cname: "ICS".to_string(),
+                    desc: String::new(),
+                    mask: 1,
+                    width: 1,
+                    hidden: false,
+                    values: vec![crate::parser::edc_parser::DcrFieldValue {
+                        cname: "PGD1".to_string(),
+                        desc: String::new(),
+                        value: 0,
+                    }],
+                }],
+            });
+
+        assert!(cached_device_needs_reparse(
+            "DSPIC33AK64MC105",
+            &device,
+            true,
+            true
+        ));
+        assert!(!cached_device_needs_reparse(
+            "DSPIC33CK64MP102",
+            &device,
+            true,
+            true
+        ));
+    }
+
+    #[test]
+    fn cache_reparse_detects_missing_ak_backup_fuse_fields() {
+        let default_pinout = Pinout {
+            package: "default".to_string(),
+            display_name: None,
+            pin_count: 1,
+            source: "edc".to_string(),
+            pins: HashMap::from([(1, "RA0".to_string())]),
+        };
+        let mut device = test_device("default", default_pinout, Vec::new());
+        device.device_info.i2c = 3;
+        device.fuse_defs = vec![
+            crate::parser::edc_parser::DcrRegister {
+                cname: "FICD".to_string(),
+                desc: String::new(),
+                addr: 0,
+                default_value: 0,
+                fields: vec![crate::parser::edc_parser::DcrField {
+                    cname: "JTAGEN".to_string(),
+                    desc: String::new(),
+                    mask: 1,
+                    width: 1,
+                    hidden: false,
+                    values: vec![crate::parser::edc_parser::DcrFieldValue {
+                        cname: "ON".to_string(),
+                        desc: String::new(),
+                        value: 1,
+                    }],
+                }],
+            },
+            crate::parser::edc_parser::DcrRegister {
+                cname: "FDEVOPT".to_string(),
+                desc: String::new(),
+                addr: 0,
+                default_value: 0,
+                fields: vec![crate::parser::edc_parser::DcrField {
+                    cname: "BISTDIS".to_string(),
+                    desc: String::new(),
+                    mask: 1,
+                    width: 1,
+                    hidden: false,
+                    values: vec![crate::parser::edc_parser::DcrFieldValue {
+                        cname: "OFF".to_string(),
+                        desc: String::new(),
+                        value: 1,
+                    }],
+                }],
+            },
+        ];
+
+        assert!(cached_device_needs_reparse(
+            "DSPIC33AK256MPS205",
+            &device,
+            true,
+            true
+        ));
+
+        device.fuse_defs[0]
+            .fields
+            .push(crate::parser::edc_parser::DcrField {
+                cname: "BKBUG".to_string(),
+                desc: String::new(),
+                mask: 2,
+                width: 1,
+                hidden: false,
+                values: vec![crate::parser::edc_parser::DcrFieldValue {
+                    cname: "OFF".to_string(),
+                    desc: String::new(),
+                    value: 1,
+                }],
+            });
+        device.fuse_defs[1]
+            .fields
+            .push(crate::parser::edc_parser::DcrField {
+                cname: "ALTI2C1".to_string(),
+                desc: String::new(),
+                mask: 4,
+                width: 1,
+                hidden: false,
+                values: vec![crate::parser::edc_parser::DcrFieldValue {
+                    cname: "OFF".to_string(),
+                    desc: String::new(),
+                    value: 1,
+                }],
+            });
+
+        assert!(!cached_device_needs_reparse(
+            "DSPIC33AK256MPS205",
+            &device,
+            true,
+            true
+        ));
+    }
+
+    #[test]
+    fn cache_reparse_detects_missing_clc_metadata_when_clc_signals_exist() {
+        let default_pinout = Pinout {
+            package: "default".to_string(),
+            display_name: None,
+            pin_count: 48,
+            source: "edc".to_string(),
+            pins: HashMap::new(),
+        };
+        let mut device = test_device("default", default_pinout, Vec::new());
+        device.part_number = "DSPIC33AK256MPS205".to_string();
+        device.fuse_defs = vec![crate::parser::edc_parser::DcrRegister {
+            cname: "FICD".to_string(),
+            desc: String::new(),
+            addr: 0,
+            default_value: 0,
+            fields: vec![crate::parser::edc_parser::DcrField {
+                cname: "JTAGEN".to_string(),
+                desc: String::new(),
+                mask: 1,
+                width: 1,
+                hidden: false,
+                values: vec![crate::parser::edc_parser::DcrFieldValue {
+                    cname: "ON".to_string(),
+                    desc: String::new(),
+                    value: 1,
+                }],
+            }, crate::parser::edc_parser::DcrField {
+                cname: "BKBUG".to_string(),
+                desc: String::new(),
+                mask: 2,
+                width: 1,
+                hidden: false,
+                values: vec![crate::parser::edc_parser::DcrFieldValue {
+                    cname: "OFF".to_string(),
+                    desc: String::new(),
+                    value: 1,
+                }],
+            }],
+        }];
+        device
+            .remappable_inputs
+            .push(crate::parser::edc_parser::RemappablePeripheral {
+                name: "CLCINA".to_string(),
+                direction: "in".to_string(),
+                ppsval: None,
+            });
+        device
+            .remappable_outputs
+            .push(crate::parser::edc_parser::RemappablePeripheral {
+                name: "CLC1OUT".to_string(),
+                direction: "out".to_string(),
+                ppsval: Some(69),
+            });
+
+        assert!(cached_device_needs_reparse(
+            "DSPIC33AK256MPS205",
+            &device,
+            true,
+            true
+        ));
+
+        device.device_info.clc = 10;
+        device.clc_module_id = Some("DOS-01577_cla_clc_upb_v1_dspic33a.Module".to_string());
+        device
+            .pps_input_mappings
+            .push(crate::parser::edc_parser::PPSInputMapping {
+                peripheral: "CLCINA".to_string(),
+                register: "RPINR20".to_string(),
+                register_addr: 0,
+                field_name: "CLCINAR".to_string(),
+                field_mask: 0xff,
+                field_offset: 0,
+            });
+        device
+            .pps_output_mappings
+            .push(crate::parser::edc_parser::PPSOutputMapping {
+                rp_number: 1,
+                register: "RPOR0".to_string(),
+                register_addr: 0,
+                field_name: "RP1R".to_string(),
+                field_mask: 0x7f,
+                field_offset: 0,
+            });
+
+        assert!(!cached_device_needs_reparse(
+            "DSPIC33AK256MPS205",
+            &device,
+            true,
+            true
+        ));
     }
 }

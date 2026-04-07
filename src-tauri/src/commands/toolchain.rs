@@ -6,39 +6,12 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use crate::parser::dfp_manager;
+use crate::part_profile::{detect_device_family, DeviceFamily};
 use crate::settings;
 
 use super::{write_text_file, CompileCheckRequest, CompileCheckResponse, CompilerResponse};
 
 const COMPILER_SEARCH_ROOTS: &[&str] = &["/Applications/microchip", "/opt/microchip"];
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DeviceFamily {
-    Pic24,
-    Dspic33,
-    Unknown,
-}
-
-impl DeviceFamily {
-    fn as_key(self) -> &'static str {
-        match self {
-            Self::Pic24 => "pic24",
-            Self::Dspic33 => "dspic33",
-            Self::Unknown => "unknown",
-        }
-    }
-}
-
-fn detect_device_family(part_number: Option<&str>) -> DeviceFamily {
-    let upper = part_number.unwrap_or_default().trim().to_ascii_uppercase();
-    if upper.starts_with("PIC24") {
-        DeviceFamily::Pic24
-    } else if upper.starts_with("DSPIC33") {
-        DeviceFamily::Dspic33
-    } else {
-        DeviceFamily::Unknown
-    }
-}
 
 fn loaded_toolchain_settings() -> settings::ToolchainSettings {
     settings::load()

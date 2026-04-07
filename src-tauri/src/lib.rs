@@ -6,4 +6,5 @@
 pub mod codegen;
 pub mod commands;
 pub mod parser;
+pub mod part_profile;
 pub mod settings;

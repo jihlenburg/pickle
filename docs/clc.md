@@ -15,7 +15,8 @@ pickle currently treats the CLC feature as one cross-cutting subsystem:
 - `frontend/static/app/05-clc-model.js` owns defaults, normalization, mode metadata, and register packing
 - `frontend/static/app/05-clc-designer.js` owns the DOM-based editor and register preview
 - `frontend/static/app/05-clc-schematic.js` renders the SVG schematic preview
-- `src-tauri/src/codegen/generate.rs` owns the backend `ClcModuleConfig` shape and emitted `configure_clc()` code
+- `src-tauri/src/codegen/generate_clc.rs` owns the backend `ClcModuleConfig` shape and CLC register packing
+- `src-tauri/src/codegen/generate.rs` orchestrates when `configure_clc()` is emitted in the full output
 
 The frontend and backend intentionally share the same logical field layout so a
 saved config can round-trip through the UI, code generation, and compile-check
@@ -251,9 +252,10 @@ Notes:
 
 ## Backend Code Generation
 
-The backend type is `ClcModuleConfig` in
-`src-tauri/src/codegen/generate.rs`. Its field semantics intentionally mirror
-the frontend model.
+The backend CLC type and packing logic live in
+`src-tauri/src/codegen/generate_clc.rs`, and `generate.rs` re-exports the
+`ClcModuleConfig` shape for the rest of the backend. Its field semantics
+intentionally mirror the frontend model.
 
 When any configured modules are present, code generation emits:
 
@@ -261,7 +263,7 @@ When any configured modules are present, code generation emits:
 - a `configure_clc()` implementation in the source
 - a `system_init()` call to `configure_clc()`
 
-Each configured module is emitted in this order:
+Each configured module is emitted in this order on CK-style parts:
 
 1. `CLCnCONL = 0x0000U;` to disable the module before reconfiguration
 2. `CLCnSEL`
@@ -281,6 +283,15 @@ Generated comments include:
 - the resolved mode name
 - the selected `DS1..DS4` values
 - enable/output/inversion summary for the final `CONL`
+
+dsPIC33AK note:
+
+- AK-family devices expose unified 32-bit `CLCxCON`, `CLCxSEL`, and `CLCxGLS`
+  registers instead of the older `CONL` / `CONH` / `GLSL` / `GLSH` split
+- pickle now detects AK-family CLC blocks correctly during parsing and emits
+  the unified `CLCxCON` / `CLCxSEL` / `CLCxGLS` writes during code generation
+- the remaining AK-specific gaps sit around neighboring peripherals, not the
+  generic CLC register packing itself
 
 ## Request / Response Boundaries
 
@@ -355,6 +366,7 @@ When the CLC feature changes, keep these in sync in the same patch:
 - `frontend/static/app/05-clc-designer.js`
 - `frontend/static/app/05-clc-schematic.js`
 - `src-tauri/src/codegen/generate.rs`
+- `src-tauri/src/codegen/generate_clc.rs`
 - this document
 
 If a change affects public behavior, also update:

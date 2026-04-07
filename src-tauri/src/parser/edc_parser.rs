@@ -5,7 +5,9 @@
 //! Parsing is split into three logical passes:
 //! 1. walk `PinList` to recover package/pad/function data
 //! 2. walk `SFRDataSector` to recover register addresses and PPS bitfields
-//! 3. walk `WORMHoleSector` to recover DCR fuse definitions
+//! 3. walk config-fuse sectors (`WORMHoleSector` on older packs,
+//!    `ConfigFuseSector` on newer dsPIC33AK packs) to recover DCR fuse
+//!    definitions
 //!
 //! Keeping those passes separate mirrors the EDC layout and keeps the cached JSON
 //! stable for both frontend rendering and code generation.
@@ -36,6 +38,10 @@ pub struct Pad {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pinout {
     pub package: String,
+    /// Optional user-facing label override. The raw `package` key remains the
+    /// stable lookup identifier used by config files, codegen, and overlay merges.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     pub pin_count: u32,
     pub source: String,
     /// Pin position -> pad name. Serialized with string keys for JSON compat.
@@ -172,6 +178,20 @@ pub struct DeviceData {
 }
 
 impl DeviceData {
+    /// Return true when the device exposes CLC hardware, even if older cached
+    /// JSON predates the parser fields that now track CLC module identity.
+    pub fn has_clc(&self) -> bool {
+        self.clc_module_id.is_some()
+            || self.device_info.clc > 0
+            || self
+                .remappable_inputs
+                .iter()
+                .any(|peripheral| peripheral.name.starts_with("CLCIN"))
+            || self.remappable_outputs.iter().any(|peripheral| {
+                peripheral.name.starts_with("CLC") && peripheral.name.ends_with("OUT")
+            })
+    }
+
     pub fn get_pinout(&self, package: Option<&str>) -> &Pinout {
         if let Some(pkg) = package {
             if let Some(p) = self.pinouts.get(pkg) {
@@ -304,6 +324,19 @@ fn parse_when_value(when: &str) -> u32 {
             .and_then(|m| m.as_str().parse().ok())
             .unwrap_or(0)
     }
+}
+
+/// Backup config-fuse sectors on newer AK packs duplicate the base DCR names
+/// with a `BKUP` suffix. Treat them as the same user-facing register so backup
+/// fields like `ALTI2C1/2/3` merge back into `FDEVOPT`.
+fn canonical_dcr_register_name(name: &str) -> &str {
+    name.strip_suffix("BKUP").unwrap_or(name)
+}
+
+/// Some DFPs mark documented configuration bits as hidden even though the
+/// datasheet shows them and users still need to control them.
+fn should_expose_hidden_dcr_field(register_name: &str, field_name: &str) -> bool {
+    matches!((register_name, field_name), ("FICD", "BKBUG"))
 }
 
 fn extract_port_info(name: &str) -> (Option<String>, Option<u32>) {
@@ -484,18 +517,22 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
     let re_rp_field = Regex::new(r"^RP(\d+)R$").unwrap();
 
     // Peripheral counting: regex patterns keyed by SFR cname
-    let re_uart = Regex::new(r"^U(\d+)MODE$").unwrap();
-    let re_spi = Regex::new(r"^SPI(\d+)CON$").unwrap();
-    let re_i2c = Regex::new(r"^I2C(\d+)CONL$").unwrap();
-    let re_can = Regex::new(r"^C(\d+)CONL$").unwrap();
-    let re_clc = Regex::new(r"^CLC(\d+)CONL$").unwrap();
-    let re_pwm = Regex::new(r"^PG(\d+)CONL$").unwrap();
-    let re_sccp = Regex::new(r"^CCP(\d+)CONL$").unwrap();
+    // dsPIC33A families collapsed many 16-bit register pairs into 32-bit SFRs, so
+    // inventory detection accepts both the older `*CONL`/`MODE` names and the
+    // newer unified `*CON`/`CON1` variants.
+    let re_uart = Regex::new(r"^U(\d+)(?:MODE|CON)$").unwrap();
+    let re_spi = Regex::new(r"^SPI(\d+)CON(?:1L?)?$").unwrap();
+    let re_i2c = Regex::new(r"^I2C(\d+)CON(?:L|1)?$").unwrap();
+    let re_can = Regex::new(r"^C(\d+)CON(?:L)?$").unwrap();
+    let re_clc = Regex::new(r"^CLC(\d+)CON(?:L)?$").unwrap();
+    let re_pwm = Regex::new(r"^PG(\d+)CON(?:L)?$").unwrap();
+    let re_sccp = Regex::new(r"^CCP(\d+)CON1(?:L)?$").unwrap();
     let re_timer = Regex::new(r"^T(\d+)CON$").unwrap();
     let re_sent = Regex::new(r"^SENT(\d+)CON$").unwrap();
     let re_dma = Regex::new(r"^DMACH(\d+)$").unwrap();
-    let re_qei = Regex::new(r"^QEI(\d+)CONL$").unwrap();
-    let re_dac = Regex::new(r"^DAC(\d+)CON$").unwrap();
+    let re_qei = Regex::new(r"^QEI(\d+)CON(?:L)?$").unwrap();
+    let re_dac = Regex::new(r"^DAC(\d+)CON(?:L)?$").unwrap();
+    let re_amp = Regex::new(r"^AMP(\d+)CON1$").unwrap();
 
     let mut seen_uart: HashSet<u32> = HashSet::new();
     let mut seen_spi: HashSet<u32> = HashSet::new();
@@ -509,9 +546,9 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
     let mut seen_dma: HashSet<u32> = HashSet::new();
     let mut seen_qei: HashSet<u32> = HashSet::new();
     let mut seen_dac: HashSet<u32> = HashSet::new();
+    let mut seen_opamp: HashSet<u32> = HashSet::new();
     let mut adc_channels: HashSet<u32> = HashSet::new();
     let mut comparator_channels: HashSet<u32> = HashSet::new();
-    let mut opamp_count: u32 = 0;
     let mut has_shrres = false;
 
     let sfr_sector = root
@@ -550,6 +587,9 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
             }
 
             if cname.starts_with("RPINR") {
+                // dsPIC33AK still advertises PPS inputs through the RPINR family even
+                // though the surrounding SFR model became 32-bit and now includes
+                // extra endpoints such as CLC input assignments (`CLCINAR`, etc.).
                 let mut bit_offset: u32 = 0;
                 for mode_child in sfr.descendants().filter(|n| n.is_element()) {
                     let mtag = mode_child.tag_name().name();
@@ -611,7 +651,10 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
             // Detect CLC IP block identity from the first CLC register we encounter.
             // All CLC registers on a device share the same `_modsrc` — we only need
             // one hit to identify the module variant for input-source lookup.
-            if clc_module_id.is_none() && cname.starts_with("CLC") && cname.ends_with("CONL") {
+            if clc_module_id.is_none()
+                && cname.starts_with("CLC")
+                && (cname.ends_with("CONL") || cname.ends_with("CON"))
+            {
                 if let Some(modsrc) = get_edc_attr(&sfr, "_modsrc") {
                     if modsrc.contains("clc") {
                         clc_module_id = Some(modsrc.to_string());
@@ -641,6 +684,7 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
             count_peripheral!(re_dma, seen_dma);
             count_peripheral!(re_qei, seen_qei);
             count_peripheral!(re_dac, seen_dac);
+            count_peripheral!(re_amp, seen_opamp);
 
             // Count ADC channels and comparators from interrupt vector names,
             // op-amps from AMPEN field defs, and ADC resolution from SHRRES.
@@ -651,7 +695,9 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
                 let fname = get_edc_attr(&fld, "cname").unwrap_or("");
                 if let Some(rest) = fname.strip_prefix("AMPEN") {
                     if rest.chars().all(|c| c.is_ascii_digit()) && !rest.is_empty() {
-                        opamp_count += 1;
+                        if let Ok(n) = rest.parse::<u32>() {
+                            seen_opamp.insert(n);
+                        }
                     }
                 }
                 if fname == "SHRRES" {
@@ -665,9 +711,10 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
     // These live in `InterruptList` elements, not SFR registers.
     let re_adcan = Regex::new(r"^ADCAN(\d+)Interrupt$").unwrap();
     let re_cmp = Regex::new(r"^CMP(\d+)Interrupt$").unwrap();
-    for node in root.descendants().filter(|n| {
-        n.is_element() && n.tag_name().name() == "Interrupt"
-    }) {
+    for node in root
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "Interrupt")
+    {
         let irq_name = get_edc_attr(&node, "cname")
             .or_else(|| get_edc_attr(&node, "name"))
             .unwrap_or("");
@@ -683,14 +730,29 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
         }
     }
 
+    // Fall back to pad metadata for ADC channel inventory. This works across
+    // older EDCs that expose dedicated ADC interrupts and newer dsPIC33A packs
+    // that only advertise the analog channels in the pad function list.
+    let re_analog_channel = Regex::new(r"^AN[A-Z]?(\d+)$").unwrap();
+    for pad in pads.values() {
+        for channel in &pad.analog_channels {
+            if let Some(caps) = re_analog_channel.captures(channel) {
+                if let Ok(n) = caps.get(1).unwrap().as_str().parse::<u32>() {
+                    adc_channels.insert(n);
+                }
+            }
+        }
+    }
+
     // --- Memory region extraction ---
     let mut ram_bytes: u32 = 0;
     let mut flash_bytes: u32 = 0;
 
     // RAM: DataSpace element with largest span (xbeginaddr..xendaddr)
-    for ds in root.descendants().filter(|n| {
-        n.is_element() && n.tag_name().name() == "DataSpace"
-    }) {
+    for ds in root
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "DataSpace")
+    {
         let begin = parse_int(get_edc_attr(&ds, "xbeginaddr").unwrap_or("0"));
         let end = parse_int(get_edc_attr(&ds, "xendaddr").unwrap_or("0"));
         if end > begin {
@@ -704,9 +766,10 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
     // Flash: CodeSector beginaddr..endaddr uses PC byte-addressing
     // (each 24-bit instruction word occupies 2 PC addresses), so
     // instruction words = (end - begin) / 2, each word = 3 bytes.
-    for cs in root.descendants().filter(|n| {
-        n.is_element() && n.tag_name().name() == "CodeSector"
-    }) {
+    for cs in root
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "CodeSector")
+    {
         let begin = parse_int(get_edc_attr(&cs, "beginaddr").unwrap_or("0"));
         let end = parse_int(get_edc_attr(&cs, "endaddr").unwrap_or("0"));
         if end > begin {
@@ -724,7 +787,7 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
         adc_max_resolution: if has_shrres { 12 } else { 0 },
         comparators: comparator_channels.len() as u32,
         dac_channels: seen_dac.len() as u32,
-        op_amps: opamp_count,
+        op_amps: seen_opamp.len() as u32,
         pwm_generators: seen_pwm.len() as u32,
         uarts: seen_uart.len() as u32,
         spis: seen_spi.len() as u32,
@@ -739,11 +802,15 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
     };
 
     // Third pass: parse DCR (Device Configuration Register) definitions from
-    // `WORMHoleSector` to discover fuse registers, fields, and valid values.
+    // config-fuse sectors to discover fuse registers, fields, and valid values.
+    // Older packs expose these under `WORMHoleSector`; newer dsPIC33AK packs
+    // place the same `DCRDef` nodes directly under `ConfigFuseSector`.
     let mut fuse_defs: Vec<DcrRegister> = Vec::new();
+    let mut fuse_index: HashMap<String, usize> = HashMap::new();
 
     for sector in root.descendants().filter(|n| {
-        n.tag_name().name() == "WORMHoleSector"
+        let tag_name = n.tag_name().name();
+        (tag_name == "WORMHoleSector" || tag_name == "ConfigFuseSector")
             && get_edc_attr(n, "regionid")
                 .map(|id| id.contains("cfgmem") || id.contains("config"))
                 .unwrap_or(false)
@@ -752,15 +819,17 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
             .children()
             .filter(|n| n.is_element() && n.tag_name().name() == "DCRDef")
         {
-            let cname = get_edc_attr(&dcr_def, "cname").unwrap_or("").to_string();
+            let raw_cname = get_edc_attr(&dcr_def, "cname").unwrap_or("").to_string();
+            let cname = canonical_dcr_register_name(&raw_cname).to_string();
             let desc = get_edc_attr(&dcr_def, "desc").unwrap_or("").to_string();
             let addr = parse_int(get_edc_attr(&dcr_def, "_addr").unwrap_or("0"));
             let default_value = parse_int(get_edc_attr(&dcr_def, "default").unwrap_or("0"));
             let reg_hidden = get_edc_attr(&dcr_def, "ishidden")
                 .map(|v| v == "true")
                 .unwrap_or(false);
+            let is_backup_register = raw_cname != cname;
 
-            if cname.is_empty() || reg_hidden {
+            if cname.is_empty() || (reg_hidden && !is_backup_register) {
                 continue;
             }
 
@@ -784,6 +853,7 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
                     let hidden = get_edc_attr(&child, "ishidden")
                         .map(|v| v == "true")
                         .unwrap_or(false);
+                    let hidden = hidden && !should_expose_hidden_dcr_field(&cname, &field_cname);
 
                     if field_cname.is_empty() || field_mask == 0 {
                         continue;
@@ -825,19 +895,69 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
 
             // Only include registers that have at least one selectable field.
             if !fields.is_empty() {
-                fuse_defs.push(DcrRegister {
-                    cname,
-                    desc,
-                    addr,
-                    default_value,
-                    fields,
-                });
+                let register_index = if let Some(index) = fuse_index.get(&cname).copied() {
+                    index
+                } else {
+                    fuse_defs.push(DcrRegister {
+                        cname: cname.clone(),
+                        desc: desc.clone(),
+                        addr,
+                        default_value,
+                        fields: Vec::new(),
+                    });
+                    let index = fuse_defs.len() - 1;
+                    fuse_index.insert(cname.clone(), index);
+                    index
+                };
+                let register = &mut fuse_defs[register_index];
+
+                if register.desc.is_empty() && !desc.is_empty() {
+                    register.desc = desc;
+                }
+
+                // Prefer the visible sector metadata when available, but allow
+                // backup sectors to seed the register if they are the only
+                // place the pack exposed a user-facing field.
+                if !reg_hidden || register.addr == 0 {
+                    register.addr = addr;
+                    register.default_value = default_value;
+                }
+
+                for field in fields {
+                    if let Some(existing) = register
+                        .fields
+                        .iter_mut()
+                        .find(|candidate| candidate.cname == field.cname)
+                    {
+                        if existing.desc.is_empty() && !field.desc.is_empty() {
+                            existing.desc = field.desc.clone();
+                        }
+                        if existing.mask == 0 {
+                            existing.mask = field.mask;
+                        }
+                        if existing.width == 0 {
+                            existing.width = field.width;
+                        }
+                        existing.hidden = existing.hidden && field.hidden;
+
+                        for value in field.values {
+                            if !existing.values.iter().any(|candidate| {
+                                candidate.cname == value.cname && candidate.value == value.value
+                            }) {
+                                existing.values.push(value);
+                            }
+                        }
+                    } else {
+                        register.fields.push(field);
+                    }
+                }
             }
         }
     }
 
     let default_pinout = Pinout {
         package: pkg_name.clone(),
+        display_name: None,
         pin_count: pinout_map.len() as u32,
         source: "edc".to_string(),
         pins: pinout_map,
@@ -867,6 +987,8 @@ pub fn parse_edc_file(filepath: &Path) -> Result<DeviceData, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn test_parse_int() {
@@ -937,5 +1059,201 @@ mod tests {
         assert_eq!(pins.len(), 28);
         assert_eq!(pins[0].position, 1);
         assert_eq!(pins[0].pad_name, "RA1");
+    }
+
+    #[test]
+    fn test_has_clc_detects_pps_only_cached_shape() {
+        let device = DeviceData {
+            part_number: "DSPIC33AK256MPS205".to_string(),
+            pads: HashMap::new(),
+            pinouts: HashMap::new(),
+            default_pinout: String::new(),
+            remappable_inputs: vec![RemappablePeripheral {
+                name: "CLCINA".to_string(),
+                direction: "in".to_string(),
+                ppsval: None,
+            }],
+            remappable_outputs: vec![RemappablePeripheral {
+                name: "CLC1OUT".to_string(),
+                direction: "out".to_string(),
+                ppsval: Some(69),
+            }],
+            pps_input_mappings: Vec::new(),
+            pps_output_mappings: Vec::new(),
+            port_registers: HashMap::new(),
+            ansel_bits: HashMap::new(),
+            fuse_defs: Vec::new(),
+            clc_module_id: None,
+            clc_input_sources: None,
+            device_info: DeviceInfo::default(),
+        };
+
+        assert!(device.has_clc());
+    }
+
+    #[test]
+    fn test_parse_ak_style_pps_registers_and_clc_inputs() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let mut temp_path: PathBuf = std::env::temp_dir();
+        temp_path.push(format!("pickle-ak-pps-{unique}.PIC"));
+
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<edc:Device xmlns:edc="http://crownking/edc" xmlns:ltx="urn:pickle:test" edc:name="DSPIC33AK64MC105">
+  <edc:PinList edc:desc="AK TEST PACKAGE">
+    <edc:Pin>
+      <edc:VirtualPin edc:name="RA0"/>
+      <edc:VirtualPin edc:name="RP1"/>
+    </edc:Pin>
+    <edc:RemappablePin edc:direction="in">
+      <edc:VirtualPin edc:name="U1RX"/>
+    </edc:RemappablePin>
+    <edc:RemappablePin edc:direction="in">
+      <edc:VirtualPin edc:name="CLCINA"/>
+    </edc:RemappablePin>
+    <edc:RemappablePin edc:direction="out">
+      <edc:VirtualPin edc:name="U1TX" edc:ppsval="9"/>
+    </edc:RemappablePin>
+  </edc:PinList>
+  <edc:SFRDataSector>
+    <edc:SFRDef edc:cname="RPCON" edc:_addr="0x3900" ltx:memberofperipheral="PPS">
+      <edc:SFRFieldDef edc:cname="IOLOCK" edc:mask="0x800" edc:nzwidth="0x1"/>
+    </edc:SFRDef>
+    <edc:SFRDef edc:cname="RPINR9" edc:_addr="0x3928" ltx:memberofperipheral="PPS">
+      <edc:SFRFieldDef edc:cname="U1RXR" edc:mask="0xff" edc:nzwidth="0x8"/>
+    </edc:SFRDef>
+    <edc:SFRDef edc:cname="RPINR20" edc:_addr="0x3954" ltx:memberofperipheral="PPS">
+      <edc:SFRFieldDef edc:cname="CLCINAR" edc:mask="0xff" edc:nzwidth="0x8"/>
+    </edc:SFRDef>
+    <edc:SFRDef edc:cname="RPOR0" edc:_addr="0x3980" ltx:memberofperipheral="PPS">
+      <edc:SFRFieldDef edc:cname="RP1R" edc:mask="0x7f" edc:nzwidth="0x7"/>
+      <edc:SFRFieldDef edc:cname="RP2R" edc:mask="0x7f" edc:nzwidth="0x7"/>
+    </edc:SFRDef>
+  </edc:SFRDataSector>
+</edc:Device>
+"#;
+
+        fs::write(&temp_path, xml).unwrap();
+        let device = parse_edc_file(&temp_path).unwrap();
+        let _ = fs::remove_file(&temp_path);
+
+        assert_eq!(device.part_number, "DSPIC33AK64MC105");
+        assert_eq!(device.remappable_inputs.len(), 2);
+        assert_eq!(device.remappable_outputs.len(), 1);
+        assert!(device
+            .pps_input_mappings
+            .iter()
+            .any(|m| m.field_name == "U1RXR" && m.register == "RPINR9" && m.field_mask == 0xff));
+        assert!(device
+            .pps_input_mappings
+            .iter()
+            .any(|m| m.field_name == "CLCINAR" && m.register == "RPINR20" && m.field_mask == 0xff));
+        assert!(device
+            .pps_output_mappings
+            .iter()
+            .any(|m| m.field_name == "RP1R" && m.register == "RPOR0" && m.field_mask == 0x7f));
+    }
+
+    #[test]
+    fn test_parse_config_fuse_sector_dcrs() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let mut temp_path: PathBuf = std::env::temp_dir();
+        temp_path.push(format!("pickle-ak-dcr-{unique}.PIC"));
+
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<edc:Device xmlns:edc="http://crownking/edc" edc:name="DSPIC33AK256MC205">
+  <edc:PinList edc:desc="AK TEST PACKAGE">
+    <edc:Pin>
+      <edc:VirtualPin edc:name="RA0"/>
+    </edc:Pin>
+  </edc:PinList>
+  <edc:ProgramSpace>
+    <edc:ConfigFuseSector edc:beginaddr="0x7F3000" edc:endaddr="0x7F3800" edc:regionid="cfgmema1">
+      <edc:DCRDef edc:cname="FICD" edc:desc="" edc:default="0xFFFFFFDF" edc:_addr="0x7F3010">
+        <edc:DCRModeList>
+          <edc:DCRMode edc:id="DS.0">
+            <edc:DCRFieldDef edc:cname="BKBUG" edc:desc="Debugger enable bit." edc:ishidden="true" edc:mask="0x80" edc:nzwidth="1">
+              <edc:DCRFieldSemantic edc:cname="ON" edc:desc="Debugger enabled." edc:when="(field &amp; 0x80) == 0x0"/>
+              <edc:DCRFieldSemantic edc:cname="OFF" edc:desc="Debugger disabled." edc:when="(field &amp; 0x80) == 0x80"/>
+            </edc:DCRFieldDef>
+            <edc:DCRFieldDef edc:cname="JTAGEN" edc:desc="JTAG enable bit." edc:mask="0x1" edc:nzwidth="1">
+              <edc:DCRFieldSemantic edc:cname="OFF" edc:desc="JTAG is disabled." edc:when="(field &amp; 0x1) == 0x0"/>
+              <edc:DCRFieldSemantic edc:cname="ON" edc:desc="JTAG is enabled." edc:when="(field &amp; 0x1) == 0x1"/>
+            </edc:DCRFieldDef>
+          </edc:DCRMode>
+        </edc:DCRModeList>
+      </edc:DCRDef>
+      <edc:DCRDef edc:cname="FDEVOPT" edc:desc="" edc:default="0xFFFFFFFF" edc:_addr="0x7F3020">
+        <edc:DCRModeList>
+          <edc:DCRMode edc:id="DS.0">
+            <edc:DCRFieldDef edc:cname="BISTDIS" edc:desc="RAM test disable." edc:mask="0x40" edc:nzwidth="1">
+              <edc:DCRFieldSemantic edc:cname="ON" edc:desc="RAM test enabled." edc:when="(field &amp; 0x40) == 0x0"/>
+              <edc:DCRFieldSemantic edc:cname="OFF" edc:desc="RAM test disabled." edc:when="(field &amp; 0x40) == 0x40"/>
+            </edc:DCRFieldDef>
+          </edc:DCRMode>
+        </edc:DCRModeList>
+      </edc:DCRDef>
+      <edc:DCRDef edc:cname="FWDT" edc:desc="" edc:default="0xFFFFFFFF" edc:_addr="0x7F3030">
+        <edc:DCRModeList>
+          <edc:DCRMode edc:id="DS.0">
+            <edc:DCRFieldDef edc:cname="WDTEN" edc:desc="Watchdog enable." edc:mask="0x1" edc:nzwidth="1">
+              <edc:DCRFieldSemantic edc:cname="SW" edc:desc="Software controlled." edc:when="(field &amp; 0x1) == 0x0"/>
+              <edc:DCRFieldSemantic edc:cname="HW" edc:desc="Hardware enabled." edc:when="(field &amp; 0x1) == 0x1"/>
+            </edc:DCRFieldDef>
+          </edc:DCRMode>
+        </edc:DCRModeList>
+      </edc:DCRDef>
+    </edc:ConfigFuseSector>
+    <edc:ConfigFuseSector edc:beginaddr="0x7F3800" edc:endaddr="0x7F4000" edc:regionid="cfgmema1backup">
+      <edc:DCRDef edc:cname="FDEVOPTBKUP" edc:desc="" edc:default="0xFFFFFFFF" edc:_addr="0x7F3820" edc:ishidden="true">
+        <edc:DCRModeList>
+          <edc:DCRMode edc:id="DS.0">
+            <edc:DCRFieldDef edc:cname="ALTI2C1" edc:desc="Alternate I2C1 pins." edc:mask="0x8" edc:nzwidth="1">
+              <edc:DCRFieldSemantic edc:cname="ON" edc:desc="Alternate I2C1 pins are used." edc:when="(field &amp; 0x8) == 0x0"/>
+              <edc:DCRFieldSemantic edc:cname="OFF" edc:desc="Primary I2C1 pins are used." edc:when="(field &amp; 0x8) == 0x8"/>
+            </edc:DCRFieldDef>
+            <edc:DCRFieldDef edc:cname="SPI2DIS" edc:desc="SPI2 direct pins disable." edc:mask="0x2000" edc:nzwidth="1">
+              <edc:DCRFieldSemantic edc:cname="OFF" edc:desc="Host SPI2 uses PPS." edc:when="(field &amp; 0x2000) == 0x0"/>
+              <edc:DCRFieldSemantic edc:cname="ON" edc:desc="Host SPI2 uses direct pins." edc:when="(field &amp; 0x2000) == 0x2000"/>
+            </edc:DCRFieldDef>
+          </edc:DCRMode>
+        </edc:DCRModeList>
+      </edc:DCRDef>
+    </edc:ConfigFuseSector>
+  </edc:ProgramSpace>
+</edc:Device>
+"#;
+
+        fs::write(&temp_path, xml).unwrap();
+        let device = parse_edc_file(&temp_path).unwrap();
+        let _ = fs::remove_file(&temp_path);
+
+        assert_eq!(device.fuse_defs.len(), 3);
+        assert!(device.fuse_defs.iter().any(|reg| {
+            reg.cname == "FICD"
+                && reg.fields.iter().any(|field| field.cname == "JTAGEN")
+                && reg
+                    .fields
+                    .iter()
+                    .any(|field| field.cname == "BKBUG" && !field.hidden)
+        }));
+        assert!(device.fuse_defs.iter().any(|reg| {
+            reg.cname == "FDEVOPT"
+                && reg.fields.iter().any(|field| field.cname == "BISTDIS")
+                && reg.fields.iter().any(|field| field.cname == "ALTI2C1")
+                && reg.fields.iter().any(|field| field.cname == "SPI2DIS")
+        }));
+        assert!(device.fuse_defs.iter().any(
+            |reg| reg.cname == "FWDT" && reg.fields.iter().any(|field| field.cname == "WDTEN")
+        ));
+        assert!(!device
+            .fuse_defs
+            .iter()
+            .any(|reg| reg.cname == "FDEVOPTBKUP"));
     }
 }

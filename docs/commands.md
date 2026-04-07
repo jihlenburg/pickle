@@ -1,6 +1,6 @@
 # Tauri Commands
 
-pickle exposes its desktop/backend API through `#[tauri::command]` handlers in `src-tauri/src/commands.rs` and `src-tauri/src/commands/*.rs`.
+pickle exposes its desktop/backend API through `#[tauri::command]` handlers under `src-tauri/src/commands/`, with `src-tauri/src/commands.rs` acting as the command facade/re-export root.
 
 - Frontend calls use `window.__TAURI__.core.invoke("command_name", { ...args })`.
 - Some long-running verification commands also emit `verify-progress` events so the UI can stream status text.
@@ -15,6 +15,7 @@ pickle exposes its desktop/backend API through `#[tauri::command]` handlers in `
 | `index_status` | Report pack index availability/staleness |
 | `load_app_settings` | Load or create `settings.toml` |
 | `set_theme_mode` | Persist theme preference |
+| `set_welcome_intro_seen` | Persist first-launch intro dismissal state |
 | `remember_last_used_device` | Persist last loaded part/package |
 | `load_device` | Resolve a device/package into the frontend payload |
 | `open_text_file_dialog` | Pick and read a text file |
@@ -29,6 +30,9 @@ pickle exposes its desktop/backend API through `#[tauri::command]` handlers in `
 | `find_datasheet` | Resolve a datasheet from cache/download/text fallback |
 | `verify_pinout` | Run datasheet verification with OpenAI or Anthropic |
 | `apply_overlay` | Save package pin overlays to `pinouts/` |
+| `set_package_display_name` | Save or clear a local display-name override for any package |
+| `rename_overlay_package` | Rename an overlay-backed package entry |
+| `delete_overlay_package` | Delete an overlay-backed package entry |
 | `api_key_status` | Report whether any supported verification key is configured |
 
 ## Device Index And Loading
@@ -103,7 +107,7 @@ Response:
   "part_number": "DSPIC33CK64MP102",
   "selected_package": "SSOP-28",
   "packages": {
-    "SSOP-28": { "pin_count": 28, "source": "edc" }
+    "SSOP-28": { "pin_count": 28, "source": "edc", "display_name": null }
   },
   "pin_count": 28,
   "pins": [],
@@ -118,6 +122,10 @@ Response:
 ```
 
 `pins` contains resolved per-position pin objects from `DeviceData::resolve_pins()`, including pad name, functions, RP number, port metadata, and package position.
+
+`selected_package` and the keys in `packages` are the stored backend package identifiers. The frontend may normalize some internal EDC-coded labels such as `STX04 (48-pin uQFN)` into a friendlier display label like `48-PIN VQFN`, and package metadata can also carry an explicit `display_name` override. In both cases, the backend keys remain unchanged for lookups, config files, and overlay merges. The current package selector stays visible in the header even when only one visible package exists; rename/reset/delete actions live in the attached package-actions menu rather than altering the backend key directly.
+
+`has_clc` is derived from the parsed device data, not only from a cached `clc_module_id`. That means devices with visible `CLCINx` / `CLCxOUT` endpoints still expose the CLC tab even if an older cache predates the newer module-ID parsing pass.
 
 ## Settings
 
@@ -145,6 +153,12 @@ Response:
     "codegen": {
       "output_basename": "mcu_init"
     },
+    "verification": {
+      "provider": "auto"
+    },
+    "onboarding": {
+      "welcome_intro_seen": false
+    },
     "last_used": { "part_number": "DSPIC33CK64MP102", "package": "SSOP-28" }
   }
 }
@@ -161,6 +175,18 @@ Request:
 | `theme` | string | yes |
 
 Allowed values are `dark`, `light`, and `system`. Invalid values are normalized by the backend.
+
+### `set_welcome_intro_seen`
+
+Persists whether the first-launch intro overlay has already been dismissed.
+
+Request:
+
+| Field | Type | Required |
+|---|---|---|
+| `seen` | bool | yes |
+
+Response: none
 
 ### `remember_last_used_device`
 
@@ -353,6 +379,12 @@ If `request.oscillator` is present, clock-related fuse fields that it owns are
 still accepted in `request.fuses`, but they are ignored during emission so the
 generated source cannot contain duplicate `#pragma config` lines.
 
+For dsPIC33AK parts, the backend now synthesizes the shared runtime
+clock-generator register sequence automatically. The generated source uses
+`OSCCFG`, `CLK1CON`, `CLK1DIV`, `PLL1CON`, and `PLL1DIV` instead of CK-style
+`FNOSC` / `POSCMD` / `PLLKEN` pragmas, and still strips those legacy fuse
+fields from incoming fuse blocks to avoid conflicting output.
+
 See [CLC](clc.md) for the exact `ClcModuleConfig` field layout and the way the
 frontend normalizes/persists configured modules.
 
@@ -437,6 +469,7 @@ Response:
 Search order:
 
 1. cached datasheet files under `dfp_cache/datasheets`
+   Local candidates are re-validated against the selected part before reuse. pickle accepts an exact part match or a sibling-family match with the same family-series marker such as `MC10` for `MC105` / `MC106`, and ignores obviously clipped PDFs that are too small to be a full datasheet. After `find_datasheet` resolves a Microchip family PDF for a specific part, later validation also trusts the cached datasheet number/title from that resolution, so a valid family PDF can be reused even when its title does not repeat the exact selected part suffix.
 2. shallow scan of `~/Downloads`
 3. Microchip product-page resolution and PDF download
 4. text-extraction fallback when PDF download fails
@@ -504,11 +537,18 @@ Response: serialized `VerifyResult`
 }
 ```
 
-The real response includes per-package pin maps, `pin_functions`, correction lists, and optional extracted CLC input-source tables. This command also emits `verify-progress` events.
+The real response includes per-package pin maps, `pin_functions`, locally derived correction lists, and optional extracted CLC input-source tables. Package tables are filtered by both pin count and explicit device-branch compatibility when a family datasheet mixes variants such as `MC` and `MPS`. The backend now treats the provider pass as datasheet-table extraction only and computes mismatches against the loaded device locally, which keeps corrections deterministic and lets sibling parts sharing the same family PDF reuse the same cached extraction result. This command also emits `verify-progress` events with staged payloads such as `datasheet.search`, `provider.upload`, and `result.done`, plus optional `detail`, `progress`, and `provider` fields.
+
+Implementation note: the command layer is now split into `commands/verification/lookup.rs` for datasheet discovery, `commands/verification/run.rs` for the provider-backed pinout/CLC commands, `commands/verification/overlay.rs` for overlay/name/status actions, and `commands/verification_support.rs` for shared datasheet decode/cache/device-context prep. The parser-side verification path is split into prompt/cache-scope helpers (`verify_prompt.rs`), shared progress payloads (`verify_progress.rs`), bookmark/PDF reduction and PNG rendering (`verify_pdf.rs`), provider dispatch (`verify_provider.rs`), shared provider schema (`verify_provider_schema.rs`), Anthropic/OpenAI transports (`verify_provider_anthropic.rs`, `verify_provider_openai.rs`), OpenAI stream normalization (`verify_openai_stream.rs`), local comparison/filtering (`verify_compare.rs`), overlay persistence (`verify_overlay.rs`), and the cache-aware runner (`pinout_verifier.rs`).
+
+The non-LLM DFP/data-source side is also split more explicitly now: `dfp_paths.rs` owns read-root and cache-path policy, `dfp_datasheet.rs` owns PDF probing/validation plus local datasheet cache reuse, `dfp_store.rs` owns cached-device JSON plus overlay/CLC-source persistence, and `dfp_manager.rs` stays focused on device-pack lookup/extraction and compiler-support orchestration.
 
 ### `apply_overlay`
 
-Writes package pin overlays to `pinouts/<PART>.json`.
+Writes package pin overlays to `pinouts/<PART>.json`. If the verified package
+table is pin-for-pin identical to an existing device-pack variant, the command
+now stores a display-name override on that canonical package key instead of
+creating a second redundant overlay package entry.
 
 Request:
 
@@ -534,7 +574,88 @@ Response:
 ```json
 {
   "success": true,
-  "path": "/.../pinouts/DSPIC33CK64MP102.json"
+  "path": "/.../pinouts/DSPIC33CK64MP102.json",
+  "packageName": "SSOP-28"
+}
+```
+
+### `set_package_display_name`
+
+Saves or clears a local display-name override for any package inside `pinouts/<PART>.json`. This changes only the UI label. The stored backend package key remains unchanged.
+
+Request:
+
+```json
+{
+  "request": {
+    "partNumber": "DSPIC33CK64MP102",
+    "packageName": "STX04 (48-pin uQFN)",
+    "displayName": "48-PIN VQFN"
+  }
+}
+```
+
+To clear the override and fall back to the default label, send `null` for `displayName`.
+
+Response:
+
+```json
+{
+  "success": true,
+  "path": "/.../pinouts/DSPIC33CK64MP102.json",
+  "packageName": "STX04 (48-pin uQFN)",
+  "displayName": "48-PIN VQFN"
+}
+```
+
+### `rename_overlay_package`
+
+Renames an existing overlay-backed package key inside `pinouts/<PART>.json`. Built-in device-pack package entries are not modified by this command. This is distinct from `set_package_display_name`, which only changes the UI label.
+
+Request:
+
+```json
+{
+  "request": {
+    "partNumber": "DSPIC33CK64MP102",
+    "oldPackageName": "48-PIN TQFP",
+    "newPackageName": "48-PIN TQFP (7x7)"
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "path": "/.../pinouts/DSPIC33CK64MP102.json",
+  "packageName": "48-PIN TQFP (7x7)"
+}
+```
+
+### `delete_overlay_package`
+
+Deletes an overlay-backed package entry from `pinouts/<PART>.json`. If that removal leaves the overlay file empty, the backend deletes the file.
+
+Request:
+
+```json
+{
+  "request": {
+    "partNumber": "DSPIC33CK64MP102",
+    "packageName": "48-PIN TQFP"
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "path": null,
+  "packageName": "48-PIN TQFP"
 }
 ```
 

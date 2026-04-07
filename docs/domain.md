@@ -373,6 +373,17 @@ Common fields surfaced by pickle include:
 
 The backend does not hardcode values when it can avoid it; it prefers the parsed field/value list from the device pack.
 
+Newer dsPIC33AK packs may publish these definitions under `ConfigFuseSector`
+instead of the older `WORMHoleSector` naming. pickle now parses both shapes and
+normalizes duplicate register definitions before the frontend groups them into
+debug, watchdog, protection, and other higher-signal sections.
+
+For dsPIC33AK specifically, the migration guide notes that many legacy
+clock-selection bits moved out of the configuration-memory region and into the
+runtime SFR space. That means CK-era fields such as `FNOSC`, `POSCMD`,
+`PLLKEN`, and `XTCFG` should not be treated as the primary clock-control
+mechanism on AK parts.
+
 ## Oscillator System
 
 Relevant sources handled by pickle:
@@ -399,6 +410,18 @@ With dsPIC33CK constraints:
 
 The backend chooses the closest valid result to the requested `Fosc`.
 
+dsPIC33AK changes two important assumptions:
+
+- `Fcy = Fosc` rather than `Fcy = Fosc / 2`
+- the clock tree is configured through `OSCCFG`, `CLKxCON`, `CLKxDIV`,
+  `PLLxCON`, and `PLLxDIV` style SFRs with ready bits that must be polled
+
+pickle keeps the CK-style pragma path on CK families, but on dsPIC33AK it now
+emits the runtime clock-generator sequence directly instead of pretending the
+old pragma-based flow still applies. The remaining AK work is now around
+family-specific peripheral init, especially the larger PWM/power surface on
+`dsPIC33AKxxxMPSxxx` parts.
+
 ## Port Registers
 
 The generator currently reasons about:
@@ -418,6 +441,9 @@ Datasheets sometimes document package variants or corrections that do not appear
 
 ```json
 {
+  "display_names": {
+    "STX04 (48-pin uQFN)": "48-PIN VQFN"
+  },
   "packages": {
     "QFN-48": {
       "pin_count": 48,
@@ -431,7 +457,7 @@ Datasheets sometimes document package variants or corrections that do not appear
 }
 ```
 
-These overlays are merged into the device at load time and can be created either manually or from verification results.
+These overlays are merged into the device at load time and can be created either manually or from verification results. The optional `display_names` map stores local UI label overrides without changing the underlying backend package key.
 
 ## CLC
 

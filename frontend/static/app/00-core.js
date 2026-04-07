@@ -91,7 +91,7 @@ let indexCatalogState = {
     isStale: true,
 };
 
-/** @type {{appearance:{theme:string}, startup:{device:string, package:string}, toolchain:{fallback_compiler:string, family_compilers:{pic24:string, dspic33:string}}, codegen:{output_basename:string}, verification:{provider:string}, last_used:{part_number:string, package:string}}} */
+/** @type {{appearance:{theme:string}, startup:{device:string, package:string}, toolchain:{fallback_compiler:string, family_compilers:{pic24:string, dspic33:string}}, codegen:{output_basename:string}, verification:{provider:string}, onboarding:{welcome_intro_seen:boolean}, last_used:{part_number:string, package:string}}} */
 let appSettings = defaultAppSettings();
 
 function defaultAppSettings() {
@@ -314,7 +314,7 @@ function periphClass(name) {
     if (/^S[DC][AL]/.test(name)) return 'periph-i2c';
     if (/^PWM|^OCM/.test(name)) return 'periph-pwm';
     if (/^T\d|^TCKI|^ICM/.test(name)) return 'periph-timer';
-    if (/^AN|^ADC/.test(name)) return 'periph-adc';
+    if (/^AN|^ADC|^AD\d+AN/.test(name)) return 'periph-adc';
     if (/^CMP/.test(name)) return 'periph-cmp';
     if (/^OA/.test(name)) return 'periph-opamp';
     return 'periph-other';
@@ -327,7 +327,7 @@ function periphClass(name) {
  * @returns {string} CSS class name (e.g. "tag-adc", "tag-cmp")
  */
 function funcTagColorClass(name) {
-    if (/^AN[A-Z]?\d+$|^VREF[+-]?$|^IBIAS/.test(name)) return 'tag-adc';
+    if (/^AN[A-Z]?\d+$|^AD\d+AN[A-Z]*\d+$|^VREF[+-]?$|^IBIAS/.test(name)) return 'tag-adc';
     if (/^CMP\d+[A-D]?$/.test(name))                     return 'tag-cmp';
     if (/^OA\d/.test(name))                                return 'tag-opamp';
     if (/^DAC/.test(name))                                 return 'tag-dac';
@@ -387,36 +387,53 @@ async function loadDevice(pkg, options = {}) {
     try {
         deviceData = await invoke('load_device', { partNumber: part, package: pkg || null });
 
-        // Populate package selector. Keep it visible when a synthetic fallback
-        // package was hidden so the user can still see which real package is active.
+        const preferredSelectedPackage = model.preferredVisiblePackageName(
+            deviceData?.packages || {},
+            deviceData?.selected_package || ''
+        );
+        if (
+            preferredSelectedPackage
+            && deviceData?.selected_package
+            && preferredSelectedPackage !== deviceData.selected_package
+        ) {
+            await loadDevice(preferredSelectedPackage, options);
+            return;
+        }
+
+        // Always show the current package once a device is loaded. Even when
+        // there is only one visible package, the selector is still useful as
+        // an identity anchor for the attached package-actions menu.
         const pkgSelect = $('pkg-select');
-        const allPkgNames = Object.keys(deviceData.packages);
-        const pkgNames = visiblePackageNames();
-        const syntheticHidden = allPkgNames.some((name) => isSyntheticPackage(name) && !pkgNames.includes(name));
-        if (pkgNames.length > 1 || syntheticHidden) {
+        const pkgEntries = visiblePackageEntries();
+        const pkgGroup = $('pkg-control-group');
+        if (pkgSelect && pkgEntries.length > 0) {
             pkgSelect.innerHTML = '';
-            for (const name of pkgNames) {
+            for (const entry of pkgEntries) {
+                const name = entry.backendKey;
                 const meta = deviceData.packages[name];
                 const opt = document.createElement('option');
                 opt.value = name;
-                opt.textContent = `${displayPackageName(name, { meta })} (${meta.pin_count}p)`;
-                if (isSyntheticPackage(name, meta)) {
+                opt.textContent = `${entry.displayName} (${meta.pin_count}p)`;
+                if (entry.synthetic) {
                     opt.title = 'Fallback package from the EDC. This is not a real package name; verify against the datasheet to import the actual package.';
+                } else if (entry.displayName !== name) {
+                    opt.title = `Stored package name: ${name}`;
                 }
                 if (name === deviceData.selected_package) opt.selected = true;
                 pkgSelect.appendChild(opt);
             }
-            pkgSelect.disabled = pkgNames.length <= 1;
-            pkgSelect.title = syntheticHidden
-                ? 'The synthetic EDC fallback package was hidden. This is the real datasheet-backed package currently in use.'
-                : isSyntheticPackage(deviceData.selected_package)
-                    ? 'Current package is a fallback from the EDC and not a real package name. Verify against the datasheet to import the actual package.'
-                    : '';
-            showElement(pkgSelect);
-        } else {
             pkgSelect.disabled = false;
-            hideElement(pkgSelect);
+            pkgSelect.title = isSyntheticPackage(deviceData.selected_package)
+                ? 'Current package is a fallback from the EDC and not a real package name. Verify against the datasheet to import the actual package.'
+                : 'Current package';
+            showElement(pkgGroup, 'inline-flex');
+        } else {
+            if (pkgSelect) {
+                pkgSelect.disabled = false;
+            }
+            hideElement(pkgGroup);
         }
+        refreshPackageManagerUi();
 
         // Show verify button when device is loaded
         showElement('verify-btn');
@@ -450,7 +467,11 @@ async function loadDevice(pkg, options = {}) {
         if (isSyntheticPackage(deviceData.selected_package)) {
             setStatus(`${deviceData.part_number} — ${displayPackageName(deviceData.selected_package, { long: true })}. Verify against the datasheet to import the actual package.`);
         } else {
-            setStatus(`${deviceData.part_number} — ${deviceData.selected_package}`);
+            setStatus(`${deviceData.part_number} — ${displayPackageName(deviceData.selected_package, { long: true })}`);
+        }
+
+        if (typeof dismissWelcomeIntro === 'function') {
+            dismissWelcomeIntro({ persist: true });
         }
 
         // Update cached device set if this was a new download
@@ -465,6 +486,10 @@ async function loadDevice(pkg, options = {}) {
             console.warn('Failed to remember last-used device:', settingsError);
         }
     } catch (e) {
+        hideElement('pkg-control-group');
+        if (typeof closePackageMenu === 'function') {
+            closePackageMenu();
+        }
         setStatus('Error: ' + (e.message || e));
     }
 }
@@ -497,39 +522,335 @@ function isSyntheticPackage(name, meta = packageMeta(name)) {
     return !!(name && /^default$/i.test(String(name).trim()) && meta?.source === 'edc');
 }
 
+function selectedPackageMeta() {
+    return packageMeta(deviceData?.selected_package || '');
+}
+
+function selectedPackageIsOverlay() {
+    return selectedPackageMeta()?.source === 'overlay';
+}
+
+function normalizeFriendlyPackageName(name) {
+    return model.normalizeFriendlyPackageName(name);
+}
+
+function packageSourceLabel(meta = selectedPackageMeta()) {
+    return meta?.source === 'overlay'
+        ? appConfig.ui.packageManager.sourceOverlay
+        : appConfig.ui.packageManager.sourceBuiltin;
+}
+
+function packageDefaultDisplayName(name, options = {}) {
+    const meta = options.meta || packageMeta(name);
+    return model.packageIdentity(name, meta).defaultDisplayName;
+}
+
+function editablePackageName(name, options = {}) {
+    const meta = options.meta || packageMeta(name);
+    const explicitDisplayName = String(options.displayName ?? '').trim();
+    if (explicitDisplayName) {
+        return explicitDisplayName;
+    }
+    return model.packageIdentity(name, meta).displayName;
+}
+
+function hasPackageDisplayNameOverride(name, meta = packageMeta(name)) {
+    return Boolean(String(meta?.display_name || '').trim());
+}
+
 function displayPackageName(name, options = {}) {
     const meta = options.meta || packageMeta(name);
     if (!name) {
         return '—';
     }
+    const baseName = editablePackageName(name, {
+        meta,
+        displayName: options.displayName,
+    });
     if (!isSyntheticPackage(name, meta)) {
-        return name;
+        return baseName;
     }
     return options.long
-        ? `${name} [not a real package]`
-        : `${name} [not real]`;
+        ? `${baseName} [not a real package]`
+        : `${baseName} [not real]`;
+}
+
+function refreshPackageManagerUi() {
+    const group = $('pkg-control-group');
+    const button = $('pkg-menu-btn');
+    if (!group || !button) {
+        return;
+    }
+
+    if (!deviceData?.selected_package) {
+        hideElement(group);
+        if (typeof closePackageMenu === 'function') {
+            closePackageMenu();
+        }
+        return;
+    }
+
+    button.textContent = appConfig.ui.packageManager.menuButtonLabel;
+    button.title = appConfig.ui.packageManager.menuButtonTitle;
+    showElement(group, 'inline-flex');
+
+    // Keep the shell-owned package menu state in sync with backend-driven
+    // package reloads and overlay updates.
+    if (typeof refreshPackageMenuState === 'function') {
+        refreshPackageMenuState();
+    }
+
+    const dialog = $('package-dialog');
+    if (dialog?.open) {
+        populatePackageManagerDialog();
+    }
+}
+
+function refreshPackageManagerActionState() {
+    const nameInput = $('package-name-input');
+    const saveButton = $('package-save-btn');
+    const resetButton = $('package-reset-btn');
+    const deleteButton = $('package-delete-btn');
+    if (!nameInput || !saveButton || !resetButton || !deleteButton) {
+        return;
+    }
+
+    const currentPackage = deviceData?.selected_package || '';
+    const meta = selectedPackageMeta();
+    const currentEditableName = editablePackageName(currentPackage, { meta });
+    const nextName = nameInput.value.trim();
+    const canEditName = Boolean(currentPackage);
+
+    nameInput.disabled = !canEditName;
+    saveButton.disabled = !canEditName || !nextName || nextName === currentEditableName;
+    resetButton.disabled = !canEditName || !hasPackageDisplayNameOverride(currentPackage, meta);
+    deleteButton.disabled = !selectedPackageIsOverlay();
+}
+
+function populatePackageManagerDialog() {
+    const currentPackage = deviceData?.selected_package || '';
+    const meta = selectedPackageMeta();
+    const currentDisplay = displayPackageName(currentPackage, { long: true });
+    const currentSource = packageSourceLabel(meta);
+    const ui = appConfig.ui.packageManager;
+
+    setTextContent('package-dialog-title', ui.dialogTitle);
+    setTextContent('package-dialog-current-label', ui.currentLabel);
+    setTextContent('package-dialog-stored-label', ui.storedLabel);
+    setTextContent('package-dialog-source-label', ui.sourceLabel);
+    setTextContent('package-dialog-name-label', ui.nameLabel);
+    setTextContent('package-close-btn', ui.closeButton);
+    setTextContent('package-cancel-btn', ui.closeButton);
+    setTextContent('package-save-btn', ui.saveButton);
+    setTextContent('package-reset-btn', ui.resetButton);
+    setTextContent('package-delete-btn', ui.deleteButton);
+    setTextContent('package-dialog-current', currentDisplay);
+    setTextContent('package-dialog-source', currentSource);
+    setTextContent('package-dialog-note', selectedPackageIsOverlay() ? ui.overlayNote : ui.builtinNote);
+
+    const storedRow = $('package-dialog-stored-row');
+    const storedValue = $('package-dialog-stored');
+    if (storedRow && storedValue) {
+        if (currentDisplay !== currentPackage) {
+            storedValue.textContent = currentPackage;
+            storedRow.hidden = false;
+        } else {
+            storedValue.textContent = '';
+            storedRow.hidden = true;
+        }
+    }
+
+    const nameInput = $('package-name-input');
+    if (nameInput) {
+        nameInput.placeholder = ui.namePlaceholder;
+        nameInput.value = editablePackageName(currentPackage, { meta });
+    }
+    refreshPackageManagerActionState();
+}
+
+function showPackageManagerDialog() {
+    if (!deviceData?.selected_package) {
+        return;
+    }
+
+    if (typeof closePackageMenu === 'function') {
+        closePackageMenu();
+    }
+
+    const dialog = $('package-dialog');
+    if (!dialog || dialog.open) {
+        return;
+    }
+
+    populatePackageManagerDialog();
+    dialog.showModal();
+    $('package-name-input')?.focus();
+    $('package-name-input')?.select();
+}
+
+function closePackageManagerDialog() {
+    $('package-dialog')?.close();
+}
+
+function syncVerificationPackageDelete(packageName) {
+    if (typeof verifyResult === 'undefined' || !verifyResult?.packages?.[packageName]) {
+        return;
+    }
+
+    delete verifyResult.packages[packageName];
+    if (typeof renderVerifyResult === 'function') {
+        renderVerifyResult(verifyResult);
+    }
+}
+
+async function saveSelectedPackageDisplayName() {
+    if (!deviceData?.part_number || !deviceData?.selected_package) {
+        return;
+    }
+
+    const meta = selectedPackageMeta();
+    const packageName = deviceData.selected_package;
+    const defaultDisplayName = packageDefaultDisplayName(packageName, { meta });
+    const currentEditableName = editablePackageName(packageName, { meta });
+    const nameInput = $('package-name-input');
+    const nextName = String(nameInput?.value || '').trim();
+    if (!nextName || nextName === currentEditableName) {
+        refreshPackageManagerActionState();
+        return;
+    }
+
+    const displayName = nextName === defaultDisplayName ? null : nextName;
+
+    try {
+        const result = await invoke('set_package_display_name', {
+            request: {
+                partNumber: deviceData.part_number,
+                packageName,
+                displayName,
+            },
+        });
+        await loadDevice(result.packageName || packageName, { preserveState: true, markDirty: true });
+        setStatus(displayName
+            ? appConfig.format(appConfig.ui.packageManager.savedStatus, {
+                packageName: displayName,
+            })
+            : appConfig.format(appConfig.ui.packageManager.resetStatus, {
+                packageName: defaultDisplayName,
+            }));
+        closePackageManagerDialog();
+    } catch (error) {
+        setStatus(`Error saving package name: ${error.message || error}`);
+    }
+}
+
+async function resetSelectedPackageDisplayName() {
+    if (!deviceData?.part_number || !deviceData?.selected_package) {
+        return;
+    }
+
+    const meta = selectedPackageMeta();
+    const packageName = deviceData.selected_package;
+    if (!hasPackageDisplayNameOverride(packageName, meta)) {
+        refreshPackageManagerActionState();
+        return;
+    }
+
+    const defaultDisplayName = packageDefaultDisplayName(packageName, { meta });
+
+    try {
+        const result = await invoke('set_package_display_name', {
+            request: {
+                partNumber: deviceData.part_number,
+                packageName,
+                displayName: null,
+            },
+        });
+        await loadDevice(result.packageName || packageName, { preserveState: true, markDirty: true });
+        setStatus(appConfig.format(appConfig.ui.packageManager.resetStatus, {
+            packageName: defaultDisplayName,
+        }));
+        closePackageManagerDialog();
+    } catch (error) {
+        setStatus(`Error resetting package name: ${error.message || error}`);
+    }
+}
+
+async function deleteSelectedOverlayPackage() {
+    if (!deviceData?.part_number || !selectedPackageIsOverlay()) {
+        return;
+    }
+
+    const packageName = deviceData.selected_package;
+    const confirmed = window.confirm(appConfig.format(appConfig.ui.packageManager.deleteConfirm, {
+        packageName: displayPackageName(packageName, { long: true }),
+    }));
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        await invoke('delete_overlay_package', {
+            request: {
+                partNumber: deviceData.part_number,
+                packageName,
+            },
+        });
+        syncVerificationPackageDelete(packageName);
+        closePackageManagerDialog();
+        await loadDevice(undefined, { preserveState: true, markDirty: true });
+        setStatus(appConfig.format(appConfig.ui.packageManager.deletedStatus, {
+            packageName: displayPackageName(packageName, { long: true }),
+        }));
+    } catch (error) {
+        setStatus(`Error deleting overlay package: ${error.message || error}`);
+    }
+}
+
+function wirePackageManagerDialog() {
+    const dialog = $('package-dialog');
+    if (!dialog || dialog.dataset.bound === 'true') {
+        return;
+    }
+    dialog.dataset.bound = 'true';
+
+    dialog.addEventListener('click', (event) => {
+        const rect = dialog.getBoundingClientRect();
+        if (
+            event.clientX < rect.left
+            || event.clientX > rect.right
+            || event.clientY < rect.top
+            || event.clientY > rect.bottom
+        ) {
+            dialog.close();
+        }
+    });
+
+    $('package-name-input')?.addEventListener('input', refreshPackageManagerActionState);
+    $('package-name-input')?.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            void saveSelectedPackageDisplayName();
+        }
+    });
+    $('package-close-btn')?.addEventListener('click', closePackageManagerDialog);
+    $('package-cancel-btn')?.addEventListener('click', closePackageManagerDialog);
+    $('package-save-btn')?.addEventListener('click', () => {
+        void saveSelectedPackageDisplayName();
+    });
+    $('package-reset-btn')?.addEventListener('click', () => {
+        void resetSelectedPackageDisplayName();
+    });
+    $('package-delete-btn')?.addEventListener('click', () => {
+        void deleteSelectedOverlayPackage();
+    });
 }
 
 function visiblePackageNames() {
-    if (!deviceData?.packages) {
-        return [];
-    }
+    return model.visiblePackageNames(deviceData?.packages || {});
+}
 
-    const pkgNames = Object.keys(deviceData.packages);
-    const realPinCounts = new Set(
-        pkgNames
-            .filter((name) => !isSyntheticPackage(name))
-            .map((name) => deviceData.packages[name]?.pin_count)
-            .filter((pinCount) => typeof pinCount === 'number')
-    );
-
-    return pkgNames.filter((name) => {
-        const meta = deviceData.packages[name];
-        if (!isSyntheticPackage(name, meta)) {
-            return true;
-        }
-        return !realPinCounts.has(meta?.pin_count);
-    });
+function visiblePackageEntries() {
+    return model.visiblePackageEntries(deviceData?.packages || {});
 }
 
 function renderDeviceSummary() {
@@ -585,6 +906,12 @@ async function loadAppSettings() {
             verification: {
                 provider: model.normalizeVerificationProvider(
                     settings.verification?.provider || defaultAppSettings().verification.provider
+                ),
+            },
+            onboarding: {
+                welcome_intro_seen: Boolean(
+                    settings.onboarding?.welcome_intro_seen
+                    ?? defaultAppSettings().onboarding.welcome_intro_seen
                 ),
             },
             last_used: {
@@ -645,7 +972,7 @@ function resolveStartupTarget(settings) {
  */
 function fixedFuncGroup(name) {
     if (/^OA\d/.test(name)) return 'Op-Amp';
-    if (/^AN[A-Z]?\d+$/.test(name)) return 'ADC';
+    if (/^AN[A-Z]?\d+$|^AD\d+AN[A-Z]*\d+$/.test(name)) return 'ADC';
     if (/^CMP\d/.test(name)) return 'Comparator';
     if (/^IBIAS/.test(name)) return 'Bias';
     if (/^DAC/.test(name)) return 'DAC';

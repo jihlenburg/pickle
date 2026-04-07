@@ -4,9 +4,9 @@ use std::time::Instant;
 use pickle_lib::parser::datasheet_fetcher;
 
 fn main() -> Result<(), String> {
-    let part_number = env::args()
-        .nth(1)
-        .ok_or_else(|| "usage: cargo run --example resolve_datasheet -- <part-number>".to_string())?;
+    let part_number = env::args().nth(1).ok_or_else(|| {
+        "usage: cargo run --example resolve_datasheet -- <part-number>".to_string()
+    })?;
 
     let start = Instant::now();
     let resolved = datasheet_fetcher::resolve(&part_number)?;

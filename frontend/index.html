@@ -20,11 +20,21 @@
         <div class="header-controls">
             <div class="part-control">
                 <div class="part-picker">
-                    <input type="text" id="part-input" list="device-list" placeholder="Part number (e.g. DSPIC33CK64MP102)" autocomplete="off">
-                    <datalist id="device-list"></datalist>
+                    <div class="part-picker-field">
+                        <input type="text" id="part-input" placeholder="Part number (e.g. DSPIC33CK64MP102)" autocomplete="off" spellcheck="false" aria-autocomplete="list" aria-controls="part-suggestions" aria-expanded="false">
+                        <div id="part-suggestions" class="part-suggestions" role="listbox" hidden></div>
+                    </div>
                     <button id="load-btn">Load</button>
-                    <select id="pkg-select" style="display:none">
-                    </select>
+                    <div id="pkg-control-group" class="package-split" style="display:none">
+                        <select id="pkg-select" aria-label="Package">
+                        </select>
+                        <button id="pkg-menu-btn" type="button" class="package-menu-btn" aria-haspopup="menu" aria-expanded="false" aria-label="Package actions" title="Package actions">...</button>
+                        <div id="pkg-menu" class="package-menu" hidden>
+                            <button id="pkg-edit-name-btn" type="button" class="package-menu-item">Edit Name...</button>
+                            <button id="pkg-reset-name-btn" type="button" class="package-menu-item">Reset Name</button>
+                            <button id="pkg-delete-btn" type="button" class="package-menu-item">Delete Overlay</button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -52,6 +62,8 @@
     </header>
 
     <div class="main">
+        <section id="welcome-screen" class="welcome-screen" hidden aria-labelledby="welcome-title"></section>
+
         <div class="panel panel-left">
             <div class="panel-left-top">
                 <div id="pkg-container"></div>
@@ -211,6 +223,42 @@
         </div>
     </div>
 
+    <dialog id="package-dialog" class="package-dialog" aria-label="Edit package name">
+        <div class="package-dialog-card">
+            <div class="package-dialog-header">
+                <h2 id="package-dialog-title">Edit Package Name</h2>
+                <button id="package-close-btn" type="button" class="package-dialog-close" aria-label="Close package dialog">Close</button>
+            </div>
+            <div class="package-dialog-body">
+                <div class="package-dialog-field">
+                    <span class="package-dialog-label" id="package-dialog-current-label">Shown in UI</span>
+                    <div id="package-dialog-current" class="package-dialog-value">—</div>
+                </div>
+                <div class="package-dialog-field" id="package-dialog-stored-row" hidden>
+                    <span class="package-dialog-label" id="package-dialog-stored-label">Backend key</span>
+                    <div id="package-dialog-stored" class="package-dialog-value package-dialog-value-mono">—</div>
+                </div>
+                <div class="package-dialog-field">
+                    <span class="package-dialog-label" id="package-dialog-source-label">Source</span>
+                    <div id="package-dialog-source" class="package-dialog-value">—</div>
+                </div>
+                <p id="package-dialog-note" class="package-dialog-note"></p>
+                <label class="package-dialog-input-wrap" for="package-name-input">
+                    <span id="package-dialog-name-label" class="package-dialog-label">Displayed package name</span>
+                    <input id="package-name-input" type="text" placeholder="Enter the name to show in the UI" autocomplete="off">
+                </label>
+            </div>
+            <div class="package-dialog-actions">
+                <button id="package-delete-btn" type="button" class="package-delete-btn">Delete Overlay</button>
+                <div class="package-dialog-action-row">
+                    <button id="package-cancel-btn" type="button">Close</button>
+                    <button id="package-reset-btn" type="button">Reset Name</button>
+                    <button id="package-save-btn" type="button">Save Name</button>
+                </div>
+            </div>
+        </div>
+    </dialog>
+
     <!-- About dialog -->
     <dialog id="about-dialog" class="about-dialog" aria-label="About pickle">
         <img src="static/pickle-icon.png" alt="pickle" class="about-icon">
@@ -342,6 +390,8 @@
     <script src="static/app/05-compile-check.js"></script>
     <script src="static/app/05-settings.js"></script>
     <script src="static/app/06-shell.js"></script>
+    <script src="static/app/07-verification-model.js"></script>
+    <script src="static/app/07-verification-render.js"></script>
     <script src="static/app/07-verification.js"></script>
     <script src="static/app/08-bootstrap.js"></script>
 </body>

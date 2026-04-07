@@ -24,6 +24,12 @@ test('default settings use dark theme and last-used startup policy', () => {
         codegen: {
             output_basename: config.defaults.codegen.outputBasename,
         },
+        verification: {
+            provider: 'auto',
+        },
+        onboarding: {
+            welcome_intro_seen: false,
+        },
         last_used: { part_number: '', package: '' },
     });
 });
@@ -36,6 +42,104 @@ test('theme normalization only allows dark, light, or system', () => {
     assert.equal(model.normalizeThemeMode(' Light '), 'light');
     assert.equal(model.normalizeThemeMode(undefined), 'dark');
     assert.equal(model.normalizeThemeMode('weird'), 'dark');
+});
+
+test('package-label normalization hides internal EDC package codes', () => {
+    assert.equal(model.normalizeFriendlyPackageName('STX04 (48-pin uQFN)'), '48-PIN VQFN');
+    assert.equal(model.normalizeFriendlyPackageName('48-PIN TQFP'), '48-PIN TQFP');
+    assert.equal(
+        model.normalizeFriendlyPackageName('48-PIN VQFN/TQFP (dsPIC33AKXXXMPS505/dsPIC33AKXXXMPS205)'),
+        '48-PIN VQFN/TQFP',
+    );
+    assert.equal(model.normalizeFriendlyPackageName(''), '—');
+});
+
+test('package visibility prefers overlay-backed entries over equivalent built-in packages', () => {
+    const packages = {
+        'STX32 (48-pin VQFN)': {
+            pin_count: 48,
+            source: 'edc',
+        },
+        '48-PIN VQFN': {
+            pin_count: 48,
+            source: 'overlay',
+        },
+        '48-PIN TQFP': {
+            pin_count: 48,
+            source: 'overlay',
+        },
+    };
+
+    assert.deepEqual(model.visiblePackageNames(packages), [
+        '48-PIN VQFN',
+        '48-PIN TQFP',
+    ]);
+    assert.equal(
+        model.preferredVisiblePackageName(packages, 'STX32 (48-pin VQFN)'),
+        '48-PIN VQFN',
+    );
+});
+
+test('package visibility collapses harmless label drift before preferring the overlay', () => {
+    const packages = {
+        'STX32 (48-pin VQFN)': {
+            pin_count: 48,
+            source: 'edc',
+            display_name: '48-PIN VQFN',
+        },
+        '48-PIN VQFN': {
+            pin_count: 48,
+            source: 'overlay',
+            display_name: '48‑PIN  VQFN ',
+        },
+    };
+
+    assert.deepEqual(model.visiblePackageNames(packages), [
+        '48-PIN VQFN',
+    ]);
+    assert.equal(
+        model.preferredVisiblePackageName(packages, 'STX32 (48-pin VQFN)'),
+        '48-PIN VQFN',
+    );
+    assert.equal(
+        model.packageIdentity('48-PIN VQFN', packages['48-PIN VQFN']).displayName,
+        '48-PIN VQFN',
+    );
+});
+
+test('package identity drops trailing part-family qualifiers from explicit display names', () => {
+    const entry = model.packageIdentity('STX32 (48-pin VQFN)', {
+        pin_count: 48,
+        source: 'edc',
+        display_name: '48-PIN VQFN/TQFP (dsPIC33AKXXXMPS505/dsPIC33AKXXXMPS205)',
+    });
+
+    assert.equal(entry.displayName, '48-PIN VQFN/TQFP');
+    assert.equal(entry.identityKey, '48|48-PIN VQFN/TQFP');
+});
+
+test('peripheral instance extraction stays aligned across the UI', () => {
+    assert.deepEqual(model.extractPeripheralInstance('U3TX'), {
+        type: 'UART',
+        instance: '3',
+        id: 'UART3',
+    });
+    assert.deepEqual(model.extractPeripheralInstance('QEIHOME1'), {
+        type: 'QEI',
+        instance: '1',
+        id: 'QEI1',
+    });
+    assert.deepEqual(model.extractPeripheralInstance('CLC2OUT'), {
+        type: 'CLC',
+        instance: '2',
+        id: 'CLC2',
+    });
+    assert.deepEqual(model.extractPeripheralInstance('AD4AN3'), {
+        type: 'ADC',
+        instance: '4',
+        id: 'ADC4',
+    });
+    assert.equal(model.extractPeripheralInstance('MCLR'), null);
 });
 
 test('startup target prefers last used device unless fixed device is configured', () => {
@@ -114,10 +218,79 @@ test('oscillator-managed fuse fields track the selected clock source', () => {
         ['FNOSC', 'IESO', 'POSCMD', 'FCKSM', 'XTCFG'],
     );
     assert.deepEqual(model.oscillatorManagedFuseFields('', 'EC'), []);
+    assert.deepEqual(
+        model.oscillatorManagedFuseFields('frc_pll', 'EC', 'DSPIC33AK64MC105'),
+        [],
+    );
+    assert.equal(
+        model.oscillatorTargetHint(200, 'DSPIC33CK64MP102'),
+        'Fcy = 100.000 MHz',
+    );
+    assert.equal(
+        model.oscillatorTargetHint(200, 'DSPIC33AK64MC105'),
+        'Fcy = 200.000 MHz (dsPIC33AK: Fcy = Fosc)',
+    );
+});
+
+test('device profiles capture AK branch and instruction-clock behavior', () => {
+    assert.deepEqual(model.resolveDeviceProfile('DSPIC33AK256MPS205'), {
+        partNumber: 'DSPIC33AK256MPS205',
+        family: 'dspic33',
+        architecture: 'dspic33ak',
+        branch: 'MPS',
+        series: 'dspic33ak-mps',
+        instructionClock: 'fosc',
+        managesOscillatorFuses: false,
+    });
+    assert.equal(model.resolveDeviceProfile('DSPIC33CK64MP102').instructionClock, 'fosc_div_2');
+});
+
+test('fuse definitions are deduplicated and grouped into higher-signal sections', () => {
+    const fuseDefs = [
+        {
+            cname: 'FICD',
+            desc: 'Debugger register',
+            default_value: 0,
+            fields: [
+                { cname: 'JTAGEN', desc: 'JTAG enable', hidden: false, mask: 1, values: [] },
+            ],
+        },
+        {
+            cname: 'FWDT',
+            desc: 'Watchdog register',
+            default_value: 0,
+            fields: [
+                { cname: 'WDTEN', desc: 'WDT enable', hidden: false, mask: 1, values: [] },
+            ],
+        },
+        {
+            cname: 'FICD',
+            desc: 'Duplicate debugger register',
+            default_value: 0,
+            fields: [
+                { cname: 'JTAGEN', desc: 'JTAG enable', hidden: false, mask: 1, values: [] },
+            ],
+        },
+    ];
+
+    assert.equal(model.normalizeFuseDefinitions(fuseDefs).length, 2);
+    assert.equal(model.visibleFuseFieldCount(fuseDefs), 2);
+    assert.deepEqual(
+        model.groupedFuseDefinitions(fuseDefs).map(group => ({
+            id: group.id,
+            registers: group.registers.map(register => register.cname),
+        })),
+        [
+            { id: 'debug', registers: ['FICD'] },
+            { id: 'watchdog', registers: ['FWDT'] },
+        ],
+    );
 });
 
 test('analog helpers classify inputs, outputs, and shared analog functions', () => {
     assert.equal(model.isAnalogInput('AN7'), true);
+    assert.equal(model.isAnalogInput('AD4AN3'), true);
+    assert.equal(model.isAnalogInput('AD1ANN2'), true);
     assert.equal(model.isAnalogInput('CMP1D'), true);
     assert.equal(model.isAnalogInput('OA2IN+'), true);
     assert.equal(model.isAnalogOutput('OA1OUT'), true);
@@ -196,4 +369,61 @@ test('empty assignment maps stay stable across helper calls', () => {
     const visited = [];
     model.forEachAssignedPin(assignments, (pinPos) => visited.push(pinPos));
     assert.deepEqual(visited, []);
+});
+
+test('device interface inventory derives pin-exposed blocks from PPS and pin tags', () => {
+    const inventory = model.deriveDeviceInterfaceInventory({
+        remappable_inputs: [
+            { name: 'U1RX' },
+            { name: 'U2RX' },
+            { name: 'U3RX' },
+            { name: 'SDI1' },
+            { name: 'SCK2' },
+            { name: 'SENT1' },
+            { name: 'SENT2' },
+            { name: 'QEIA1' },
+            { name: 'QEIHOME1' },
+            { name: 'T1CK' },
+            { name: 'CLCINA' },
+        ],
+        remappable_outputs: [
+            { name: 'U1TX' },
+            { name: 'U2TX' },
+            { name: 'U3TX' },
+            { name: 'SDO1' },
+            { name: 'SCK2' },
+            { name: 'PWM1H' },
+            { name: 'PWM4L' },
+            { name: 'OCM1' },
+            { name: 'OCM4' },
+            { name: 'CLC4OUT' },
+            { name: 'SENT2TX' },
+        ],
+        pins: [
+            { functions: ['ASCL1', 'ASDA1', 'AN7', 'CMP1A', 'OA1IN+', 'DACOUT'] },
+            { functions: ['ASCL2', 'ASDA2', 'AN8', 'CMP2B', 'OA2OUT'] },
+            { functions: ['AN12', 'CMP3C', 'OA3OUT'] },
+        ],
+    });
+
+    assert.equal(inventory.uarts, 3);
+    assert.equal(inventory.spis, 2);
+    assert.equal(inventory.i2c, 2);
+    assert.equal(inventory.sent, 2);
+    assert.equal(inventory.qei, 1);
+    assert.equal(inventory.timers, 1);
+    assert.equal(inventory.clc, 1);
+    assert.equal(inventory.pwm, 2);
+    assert.equal(inventory.sccp, 2);
+    assert.equal(inventory.comparators, 3);
+    assert.equal(inventory.opAmps, 3);
+    assert.equal(inventory.dacs, 1);
+    assert.equal(inventory.adcChannels, 3);
+
+    assert.deepEqual(inventory.labels.uarts, ['UART1', 'UART2', 'UART3']);
+    assert.deepEqual(inventory.labels.i2c, ['I2C1', 'I2C2']);
+    assert.deepEqual(inventory.labels.sent, ['SENT1', 'SENT2']);
+    assert.deepEqual(inventory.labels.qei, ['QEI1']);
+    assert.deepEqual(inventory.labels.sccp, ['SCCP1', 'SCCP4']);
+    assert.deepEqual(inventory.labels.adcChannels, ['AN7', 'AN8', 'AN12']);
 });

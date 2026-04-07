@@ -107,6 +107,20 @@ impl Default for VerificationSettings {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OnboardingSettings {
+    #[serde(default = "default_welcome_intro_seen")]
+    pub welcome_intro_seen: bool,
+}
+
+impl Default for OnboardingSettings {
+    fn default() -> Self {
+        Self {
+            welcome_intro_seen: default_welcome_intro_seen(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct LastUsedDevice {
     #[serde(default)]
@@ -115,7 +129,7 @@ pub struct LastUsedDevice {
     pub package: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AppSettings {
     #[serde(default)]
     pub appearance: AppearanceSettings,
@@ -127,8 +141,24 @@ pub struct AppSettings {
     pub codegen: CodegenSettings,
     #[serde(default)]
     pub verification: VerificationSettings,
+    #[serde(default = "default_existing_onboarding_settings")]
+    pub onboarding: OnboardingSettings,
     #[serde(default)]
     pub last_used: LastUsedDevice,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            appearance: AppearanceSettings::default(),
+            startup: StartupSettings::default(),
+            toolchain: ToolchainSettings::default(),
+            codegen: CodegenSettings::default(),
+            verification: VerificationSettings::default(),
+            onboarding: OnboardingSettings::default(),
+            last_used: LastUsedDevice::default(),
+        }
+    }
 }
 
 fn default_theme() -> String {
@@ -157,6 +187,16 @@ pub fn default_codegen_output_basename() -> String {
 
 pub fn default_verification_provider() -> String {
     "auto".to_string()
+}
+
+fn default_welcome_intro_seen() -> bool {
+    false
+}
+
+fn default_existing_onboarding_settings() -> OnboardingSettings {
+    OnboardingSettings {
+        welcome_intro_seen: true,
+    }
 }
 
 fn normalize_theme(theme: &str) -> String {
@@ -246,8 +286,10 @@ impl AppSettings {
         self.toolchain.family_compilers.dspic33 =
             normalize_compiler(&self.toolchain.family_compilers.dspic33);
         self.codegen.output_basename = normalize_output_basename(&self.codegen.output_basename);
-        self.verification.provider =
-            normalize_verification_provider(&self.verification.provider);
+        self.verification.provider = normalize_verification_provider(&self.verification.provider);
+        // Booleans are already canonical; keep the onboarding section explicit
+        // so first-run behavior follows the app-data settings file instead of
+        // browser-managed WebKit storage.
         self.last_used.part_number = normalize_part_number(&self.last_used.part_number);
         self.last_used.package = normalize_package(&self.last_used.package);
         self
@@ -308,6 +350,10 @@ fn render_settings(settings: &AppSettings) -> String {
             "# Provider preference for datasheet verification: \"auto\", \"openai\", or \"anthropic\".\n",
             "provider = {}\n",
             "\n",
+            "[onboarding]\n",
+            "# Tracks whether the first-launch intro overlay has already been dismissed.\n",
+            "welcome_intro_seen = {}\n",
+            "\n",
             "[last_used]\n",
             "# Updated automatically after every successful device load.\n",
             "part_number = {}\n",
@@ -321,6 +367,7 @@ fn render_settings(settings: &AppSettings) -> String {
         toml_string(&settings.toolchain.family_compilers.dspic33),
         toml_string(&settings.codegen.output_basename),
         toml_string(&settings.verification.provider),
+        settings.onboarding.welcome_intro_seen,
         toml_string(&settings.last_used.part_number),
         toml_string(&settings.last_used.package),
     )
@@ -373,6 +420,7 @@ mod tests {
         assert_eq!(settings.toolchain.family_compilers.dspic33, "xc-dsc-gcc");
         assert_eq!(settings.codegen.output_basename, "mcu_init");
         assert_eq!(settings.verification.provider, "auto");
+        assert!(!settings.onboarding.welcome_intro_seen);
     }
 
     #[test]
@@ -398,6 +446,9 @@ mod tests {
             verification: VerificationSettings {
                 provider: " OPENAI ".to_string(),
             },
+            onboarding: OnboardingSettings {
+                welcome_intro_seen: true,
+            },
             last_used: LastUsedDevice {
                 part_number: " dspic33ck64mp102 ".to_string(),
                 package: " tqfp-28 ".to_string(),
@@ -413,6 +464,7 @@ mod tests {
         assert_eq!(settings.toolchain.family_compilers.dspic33, "xc-dsc-gcc");
         assert_eq!(settings.codegen.output_basename, "mcu_init_v2");
         assert_eq!(settings.verification.provider, "openai");
+        assert!(settings.onboarding.welcome_intro_seen);
         assert_eq!(settings.last_used.part_number, "DSPIC33CK64MP102");
         assert_eq!(settings.last_used.package, "tqfp-28");
     }
@@ -428,6 +480,8 @@ mod tests {
         assert!(text.contains("dspic33 = \"xc-dsc-gcc\""));
         assert!(text.contains("output_basename = \"mcu_init\""));
         assert!(text.contains("provider = \"auto\""));
+        assert!(text.contains("[onboarding]"));
+        assert!(text.contains("welcome_intro_seen = false"));
     }
 
     #[test]
@@ -454,6 +508,9 @@ mod tests {
                 [verification]
                 provider = " invalid "
 
+                [onboarding]
+                welcome_intro_seen = true
+
                 [last_used]
                 part_number = " dspic33ch128mp508 "
             "#,
@@ -468,6 +525,7 @@ mod tests {
         assert_eq!(parsed.toolchain.family_compilers.dspic33, "xc-dsc-gcc");
         assert_eq!(parsed.codegen.output_basename, "board_init");
         assert_eq!(parsed.verification.provider, "auto");
+        assert!(parsed.onboarding.welcome_intro_seen);
         assert_eq!(parsed.last_used.part_number, "DSPIC33CH128MP508");
         assert_eq!(parsed.last_used.package, "");
     }
@@ -510,6 +568,9 @@ mod tests {
             verification: VerificationSettings {
                 provider: " ANTHROPIC ".to_string(),
             },
+            onboarding: OnboardingSettings {
+                welcome_intro_seen: true,
+            },
             last_used: LastUsedDevice {
                 part_number: " dspic33ck64mp102 ".to_string(),
                 package: " ssop-28 ".to_string(),
@@ -524,9 +585,44 @@ mod tests {
         assert!(text.contains("dspic33 = \"xc-dsc-gcc\""));
         assert!(text.contains("output_basename = \"mcu_init\""));
         assert!(text.contains("provider = \"anthropic\""));
+        assert!(text.contains("welcome_intro_seen = true"));
         assert!(text.contains("part_number = \"DSPIC33CK64MP102\""));
         assert!(text.contains("package = \"ssop-28\""));
         assert!(!text.contains(" SYSTEM "));
+    }
+
+    #[test]
+    fn missing_onboarding_section_defaults_to_seen_for_existing_installs() {
+        let parsed = parse_settings(
+            r#"
+                [appearance]
+                theme = "dark"
+
+                [startup]
+                device = "last-used"
+                package = ""
+
+                [toolchain]
+                fallback_compiler = "xc-dsc-gcc"
+
+                [toolchain.family_compilers]
+                pic24 = "xc16-gcc"
+                dspic33 = "xc-dsc-gcc"
+
+                [codegen]
+                output_basename = "mcu_init"
+
+                [verification]
+                provider = "auto"
+
+                [last_used]
+                part_number = ""
+                package = ""
+            "#,
+        )
+        .expect("legacy settings without onboarding section should parse");
+
+        assert!(parsed.onboarding.welcome_intro_seen);
     }
 
     #[test]

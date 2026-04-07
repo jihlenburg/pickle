@@ -9,7 +9,13 @@ The basename is configurable through `settings.toml` under
 `[codegen].output_basename`, and the frontend code/export/compile-check flows
 all consume the configured names instead of assuming `mcu_init`.
 
-The generator lives in `src-tauri/src/codegen/generate.rs` and is driven by `generate_code` from the Tauri command layer.
+The generator is driven by `generate_code` from the Tauri command layer. Its
+phase orchestration lives in `src-tauri/src/codegen/generate.rs`, with shared
+generator data types in `generate_types.rs`, dedicated PPS emission in
+`generate_pps.rs`, dedicated port/analog emission in `generate_ports.rs`,
+single-translation-unit merge helpers in `generate_single_file.rs`,
+generic formatting/text helpers in `generate_support.rs`, and CLC-specific
+packing/emission in `generate_clc.rs`.
 
 ## Output Shape
 
@@ -36,6 +42,10 @@ The source contains:
 - optional `configure_clc()`
 - `system_init()` in hardware-safe call order
 
+Compile-check flows that still need a single translation unit reuse
+`src-tauri/src/codegen/generate_single_file.rs` to inline the generated signal
+alias macros into the emitted C file.
+
 ## Generation Order
 
 The generator emits code in this order:
@@ -51,6 +61,8 @@ The generator emits code in this order:
 That order is deliberate: clock configuration comes first, PPS is bound before pins are driven, and peripheral-enablement steps happen after base port state is established.
 
 ## PPS Generation
+
+`configure_pps()` is emitted by `src-tauri/src/codegen/generate_pps.rs`.
 
 Remappable inputs and outputs are split into separate blocks and wrapped in the required RPCON unlock/lock sequence.
 
@@ -73,6 +85,8 @@ Important details:
 - comments are column-aligned so generated blocks stay readable
 
 ## Port Configuration
+
+`configure_ports()` and `configure_analog()` are emitted by `src-tauri/src/codegen/generate_ports.rs`.
 
 `configure_ports()` is always emitted. It currently manages:
 
@@ -116,7 +130,14 @@ Non-identifier characters are normalized to `_` and names are uppercased before 
 
 ## Oscillator Generation
 
-Oscillator generation is delegated to `oscillator.rs`.
+Oscillator generation is delegated through `oscillator.rs`, which now acts as a
+public facade over:
+
+- `src-tauri/src/codegen/oscillator/model.rs` for shared `OscConfig`,
+  `PLLResult`, PLL search, and managed fuse-field ownership
+- `src-tauri/src/codegen/oscillator/legacy.rs` for pragma-driven CK/PIC24
+  oscillator output
+- `src-tauri/src/codegen/oscillator/ak.rs` for dsPIC33AK runtime clock output
 
 Supported sources:
 
@@ -130,16 +151,30 @@ Supported sources:
 
 PLL search spans valid `N1`, `M`, `N2`, and `N3` combinations and chooses the closest valid result that satisfies dsPIC33 constraints.
 
+Important family split:
+
+- dsPIC33CK and related 16-bit families use the existing `FNOSC` / `POSCMD` / `PLLKEN` pragma-driven path
+- dsPIC33AK moved clock selection into runtime SFRs (`OSCCFG`, `CLK1CON`, `CLK1DIV`, `PLL1CON`, `PLL1DIV`, and related ready bits)
+- pickle now emits the shared dsPIC33AK runtime sequence as well:
+  - direct `CLK1CON` switching for `frc`, `lprc`, and `pri`
+  - `PLL1CON` / `PLL1DIV` setup plus `CLK1CON` handoff to `PLL1 Fout` for `frc_pll` and `pri_pll`
+  - polling of `OSWEN`, `CLKRDY`, and `OSCCTRLbits.PLL1RDY`
+
 When enabled, oscillator output contributes:
 
-- top-of-file `#pragma config` lines
+- top-of-file `#pragma config` lines on CK-style families, or AK design-intent comments
 - `configure_oscillator()` with register writes
 - a `system_init()` call to `configure_oscillator()`
 
-When oscillator config is enabled, it owns the overlapping clock-related fuse
-fields (`FNOSC`, `IESO`, `POSCMD`, `XTCFG`, `FCKSM`, and `PLLKEN` when PLL is
-used). The generic fuse section intentionally suppresses those fields so
-generated output cannot emit duplicate `#pragma config` definitions.
+When oscillator config is enabled on CK-style parts, it owns the overlapping
+clock-related fuse fields (`FNOSC`, `IESO`, `POSCMD`, `XTCFG`, `FCKSM`, and
+`PLLKEN` when PLL is used). The generic fuse section intentionally suppresses
+those fields so generated output cannot emit duplicate `#pragma config`
+definitions.
+
+For dsPIC33AK, those legacy clock fields are also stripped if they appear in an
+incoming fuse block because they are no longer the authoritative clock-control
+surface on that family.
 
 ## Fuse Generation
 
@@ -173,21 +208,25 @@ If any fixed assignment references an on-chip op-amp (`OA1OUT`, `OA2IN+`, and si
 ```c
 void configure_analog(void)
 {
-    AMP1CONbits.AMPEN = 1U;  /* Enable Op-Amp 1 */
+    AMPCON1Lbits.AMPEN1 = 1U;  /* Enable Op-Amp 1 */
 }
 ```
+
+On dsPIC33AK the emitted register name changes to the newer per-instance form,
+for example `AMP1CON1bits.AMPEN = 1U;`.
 
 This helper only enables the modules. Gain, routing, and other analog behavior remain application-specific.
 
 ## CLC Generation
 
-When the UI sends populated `ClcModuleConfig` entries, the generator emits `configure_clc()` and writes the packed register values for each configured module.
+When the UI sends populated `ClcModuleConfig` entries, the generator emits
+`configure_clc()`.
 
 See [CLC](clc.md) for the shared frontend/backend module shape and the exact
 bit-packing contract used by both the designer register preview and the Rust
 generator.
 
-Generated registers:
+CK-style generated registers:
 
 | Register | Meaning |
 |---|---|
@@ -201,6 +240,25 @@ The module is always written in two phases:
 1. write `CLCnCONL = 0x0000U` to disable it during setup
 2. write the packed registers
 3. write final `CLCnCONL` with or without `LCEN`
+
+For dsPIC33AK, pickle emits the unified 32-bit form instead:
+
+| Register | Meaning |
+|---|---|
+| `CLCxSEL` | data-source selectors |
+| `CLCxGLS` | full 32-bit gate source-enable matrix |
+| `CLCxCON` | mode, output polarity, gate polarity, interrupts, enable |
+
+The AK path still follows the same disable-then-configure discipline:
+
+1. write `CLCxCON = 0x00000000U` to disable it during setup
+2. write `CLCxSEL`
+3. write `CLCxGLS`
+4. write final `CLCxCON` with or without `ON`
+
+What is still out of scope is not generic CLC packing anymore, but family-specific
+peripheral behavior around it, especially the broader dsPIC33AKxxxMPS high-speed
+PWM and power-domain flows.
 
 ## Single-File Compile Mode
 

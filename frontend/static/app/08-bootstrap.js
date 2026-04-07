@@ -1,8 +1,9 @@
 /**
  * Final application bootstrap.
  *
- * Keeps startup orchestration thin by delegating shell behavior to
- * `06-shell.js` and datasheet verification to `07-verification.js`.
+ * Keeps startup orchestration thin by delegating shell behavior, startup intro
+ * visibility, and datasheet verification to the dedicated modules that own
+ * those flows.
  */
 
 let menuEventsBound = false;
@@ -77,11 +78,13 @@ async function initializeApp() {
 
     const startupTarget = resolveStartupTarget(appSettings);
     if (!startupTarget) {
+        syncWelcomeIntroVisibility({ allow: true });
         return;
     }
 
     $('part-input').value = startupTarget.partNumber;
     await loadDevice(startupTarget.package || undefined, { preserveState: false });
+    syncWelcomeIntroVisibility({ allow: !deviceData });
 }
 
 initializeApp();

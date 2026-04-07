@@ -30,9 +30,24 @@
         return `${alternate ? 'A' : ''}${role}${channel}`;
     }
 
+    function normalizeIcspPair(pair) {
+        const numericPair = Number(pair);
+        return Number.isInteger(numericPair) && numericPair > 0 ? numericPair : null;
+    }
+
     function isIcspFunctionForPair(fn, pair) {
-        return /^MCLR$/.test(fn)
-            || new RegExp(`^PGC${pair}$|^PGD${pair}$|^PGEC${pair}$|^PGED${pair}$`).test(fn);
+        const normalizedName = String(fn || '').trim().toUpperCase();
+        if (normalizedName === 'MCLR') {
+            return true;
+        }
+
+        const normalizedPair = normalizeIcspPair(pair);
+        if (normalizedPair === null) {
+            return false;
+        }
+
+        return new RegExp(`^PGC${normalizedPair}$|^PGD${normalizedPair}$|^PGEC${normalizedPair}$|^PGED${normalizedPair}$`)
+            .test(normalizedName);
     }
 
     function isPinInIcspPair(pin, pair) {

@@ -2,16 +2,26 @@
  * Application shell state and event wiring.
  *
  * Owns cross-panel shell concerns such as tab switching, catalog freshness,
- * startup theme behavior, and the UI event bindings that connect buttons to
- * the workflow functions implemented elsewhere.
+ * first-launch intro behavior, startup theme behavior, and the UI event
+ * bindings that connect buttons to the workflow functions implemented elsewhere.
  */
 
 /** @type {Set<string>} Devices available locally (no download needed) */
 let cachedDevices = new Set();
+/** @type {string[]} Full device catalog used by the custom part picker suggestions. */
+let catalogDeviceNames = [];
+/** @type {string[]} Currently visible suggestion strings in the part picker popup. */
+let visiblePartSuggestions = [];
+let activePartSuggestionIndex = -1;
 let shellEventsBound = false;
 let saveMenuBound = false;
+let packageMenuBound = false;
+let welcomeIntroBound = false;
 const shellActionHandlers = {
-    load: () => loadDevice(),
+    load: async () => {
+        dismissWelcomeIntro({ persist: true });
+        await loadDevice();
+    },
     generate: () => generateCode(),
     check: () => compileCheck(),
     copy_code: () => copyCode(),
@@ -21,7 +31,10 @@ const shellActionHandlers = {
     save: () => saveConfig(),
     save_as: () => saveConfigAs(),
     rename: () => renameConfig(),
-    open: () => openConfigDialog(),
+    open: async () => {
+        dismissWelcomeIntro({ persist: true });
+        await openConfigDialog();
+    },
     refresh_index: () => refreshIndex(),
     undo: () => undo(),
     redo: () => redo(),
@@ -48,6 +61,384 @@ function runShellAction(action) {
 function bindShellAction(id, action) {
     bindClick(id, () => {
         runShellAction(action);
+    });
+}
+
+function escapeWelcomeText(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function welcomeIntroSeen() {
+    return Boolean(appSettings?.onboarding?.welcome_intro_seen);
+}
+
+async function markWelcomeIntroSeen() {
+    if (appSettings?.onboarding?.welcome_intro_seen) {
+        return;
+    }
+
+    if (!appSettings.onboarding) {
+        appSettings.onboarding = { welcome_intro_seen: true };
+    } else {
+        appSettings.onboarding.welcome_intro_seen = true;
+    }
+
+    try {
+        await invoke('set_welcome_intro_seen', { seen: true });
+    } catch (error) {
+        console.warn('Failed to persist onboarding state:', error);
+    }
+}
+
+function setWelcomeIntroVisible(visible) {
+    const screen = $('welcome-screen');
+    if (!screen) {
+        return;
+    }
+
+    screen.hidden = !visible;
+    screen.setAttribute('aria-hidden', String(!visible));
+    document.body.classList.toggle('welcome-active', visible);
+}
+
+function dismissWelcomeIntro(options = {}) {
+    if (options.persist) {
+        void markWelcomeIntroSeen();
+    }
+    setWelcomeIntroVisible(false);
+}
+
+function focusPartSearchFromWelcome() {
+    dismissWelcomeIntro({ persist: true });
+    const input = $('part-input');
+    if (!input) {
+        return;
+    }
+    input.focus();
+    input.select();
+    updatePartSuggestions();
+}
+
+function loadWelcomeSample(partNumber) {
+    const input = $('part-input');
+    if (!input || !partNumber) {
+        return;
+    }
+
+    input.value = String(partNumber).trim().toUpperCase();
+    dismissWelcomeIntro({ persist: true });
+    updatePartSuggestions();
+    void loadDevice();
+}
+
+function renderWelcomeIntro() {
+    const screen = $('welcome-screen');
+    const config = appConfig.ui.welcomeIntro;
+    if (!screen || screen.dataset.rendered === 'true') {
+        return;
+    }
+
+    const cardsHtml = (config.featureCards || []).map((card) => `
+        <article class="welcome-card">
+            <h3>${escapeWelcomeText(card.title)}</h3>
+            <p>${escapeWelcomeText(card.body)}</p>
+        </article>
+    `).join('');
+
+    const samplesHtml = (config.sampleParts || []).map((sample) => `
+        <button type="button" class="welcome-sample-btn" data-part="${escapeWelcomeText(sample.part)}">
+            <span class="welcome-sample-label">${escapeWelcomeText(sample.label)}</span>
+            <span class="welcome-sample-note">${escapeWelcomeText(sample.note)}</span>
+        </button>
+    `).join('');
+
+    screen.innerHTML = `
+        <div class="welcome-shell">
+            <div class="welcome-hero">
+                <div class="welcome-eyebrow">${escapeWelcomeText(config.eyebrow)}</div>
+                <h2 id="welcome-title">${escapeWelcomeText(config.title)}</h2>
+                <p class="welcome-description">${escapeWelcomeText(config.description)}</p>
+                <div class="welcome-actions">
+                    <button type="button" id="welcome-primary-btn" class="welcome-primary-btn">${escapeWelcomeText(config.primaryActionLabel)}</button>
+                    <button type="button" id="welcome-open-btn" class="welcome-secondary-btn">${escapeWelcomeText(config.secondaryActionLabel)}</button>
+                    <button type="button" id="welcome-dismiss-btn" class="welcome-tertiary-btn">${escapeWelcomeText(config.dismissActionLabel)}</button>
+                </div>
+                <p class="welcome-helper">${escapeWelcomeText(config.helperText)}</p>
+            </div>
+            <div class="welcome-detail">
+                <div class="welcome-card-grid">${cardsHtml}</div>
+                <div class="welcome-samples">
+                    <div class="welcome-samples-title">Quick Starts</div>
+                    <div class="welcome-sample-list">${samplesHtml}</div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    screen.dataset.rendered = 'true';
+}
+
+function syncWelcomeIntroVisibility(options = {}) {
+    renderWelcomeIntro();
+
+    const allow = options.allow ?? true;
+    const shouldShow = Boolean(allow && !deviceData && !welcomeIntroSeen());
+    setWelcomeIntroVisible(shouldShow);
+}
+
+function wireWelcomeIntro() {
+    if (welcomeIntroBound) {
+        return;
+    }
+
+    renderWelcomeIntro();
+    const screen = $('welcome-screen');
+    if (!screen) {
+        return;
+    }
+    welcomeIntroBound = true;
+
+    screen.addEventListener('click', (event) => {
+        const actionButton = event.target.closest('#welcome-primary-btn, #welcome-open-btn, #welcome-dismiss-btn');
+        if (actionButton?.id === 'welcome-primary-btn') {
+            focusPartSearchFromWelcome();
+            return;
+        }
+        if (actionButton?.id === 'welcome-open-btn') {
+            dismissWelcomeIntro({ persist: true });
+            void openConfigDialog();
+            return;
+        }
+        if (actionButton?.id === 'welcome-dismiss-btn') {
+            dismissWelcomeIntro({ persist: true });
+            return;
+        }
+
+        const sampleButton = event.target.closest('.welcome-sample-btn');
+        if (sampleButton?.dataset.part) {
+            loadWelcomeSample(sampleButton.dataset.part);
+        }
+    });
+}
+
+function hidePartSuggestions() {
+    const input = $('part-input');
+    const popup = $('part-suggestions');
+    if (!input || !popup) {
+        return;
+    }
+
+    popup.hidden = true;
+    popup.innerHTML = '';
+    visiblePartSuggestions = [];
+    activePartSuggestionIndex = -1;
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+}
+
+function setActivePartSuggestion(index) {
+    const input = $('part-input');
+    const popup = $('part-suggestions');
+    if (!input || !popup || !visiblePartSuggestions.length) {
+        return;
+    }
+
+    const clampedIndex = Math.max(0, Math.min(index, visiblePartSuggestions.length - 1));
+    activePartSuggestionIndex = clampedIndex;
+
+    popup.querySelectorAll('.part-suggestion').forEach((button, buttonIndex) => {
+        const isActive = buttonIndex === clampedIndex;
+        button.classList.toggle('is-active', isActive);
+        button.setAttribute('aria-selected', String(isActive));
+        if (isActive) {
+            input.setAttribute('aria-activedescendant', button.id);
+            button.scrollIntoView({ block: 'nearest' });
+        }
+    });
+}
+
+function applyPartSuggestion(deviceName) {
+    const input = $('part-input');
+    if (!input || !deviceName) {
+        return;
+    }
+
+    input.value = deviceName;
+    hidePartSuggestions();
+    input.focus();
+}
+
+function rankDeviceSuggestion(deviceName, query) {
+    const matchIndex = deviceName.indexOf(query);
+    if (matchIndex < 0) {
+        return null;
+    }
+
+    return {
+        deviceName,
+        matchIndex,
+        lengthDelta: deviceName.length - query.length,
+    };
+}
+
+function findPartSuggestions(query) {
+    const normalizedQuery = String(query || '').trim().toUpperCase();
+    if (!normalizedQuery) {
+        return [];
+    }
+
+    return catalogDeviceNames
+        .map((deviceName) => rankDeviceSuggestion(deviceName, normalizedQuery))
+        .filter(Boolean)
+        .sort((left, right) => (
+            left.matchIndex - right.matchIndex
+            || left.lengthDelta - right.lengthDelta
+            || left.deviceName.localeCompare(right.deviceName)
+        ))
+        .slice(0, appConfig.ui.partPicker.maxSuggestions)
+        .map((entry) => entry.deviceName);
+}
+
+function renderPartSuggestions(matches) {
+    const input = $('part-input');
+    const popup = $('part-suggestions');
+    if (!input || !popup) {
+        return;
+    }
+
+    if (!matches.length) {
+        hidePartSuggestions();
+        return;
+    }
+
+    visiblePartSuggestions = matches;
+    popup.innerHTML = '';
+
+    matches.forEach((deviceName, index) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.id = `part-suggestion-${index}`;
+        button.className = 'part-suggestion';
+        button.setAttribute('role', 'option');
+        button.dataset.part = deviceName;
+
+        const partLabel = document.createElement('span');
+        partLabel.className = 'part-suggestion-part';
+        partLabel.textContent = deviceName;
+        button.appendChild(partLabel);
+
+        if (cachedDevices.has(deviceName)) {
+            const metaLabel = document.createElement('span');
+            metaLabel.className = 'part-suggestion-meta';
+            metaLabel.textContent = appConfig.ui.partPicker.cachedLabel;
+            button.appendChild(metaLabel);
+        }
+
+        popup.appendChild(button);
+    });
+
+    popup.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+    setActivePartSuggestion(0);
+}
+
+function updatePartSuggestions() {
+    const input = $('part-input');
+    if (!input) {
+        return;
+    }
+
+    const normalizedValue = input.value.toUpperCase();
+    if (normalizedValue !== input.value) {
+        input.value = normalizedValue;
+    }
+
+    renderPartSuggestions(findPartSuggestions(normalizedValue));
+}
+
+function handlePartPickerKeydown(event) {
+    const hasSuggestions = visiblePartSuggestions.length > 0;
+
+    if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        if (!hasSuggestions) {
+            updatePartSuggestions();
+            return;
+        }
+        setActivePartSuggestion((activePartSuggestionIndex + 1) % visiblePartSuggestions.length);
+        return;
+    }
+
+    if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        if (!hasSuggestions) {
+            updatePartSuggestions();
+            return;
+        }
+        setActivePartSuggestion(
+            (activePartSuggestionIndex - 1 + visiblePartSuggestions.length) % visiblePartSuggestions.length
+        );
+        return;
+    }
+
+    if (event.key === 'Escape') {
+        if (hasSuggestions) {
+            event.preventDefault();
+            hidePartSuggestions();
+        }
+        return;
+    }
+
+    if (event.key === 'Tab' && hasSuggestions && activePartSuggestionIndex >= 0) {
+        applyPartSuggestion(visiblePartSuggestions[activePartSuggestionIndex]);
+        return;
+    }
+
+    if (event.key === 'Enter') {
+        if (hasSuggestions && activePartSuggestionIndex >= 0) {
+            event.preventDefault();
+            applyPartSuggestion(visiblePartSuggestions[activePartSuggestionIndex]);
+        }
+        dismissWelcomeIntro({ persist: true });
+        void loadDevice();
+    }
+}
+
+function wirePartPicker() {
+    const input = $('part-input');
+    const popup = $('part-suggestions');
+    if (!input || !popup) {
+        return;
+    }
+
+    input.addEventListener('input', () => {
+        updatePartSuggestions();
+    });
+    input.addEventListener('focus', () => {
+        updatePartSuggestions();
+    });
+    input.addEventListener('keydown', handlePartPickerKeydown);
+
+    popup.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+    });
+    popup.addEventListener('click', (event) => {
+        const button = event.target.closest('.part-suggestion');
+        if (!button?.dataset.part) {
+            return;
+        }
+        applyPartSuggestion(button.dataset.part);
+    });
+
+    document.addEventListener('click', (event) => {
+        if (!event.target.closest('.part-picker-field')) {
+            hidePartSuggestions();
+        }
     });
 }
 
@@ -103,6 +494,94 @@ function wireSaveMenu() {
     });
 }
 
+function closePackageMenu() {
+    const menu = $('pkg-menu');
+    const button = $('pkg-menu-btn');
+    if (!menu || !button) {
+        return;
+    }
+
+    menu.hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+}
+
+function refreshPackageMenuState() {
+    const group = $('pkg-control-group');
+    const menu = $('pkg-menu');
+    const button = $('pkg-menu-btn');
+    const editButton = $('pkg-edit-name-btn');
+    const resetButton = $('pkg-reset-name-btn');
+    const deleteButton = $('pkg-delete-btn');
+    if (!group || !menu || !button || !editButton || !resetButton || !deleteButton) {
+        return;
+    }
+
+    const hasPackage = Boolean(deviceData?.selected_package);
+    if (!hasPackage) {
+        closePackageMenu();
+        hideElement(group);
+        return;
+    }
+
+    const ui = appConfig.ui.packageManager;
+    button.textContent = ui.menuButtonLabel;
+    button.title = ui.menuButtonTitle;
+    button.setAttribute('aria-label', ui.menuButtonTitle);
+    editButton.textContent = ui.menuEditLabel;
+    resetButton.textContent = ui.menuResetLabel;
+    deleteButton.textContent = ui.menuDeleteLabel;
+    resetButton.disabled = !hasPackageDisplayNameOverride(deviceData.selected_package, selectedPackageMeta());
+    deleteButton.hidden = !selectedPackageIsOverlay();
+    deleteButton.disabled = !selectedPackageIsOverlay();
+}
+
+function wirePackageMenu() {
+    if (packageMenuBound) {
+        return;
+    }
+
+    const menu = $('pkg-menu');
+    const button = $('pkg-menu-btn');
+    if (!menu || !button) {
+        return;
+    }
+
+    packageMenuBound = true;
+    refreshPackageMenuState();
+
+    button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        refreshPackageMenuState();
+        const nextOpen = button.getAttribute('aria-expanded') !== 'true';
+        menu.hidden = !nextOpen;
+        button.setAttribute('aria-expanded', String(nextOpen));
+    });
+
+    $('pkg-edit-name-btn')?.addEventListener('click', () => {
+        closePackageMenu();
+        showPackageManagerDialog();
+    });
+    $('pkg-reset-name-btn')?.addEventListener('click', () => {
+        closePackageMenu();
+        void resetSelectedPackageDisplayName();
+    });
+    $('pkg-delete-btn')?.addEventListener('click', () => {
+        closePackageMenu();
+        void deleteSelectedOverlayPackage();
+    });
+
+    document.addEventListener('click', (event) => {
+        if (!event.target.closest('.package-split')) {
+            closePackageMenu();
+        }
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            closePackageMenu();
+        }
+    });
+}
+
 function wireShellEventListeners() {
     if (shellEventsBound) {
         return;
@@ -121,14 +600,11 @@ function wireShellEventListeners() {
     bindShellAction('index-badge', 'refresh_index');
     bindShellAction('settings-btn', 'settings');
     wireSaveMenu();
-
-    $('part-input')?.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') {
-            loadDevice();
-        }
-    });
+    wirePackageMenu();
+    wirePartPicker();
 
     $('pkg-select')?.addEventListener('change', (event) => {
+        closePackageMenu();
         void loadDevice(event.target.value, { preserveState: true, markDirty: true });
     });
 
@@ -200,19 +676,12 @@ function renderActiveView() {
 
 function populateDeviceList() {
     invoke('list_devices').then((data) => {
-        const deviceList = $('device-list');
-        if (!deviceList) {
-            return;
-        }
-
-        deviceList.innerHTML = '';
         cachedDevices = new Set(data.cached || []);
+        catalogDeviceNames = Array.isArray(data.devices) ? data.devices.slice() : [];
 
-        (data.devices || []).forEach((deviceName) => {
-            const option = document.createElement('option');
-            option.value = deviceName;
-            deviceList.appendChild(option);
-        });
+        if (document.activeElement === $('part-input')) {
+            updatePartSuggestions();
+        }
 
         updateIndexBadge(data.total, data.cached_count);
         void refreshIndexStatus();
@@ -401,7 +870,9 @@ function wireAboutDialog() {
 function initializeShellChrome() {
     wireShellEventListeners();
     wireAboutDialog();
+    wirePackageManagerDialog();
     wireSettingsDialog();
+    wireWelcomeIntro();
     initializeConfigDocumentUi();
     const checkButton = $('check-btn');
     if (checkButton) {

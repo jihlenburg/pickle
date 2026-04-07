@@ -11,8 +11,13 @@ const reservationPolicy = window.PickleReservationPolicy;
 // =============================================================================
 
 /**
- * Return the currently selected ICSP pair number from the fuse UI (1, 2, or 3).
- * @returns {number}
+ * Return the currently selected ICSP pair number from the fuse UI.
+ *
+ * Some newer dsPIC33AK families do not expose an `ICS` fuse at all because the
+ * debugger auto-detects which PGCx/PGDx pair enters ICSP mode. In that case we
+ * must not silently reserve pair 1 in the UI.
+ *
+ * @returns {number|null}
  */
 function getFuseSelect(fieldName) {
     return document.querySelector(`#fuse-fields select[data-field="${fieldName}"]`);
@@ -20,9 +25,9 @@ function getFuseSelect(fieldName) {
 
 function getIcsPair() {
     const el = getFuseSelect('ICS');
-    if (!el) return 1;
+    if (!el) return null;
     const match = el.value.match(/\d+/);
-    return match ? parseInt(match[0]) : 1;
+    return match ? parseInt(match[0], 10) : null;
 }
 
 /** Return true when an I2C alternate pin-routing fuse is enabled for the channel. */
@@ -263,7 +268,7 @@ function isJtagEnabled() {
 
 /**
  * Check if a pin is part of the active ICSP/debug interface.
- * Matches MCLR and the debug pair selected by the ICS fuse setting.
+ * Matches MCLR and, when present, the debug pair selected by the ICS fuse setting.
  * @param {Object} pin - Pin object with functions array
  * @returns {boolean}
  */

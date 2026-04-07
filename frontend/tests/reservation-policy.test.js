@@ -34,9 +34,14 @@ test('ICSP and JTAG helpers match the active debug-pair naming rules', () => {
     assert.equal(policy.isIcspFunctionForPair('PGEC2', 2), true);
     assert.equal(policy.isIcspFunctionForPair('PGED3', 2), false);
     assert.equal(policy.isIcspFunctionForPair('MCLR', 1), true);
+    assert.equal(policy.isIcspFunctionForPair('PGC1', null), false);
+    assert.equal(policy.isIcspFunctionForPair('PGD1', undefined), false);
+    assert.equal(policy.isIcspFunctionForPair('MCLR', null), true);
 
     assert.equal(policy.isPinInIcspPair({ functions: ['RB0', 'PGD1'] }, 1), true);
     assert.equal(policy.isPinInIcspPair({ functions: ['RB0', 'PGED3'] }, 1), false);
+    assert.equal(policy.isPinInIcspPair({ functions: ['RB0', 'PGD1'] }, null), false);
+    assert.equal(policy.isPinInIcspPair({ functions: ['MCLR', 'RA0'] }, null), true);
 
     assert.equal(policy.isJtagFunction('TCK'), true);
     assert.equal(policy.isJtagFunction('PGEC1'), false);

@@ -46,11 +46,8 @@ function setupOscUI() {
 
     function updateFcyHint() {
         const val = parseFloat(targetInput.value);
-        if (val > 0) {
-            fcy.textContent = `Fcy = ${(val / 2).toFixed(3)} MHz`;
-        } else {
-            fcy.textContent = '';
-        }
+        const hint = window.PickleModel?.oscillatorTargetHint(val, deviceData?.part_number);
+        fcy.textContent = hint || '';
     }
 }
 
@@ -80,90 +77,108 @@ function setupFuseUI() {}
 
 /**
  * Build the fuse configuration UI dynamically from device DCR definitions.
- * Each register gets a heading; each non-hidden field gets a select with
- * tooltips. Default values come from the register's reset bitmask.
+ * Registers are first normalized/deduplicated, then grouped into higher-signal
+ * sections so newer AK parts do not render as a raw register dump.
  */
 function buildFuseUI(fuseDefs) {
     const container = document.getElementById('fuse-fields');
     container.innerHTML = '';
 
-    if (!fuseDefs || fuseDefs.length === 0) {
+    const fuseGroups = typeof window.PickleModel?.groupedFuseDefinitions === 'function'
+        ? window.PickleModel.groupedFuseDefinitions(fuseDefs)
+        : [];
+
+    if (!fuseGroups.length) {
         document.getElementById('fuse-config').style.display = 'none';
         return;
     }
 
-    for (const reg of fuseDefs) {
-        const visibleFields = reg.fields.filter(f => !f.hidden);
-        if (visibleFields.length === 0) continue;
+    for (const group of fuseGroups) {
+        const section = document.createElement('section');
+        section.className = 'fuse-group';
 
         const heading = document.createElement('div');
-        heading.className = 'fuse-register-heading';
-        heading.textContent = reg.cname;
-        heading.dataset.tip = reg.desc || reg.cname;
-        container.appendChild(heading);
+        heading.className = 'fuse-group-heading';
+        heading.textContent = group.label;
+        section.appendChild(heading);
 
-        for (const field of visibleFields) {
-            const row = document.createElement('div');
-            row.className = 'fuse-row';
-            row.dataset.field = field.cname;
+        for (const reg of group.registers) {
+            const registerBlock = document.createElement('div');
+            registerBlock.className = 'fuse-register';
 
-            const labelWrap = document.createElement('div');
-            labelWrap.className = 'fuse-label-wrap';
-            const label = document.createElement('label');
-            label.textContent = field.cname;
-            label.dataset.tip = field.desc || field.cname;
-            labelWrap.appendChild(label);
-            if (field.desc) {
-                const desc = document.createElement('span');
-                desc.className = 'fuse-field-desc';
-                desc.textContent = field.desc;
-                labelWrap.appendChild(desc);
-            }
-            const note = document.createElement('span');
-            note.className = 'fuse-field-note';
-            note.hidden = true;
-            labelWrap.appendChild(note);
-            if (/^ALTI2C[12]$/.test(field.cname)) {
-                const warning = document.createElement('span');
-                warning.className = 'fuse-field-warning';
-                warning.hidden = true;
-                labelWrap.appendChild(warning);
-            }
-            row.appendChild(labelWrap);
+            const registerHeading = document.createElement('div');
+            registerHeading.className = 'fuse-register-heading';
+            registerHeading.textContent = reg.cname;
+            registerHeading.dataset.tip = reg.desc || reg.cname;
+            registerBlock.appendChild(registerHeading);
 
-            const select = document.createElement('select');
-            select.dataset.register = reg.cname;
-            select.dataset.field = field.cname;
+            for (const field of reg.fields) {
+                const row = document.createElement('div');
+                row.className = 'fuse-row';
+                row.dataset.field = field.cname;
 
-            const defaultBits = reg.default_value & field.mask;
-
-            for (const val of field.values) {
-                const opt = document.createElement('option');
-                opt.value = val.cname;
-                opt.textContent = val.cname;
-                opt.title = val.desc;
-                if (val.value === defaultBits) {
-                    opt.selected = true;
-                    select.dataset.tip = val.desc;
+                const labelWrap = document.createElement('div');
+                labelWrap.className = 'fuse-label-wrap';
+                const label = document.createElement('label');
+                label.textContent = field.cname;
+                label.dataset.tip = field.desc || field.cname;
+                labelWrap.appendChild(label);
+                if (field.desc) {
+                    const desc = document.createElement('span');
+                    desc.className = 'fuse-field-desc';
+                    desc.textContent = field.desc;
+                    labelWrap.appendChild(desc);
                 }
-                select.appendChild(opt);
+                const note = document.createElement('span');
+                note.className = 'fuse-field-note';
+                note.hidden = true;
+                labelWrap.appendChild(note);
+                if (/^ALTI2C[12]$/.test(field.cname)) {
+                    const warning = document.createElement('span');
+                    warning.className = 'fuse-field-warning';
+                    warning.hidden = true;
+                    labelWrap.appendChild(warning);
+                }
+                row.appendChild(labelWrap);
+
+                const select = document.createElement('select');
+                select.dataset.register = reg.cname;
+                select.dataset.field = field.cname;
+
+                const defaultBits = reg.default_value & field.mask;
+
+                for (const val of field.values) {
+                    const opt = document.createElement('option');
+                    opt.value = val.cname;
+                    opt.textContent = val.cname;
+                    opt.title = val.desc;
+                    if (val.value === defaultBits) {
+                        opt.selected = true;
+                        select.dataset.tip = val.desc;
+                    }
+                    select.appendChild(opt);
+                }
+
+                select.addEventListener('change', () => {
+                    applyEditorMutation(() => {
+                        const sel = select.options[select.selectedIndex];
+                        select.dataset.tip = sel?.title || '';
+                        if (!select.disabled) {
+                            select.title = select.dataset.tip;
+                        }
+                    }, {
+                        markDirty: !select.disabled,
+                    });
+                });
+
+                row.appendChild(select);
+                registerBlock.appendChild(row);
             }
 
-            select.addEventListener('change', () => {
-                applyEditorMutation(() => {
-                    const sel = select.options[select.selectedIndex];
-                    select.dataset.tip = sel?.title || '';
-                    if (!select.disabled) {
-                        select.title = select.dataset.tip;
-                    }
-                }, {
-                    markDirty: !select.disabled,
-                });
-            });
-
-            row.appendChild(select);
-            container.appendChild(row);
+            section.appendChild(registerBlock);
         }
+
+        container.appendChild(section);
     }
 
     // Re-attach fuse listeners that affect pin reservation/highlighting.
@@ -193,7 +208,7 @@ function syncOscillatorManagedFuseFields() {
     const source = document.getElementById('osc-source')?.value || '';
     const poscmd = document.getElementById('osc-poscmd')?.value || '';
     const managedFields = new Set(
-        window.PickleModel?.oscillatorManagedFuseFields(source, poscmd) || []
+        window.PickleModel?.oscillatorManagedFuseFields(source, poscmd, deviceData?.part_number) || []
     );
     const managedNote =
         window.PickleConfig?.ui?.fuses?.oscillatorManagedNote

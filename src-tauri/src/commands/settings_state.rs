@@ -37,3 +37,10 @@ pub fn remember_last_used_device(
     settings.last_used.package = package.unwrap_or_default();
     settings::save(&settings.normalized())
 }
+
+#[tauri::command]
+pub fn set_welcome_intro_seen(seen: bool) -> Result<(), String> {
+    let mut settings = settings::load()?;
+    settings.onboarding.welcome_intro_seen = seen;
+    settings::save(&settings.normalized())
+}

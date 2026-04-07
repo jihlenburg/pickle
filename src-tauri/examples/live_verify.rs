@@ -97,9 +97,9 @@ fn main() -> Result<(), String> {
         }
     }
     let mut args = args.into_iter();
-    let pdf_path = args
-        .next()
-        .ok_or_else(|| "usage: cargo run --example live_verify -- <pdf-path> <part-number> [package]".to_string())?;
+    let pdf_path = args.next().ok_or_else(|| {
+        "usage: cargo run --example live_verify -- <pdf-path> <part-number> [package]".to_string()
+    })?;
     let part_number = args
         .next()
         .ok_or_else(|| "missing part number".to_string())?;
@@ -113,7 +113,10 @@ fn main() -> Result<(), String> {
     eprintln!("stage=load_device part_number={part_number}");
     let device = dfp_manager::load_device(&part_number)
         .ok_or_else(|| format!("device {part_number} not found"))?;
-    eprintln!("stage=load_device_done default_package={}", device.default_pinout);
+    eprintln!(
+        "stage=load_device_done default_package={}",
+        device.default_pinout
+    );
 
     let package_name = package.as_deref().unwrap_or(&device.default_pinout);
     let resolved_pins = device.resolve_pins(Some(package_name));
@@ -159,7 +162,10 @@ fn main() -> Result<(), String> {
         )?,
         other => return Err(format!("unsupported task: {other}")),
     };
-    eprintln!("stage=verify_done elapsed_ms={}", start.elapsed().as_millis());
+    eprintln!(
+        "stage=verify_done elapsed_ms={}",
+        start.elapsed().as_millis()
+    );
 
     println!("part_number={}", result.part_number);
     println!("package_count={}", result.packages.len());

@@ -6,6 +6,8 @@
 
 **pickle** is a native desktop pin configurator for Microchip dsPIC33 and PIC24 devices. It parses Microchip Device Family Pack (`.atpack`) data, renders package-aware pin assignment views, and generates compiler-friendly initialization code for PPS, port direction, oscillator, fuse, and CLC setup.
 
+For newer dsPIC33AK parts, pickle now parses the 32-bit EDC naming model correctly for PPS and device inventory, and the generator emits the shared AK runtime clock-generator and CLC register sequences. Remaining AK gaps are now narrower: family-specific high-speed PWM, power, and other MPS-era peripheral init flows still need dedicated treatment instead of the older CK assumptions.
+
 The name is a pun on **PIC** — Microchip's microcontroller line.
 
 ## What It Covers
@@ -18,6 +20,13 @@ The name is a pun on **PIC** — Microchip's microcontroller line.
 - CLC designer with schematic/register preview and generated `CLCn*` writes
 - Native open/save/export dialogs via Tauri
 - Optional family-aware compile checks (`xc16-gcc` for PIC24, `xc-dsc-gcc` for dsPIC33) using installed or cached device packs, plus LLM-assisted datasheet verification
+- Datasheet lookup re-validates cached local PDFs against the selected part or sibling family-series marker and skips obviously clipped extracts
+- Pinout verification caches package-table extraction per datasheet PDF and pin-count scope, then computes diffs locally so sibling parts on the same family PDF can reuse the same extraction pass
+- When a verified datasheet package table is pin-for-pin identical to an existing device-pack variant, pickle now collapses it onto that built-in package key and keeps the shared datasheet label as the UI-facing name instead of adding a redundant duplicate package
+- The header now always shows the current package selector after a device loads, even when there is only one visible package, and a compact package-actions menu on that control handles rename/reset/delete flows
+- Any package can get a local display-name override from the package-actions menu and dialog, while overlay-backed packages can also be deleted there after datasheet import
+- First launch now shows a guided intro overlay with quick-start sample devices and a direct handoff into part search or config loading instead of a blank split-pane shell
+- CLC availability is now inferred from the parsed device data itself instead of relying only on a cached module-ID hint, so stale dsPIC33AK caches with visible CLC endpoints no longer keep the CLC tab disabled
 
 ## Config Files
 
@@ -32,8 +41,9 @@ The app treats saved pin configurations as normal documents:
 ## Repo Layout
 
 - `frontend/`: static HTML/CSS/JS loaded directly by the Tauri webview
-- `frontend/static/app/`: ordered browser modules for state, pure policy/view/model helpers, document lifecycle, codegen/CLC workflows, shell actions, and verification
-- `src-tauri/`: Rust backend, parser, code generator, settings, and Tauri shell
+- `frontend/static/app/`: ordered browser modules for state, pure policy/view/model helpers, document lifecycle, codegen/CLC workflows, shell actions, and verification model/render/orchestration
+- `src-tauri/`: Rust backend, parser, split code generator helpers for orchestration/PPS/ports/CLC/single-file merge plus split oscillator backends, shared part-family profiles, settings, Tauri shell, split verification command helpers, and dedicated IPC type/support modules
+- `src-tauri/src/parser/`: EDC/DFP loading plus split DFP root/datasheet/store helpers and verification-specific helpers for prompt scope, progress payloads, PDF reduction, provider dispatch/schema/transports, provider-stream normalization, extraction comparison, overlay persistence, and cache management
 - `docs/`: architecture notes, command contracts, code-generation behavior, and domain notes
 - `tests/fixtures/`: fixture device JSON used by integration tests
 
@@ -99,7 +109,45 @@ The backend also manages mutable runtime caches and overlays in the first matchi
 - `pinouts/`
 - `clc_sources/`
 
-`settings.toml` also persists compiler preferences under `[toolchain]` and `[toolchain.family_compilers]`, plus the generated file basename under `[codegen]`. The default output pair is `mcu_init.c` and `mcu_init.h`, but that basename remains configurable without changing the UI or generator code.
+`settings.toml` also persists onboarding state under `[onboarding]`, compiler preferences under `[toolchain]` and `[toolchain.family_compilers]`, and the generated file basename under `[codegen]`. The default output pair is `mcu_init.c` and `mcu_init.h`, but that basename remains configurable without changing the UI or generator code.
+
+On macOS you may still see `~/Library/WebKit/com.github.jihlenburg.pickle/` because the Tauri WebView creates its own browser-engine data directory. pickle should not rely on that for app-owned settings or credentials; intentional persistence lives in `settings.toml`, the OS keychain, and the runtime directories below.
+
+On macOS the runtime tree normally looks like this:
+
+```text
+~/Library/Application Support/pickle/
+  settings.toml
+  devices/
+    <PART>.json
+  pinouts/
+    <PART>.json
+  clc_sources/
+    <PART>.json
+  dfp_cache/
+    pack_index.json
+    Microchip.*.atpack
+    edc/
+      <PART>.PIC
+    datasheets/
+      pdf/
+        <PART>.pdf
+      meta/
+        <PART>.json
+      text/
+        <PART>.md
+    verify_cache/
+      <hash>.json
+```
+
+Practical cleanup rules:
+
+- `devices/`, `dfp_cache/edc/`, `dfp_cache/datasheets/`, and `dfp_cache/verify_cache/` are rebuildable caches.
+- `pinouts/` and `clc_sources/` contain user-authored overlays and overrides; treat those as persistent data.
+- Current builds write datasheet PDFs into `dfp_cache/datasheets/pdf/`. Older flat `dfp_cache/datasheets/<PART>.pdf` files are legacy cache artifacts and can be removed once the same part exists under `pdf/`.
+- `dfp_cache/verify_cache/` stores extraction results keyed by PDF bytes plus a stable extraction scope such as pin-count or CLC extraction mode, not by the full selected part name.
+
+[`docs/architecture.md`](docs/architecture.md) contains the full directory-by-directory reference, including which files are optional and what each cache is used for.
 
 ## Documentation
 

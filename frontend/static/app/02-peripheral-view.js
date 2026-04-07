@@ -24,41 +24,7 @@ let periphCardState = {};
  * @returns {{type:string, instance:string, id:string}|null}
  */
 function extractPeripheralInstance(name) {
-    let m;
-    if ((m = name.match(/^U(\d+)/))) return { type: 'UART', instance: m[1], id: `UART${m[1]}` };
-    if ((m = name.match(/^(?:SDI|SDO|SCK|SS)(\d+)/))) return { type: 'SPI', instance: m[1], id: `SPI${m[1]}` };
-    if ((m = name.match(/^A?(?:SCL|SDA)(\d+)$/))) return { type: 'I2C', instance: m[1], id: `I2C${m[1]}` };
-    if ((m = name.match(/^C(\d+)(?:TX|RX)$/))) return { type: 'CAN', instance: m[1], id: `CAN${m[1]}` };
-    if ((m = name.match(/^SENT(\d+)/))) return { type: 'SENT', instance: m[1], id: `SENT${m[1]}` };
-    if ((m = name.match(/^PWM(\d+)[HL]$/))) return { type: 'PWM', instance: m[1], id: `PWM${m[1]}` };
-    if ((m = name.match(/^(?:QE[AB]|HOME|INDX)(\d+)$/))) return { type: 'QEI', instance: m[1], id: `QEI${m[1]}` };
-    if ((m = name.match(/^QEICCMP(\d+)$/))) return { type: 'QEI', instance: m[1], id: `QEI${m[1]}` };
-    if ((m = name.match(/^T(\d+)CK$/))) return { type: 'Timer', instance: m[1], id: `Timer${m[1]}` };
-    if ((m = name.match(/^TCKI(\d+)$/))) return { type: 'Timer', instance: m[1], id: `Timer${m[1]}` };
-    if ((m = name.match(/^ICM(\d+)$/))) return { type: 'Input Capture', instance: m[1], id: `ICM${m[1]}` };
-    if ((m = name.match(/^OCM(\d+)/))) return { type: 'CCP', instance: m[1], id: `CCP${m[1]}` };
-    if ((m = name.match(/^CMP(\d+)[A-D]?$/))) return { type: 'Comparator', instance: m[1], id: `CMP${m[1]}` };
-    if ((m = name.match(/^CLC(\d+)/))) return { type: 'CLC', instance: m[1], id: `CLC${m[1]}` };
-    if ((m = name.match(/^INT(\d+)$/))) return { type: 'Interrupt', instance: m[1], id: `INT${m[1]}` };
-    if ((m = name.match(/^PCI(\d+)$/))) return { type: 'PWM Fault', instance: m[1], id: `PCI${m[1]}` };
-    if ((m = name.match(/^ADCTRG(\d+)$/))) return { type: 'ADC Trigger', instance: m[1], id: `ADCTRG${m[1]}` };
-    if ((m = name.match(/^PTGTRG(\d+)$/))) return { type: 'PTG', instance: m[1], id: `PTG${m[1]}` };
-    if ((m = name.match(/^OA(\d+)/))) return { type: 'Op-Amp', instance: m[1], id: `OA${m[1]}` };
-    // ADC channels — shared (AN#) grouped together, dedicated (ANA#) as individual cores
-    if ((m = name.match(/^ANA(\d+)$/))) return { type: 'ADC', instance: String(parseInt(m[1]) + 1), id: `ADC${m[1]}`, label: `ADC${m[1]} (dedicated)` };
-    if ((m = name.match(/^AN(\d+)$/))) return { type: 'ADC', instance: '0', id: 'ADC', label: 'ADC (shared)' };
-    // DAC
-    if (/^DAC\d*OUT$/.test(name)) return { type: 'DAC', instance: '0', id: 'DAC' };
-    // Bias current
-    if ((m = name.match(/^IBIAS(\d+)$/))) return { type: 'Bias', instance: '0', id: 'Bias Current' };
-    // Singletons and shared signals — group by periphGroupFine classification
-    if (/^PWME[A-Z]$/.test(name)) return { type: 'PWM Event', instance: '0', id: 'PWM Events' };
-    if (/^PWMTRG/.test(name)) return { type: 'PWM Trigger', instance: '0', id: 'PWM Triggers' };
-    if (/^OCF[A-Z]$/.test(name)) return { type: 'CCP Fault', instance: '0', id: 'CCP Faults' };
-    if (/^CLCIN/.test(name)) return { type: 'CLC Input', instance: '0', id: 'CLC Inputs' };
-    if (/^REF[IO]$/.test(name)) return { type: 'Reference Clock', instance: '0', id: 'Ref Clock' };
-    if (/^RPV\d/.test(name)) return { type: 'Virtual Pin', instance: '0', id: 'Virtual Pins' };
-    return null;
+    return window.PickleModel.extractPeripheralInstance(name);
 }
 
 /** Category ordering for peripheral instance groups. */

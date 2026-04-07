@@ -86,6 +86,13 @@ fn load_metadata(part: &str) -> Option<DatasheetRef> {
     serde_json::from_str(&text).ok()
 }
 
+/// Return cached datasheet metadata for a part without triggering any network
+/// lookup. Validation code uses this after a successful `resolve()` call so a
+/// downloaded family datasheet can be accepted by its authoritative DS number.
+pub fn cached_metadata(part: &str) -> Option<DatasheetRef> {
+    load_metadata(part)
+}
+
 // ---------------------------------------------------------------------------
 // HTTP helpers
 // ---------------------------------------------------------------------------
@@ -142,6 +149,34 @@ fn product_url_for_part(part: &str) -> String {
         "https://www.microchip.com/en-us/product/{}",
         part.to_lowercase()
     )
+}
+
+fn sibling_family_prefix(part: &str) -> Option<String> {
+    let re = Regex::new(r"^((?:DSPIC|PIC)\d+[A-Z]+)").unwrap();
+    re.captures(&part.to_uppercase())
+        .and_then(|caps| caps.get(1))
+        .map(|m| m.as_str().to_string())
+}
+
+fn sibling_pin_suffix(part: &str) -> Option<String> {
+    let re = Regex::new(r"([A-Z]{2,}\d{3}[A-Z]?)$").unwrap();
+    re.captures(&part.to_uppercase())
+        .and_then(|caps| caps.get(1))
+        .map(|m| m.as_str().to_string())
+}
+
+fn is_compatible_sibling_part(requested_part: &str, sibling_part: &str) -> bool {
+    let requested_upper = requested_part.to_uppercase();
+    let sibling_upper = sibling_part.to_uppercase();
+
+    if sibling_upper == requested_upper {
+        return true;
+    }
+
+    sibling_family_prefix(&requested_upper)
+        .zip(sibling_pin_suffix(&requested_upper))
+        .map(|(family, suffix)| sibling_upper.contains(&family) && sibling_upper.contains(&suffix))
+        .unwrap_or(false)
 }
 
 /// Extract (datasheet_title, ds_number) from a Microchip product page's text.
@@ -280,11 +315,7 @@ fn build_candidate_pdf_url(part: &str, title: &str, ds_id: &str) -> String {
 /// This is much faster and more reliable than routing through the Jina proxy.
 fn probe_pdf_url(url: &str) -> bool {
     let client = http_client();
-    match client
-        .head(url)
-        .timeout(Duration::from_secs(10))
-        .send()
-    {
+    match client.head(url).timeout(Duration::from_secs(10)).send() {
         Ok(resp) => {
             let status = resp.status();
             if status.is_success() {
@@ -360,9 +391,7 @@ fn search_sibling_product_pages(part: &str, limit: usize) -> Vec<String> {
     };
 
     // Extract Microchip product URLs from DuckDuckGo result links
-    let re = Regex::new(
-        r"(?i)https?://www\.microchip\.com/en[/-]us/product/([a-z0-9]+)"
-    ).unwrap();
+    let re = Regex::new(r"(?i)https?://www\.microchip\.com/en[/-]us/product/([a-z0-9]+)").unwrap();
 
     let mut seen = std::collections::HashSet::new();
     let part_lower = part.to_lowercase();
@@ -375,10 +404,7 @@ fn search_sibling_product_pages(part: &str, limit: usize) -> Vec<String> {
             continue;
         }
         if seen.insert(slug.clone()) {
-            urls.push(format!(
-                "https://www.microchip.com/en-us/product/{}",
-                slug
-            ));
+            urls.push(format!("https://www.microchip.com/en-us/product/{}", slug));
             if urls.len() >= limit {
                 break;
             }
@@ -406,8 +432,8 @@ fn try_resolve_from_page(
 
     // Prefer the exact PDF URL already linked from the product page
     if let Some(pdf_url) = parse_direct_pdf_url(page_text) {
-        let datasheet_revision = revision_from_pdf_url(&pdf_url)
-            .unwrap_or_else(|| ds_number.clone());
+        let datasheet_revision =
+            revision_from_pdf_url(&pdf_url).unwrap_or_else(|| ds_number.clone());
         let datasheet_number =
             datasheet_number_from_revision(&datasheet_revision).unwrap_or(ds_number.clone());
 
@@ -526,6 +552,20 @@ pub fn resolve(part_number: &str) -> Result<DatasheetRef, String> {
     log::info!("resolve: found {} sibling product pages", siblings.len());
 
     for sibling_url in &siblings {
+        let sibling_slug = sibling_url
+            .rsplit('/')
+            .next()
+            .unwrap_or(sibling_url)
+            .to_string();
+        if !is_compatible_sibling_part(&part_upper, &sibling_slug) {
+            log::info!(
+                "resolve: skipping incompatible sibling {} for {}",
+                sibling_slug,
+                part_upper
+            );
+            continue;
+        }
+
         let proxied_sibling = proxy_url(sibling_url);
         let sibling_text = match fetch_text(&proxied_sibling, 30) {
             Ok(t) => t,
@@ -536,12 +576,6 @@ pub fn resolve(part_number: &str) -> Result<DatasheetRef, String> {
         };
 
         if let Some(mut ds_ref) = try_resolve_from_page(&part_upper, sibling_url, &sibling_text) {
-            // Extract the sibling part slug from the URL for user-facing messaging
-            let sibling_slug = sibling_url
-                .rsplit('/')
-                .next()
-                .unwrap_or(sibling_url)
-                .to_string();
             log::info!(
                 "resolve: using sibling {} datasheet for {}",
                 sibling_slug,
@@ -597,8 +631,8 @@ pub fn get_or_fetch_text(part_number: &str, pdf_url: &str) -> Result<String, Str
 #[cfg(test)]
 mod tests {
     use super::{
-        candidate_revisions, datasheet_number_from_revision, parse_direct_pdf_url,
-        revision_from_pdf_url,
+        candidate_revisions, datasheet_number_from_revision, is_compatible_sibling_part,
+        parse_direct_pdf_url, revision_from_pdf_url,
     };
 
     #[test]
@@ -620,13 +654,19 @@ Data Sheet:
     #[test]
     fn extracts_revision_from_pdf_url_with_letter() {
         let pdf_url = "https://ww1.microchip.com/downloads/aemDocuments/documents/MCU16/ProductDocuments/DataSheets/dsPIC33EPXXXGP50X-dsPIC33EPXXXMC20X-50X-and-PIC24EPXXXGP-MC20X-Family-Data-Sheet-DS70000657J.pdf";
-        assert_eq!(revision_from_pdf_url(pdf_url).as_deref(), Some("DS70000657J"));
+        assert_eq!(
+            revision_from_pdf_url(pdf_url).as_deref(),
+            Some("DS70000657J")
+        );
     }
 
     #[test]
     fn extracts_revision_from_pdf_url_without_letter() {
         let pdf_url = "https://ww1.microchip.com/downloads/aemDocuments/documents/MCU16/ProductDocuments/DataSheets/dsPIC33AK128MC106-Family-Data-Sheet-DS70005539.pdf";
-        assert_eq!(revision_from_pdf_url(pdf_url).as_deref(), Some("DS70005539"));
+        assert_eq!(
+            revision_from_pdf_url(pdf_url).as_deref(),
+            Some("DS70005539")
+        );
     }
 
     #[test]
@@ -657,5 +697,17 @@ Data Sheet:
     fn candidate_revisions_respects_hint() {
         let candidates = candidate_revisions("DS70005539", Some("DS70005539C"));
         assert_eq!(candidates[0], "DS70005539C");
+    }
+
+    #[test]
+    fn sibling_compatibility_requires_same_family_and_final_suffix() {
+        assert!(is_compatible_sibling_part(
+            "DSPIC33CDV128MC106",
+            "dspic33cdvl64mc106"
+        ));
+        assert!(!is_compatible_sibling_part(
+            "DSPIC33AK64MC105",
+            "dspic33ak128mc106"
+        ));
     }
 }
