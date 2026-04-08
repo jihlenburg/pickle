@@ -142,7 +142,7 @@ cargo tauri build                   # Production build
 - FICD.ICS selects the active ICSP debug pair (PGC1/PGD1 is factory default).
 - Part number format: `DSPIC33CK64MP102T-E/M6VAO` = base + T(tape/reel) + temp grade + /package + VAO(automotive).
 - Config fuses: `#pragma config` for FICD, FWDT, FOSCSEL, FOSC, FBORPOR.
-- CLC (Configurable Logic Cell): up to 4 modules, each with 4 data select inputs, 4 gates, and a configurable logic function. Configured via CLCnCON, CLCnSEL, and CLCnGLS registers.
+- CLC (Configurable Logic Cell): module count varies by family/package. Each module has 4 data select inputs, 4 gates, and a configurable logic function. Configured via CLCnCON, CLCnSEL, and CLCnGLS registers.
 
 ## What NOT to Do
 

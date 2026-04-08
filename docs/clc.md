@@ -40,8 +40,8 @@ slots (`0..7`). The selected numeric values are the values written into
 
 ## Frontend Data Model
 
-CLC state is stored as a 1-indexed map of four modules. The default shape for a
-single module is:
+CLC state is stored as a 1-indexed map keyed by the loaded device's visible CLC
+module count. The default shape for each module is:
 
 ```json
 {

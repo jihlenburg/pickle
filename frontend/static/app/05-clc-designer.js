@@ -26,11 +26,24 @@ const clcModel = window.PickleClcModel;
  */
 let clcConfig = {};
 let clcActiveModule = 1;
-const CLC_MODULE_COUNT = clcModel.MODULE_COUNT;
 const CLC_MODES = clcModel.MODES;
 
 function deviceHasClc() {
     return !!deviceData?.has_clc;
+}
+
+function getClcModuleCount() {
+    return clcModel.resolveModuleCount(deviceData);
+}
+
+function getSavedClcModuleCount(saved) {
+    return clcModel.resolveSavedModuleCount(saved);
+}
+
+function syncClcDesignerState() {
+    const moduleCount = getClcModuleCount();
+    clcConfig = clcModel.normalizeSavedConfig(clcConfig, moduleCount);
+    clcActiveModule = Math.min(Math.max(clcActiveModule, 1), moduleCount);
 }
 
 function clcEmptyMessage() {
@@ -61,7 +74,7 @@ function updateClcTabState() {
 
 /** Initialize CLC config state for all modules. */
 function initClcConfig() {
-    clcConfig = clcModel.createDefaultConfig();
+    clcConfig = clcModel.createDefaultConfig(getClcModuleCount());
     clcActiveModule = 1;
 }
 
@@ -99,6 +112,7 @@ function renderClcDesigner() {
     designer.style.display = '';
     empty.style.display = 'none';
     empty.textContent = clcEmptyMessage();
+    syncClcDesignerState();
 
     renderClcModuleTabs();
     renderClcInputs();
@@ -109,12 +123,12 @@ function renderClcDesigner() {
     if (typeof renderClcSchematic === 'function') renderClcSchematic();
 }
 
-/** Render the CLC1-4 module selector tabs. */
+/** Render the available CLC module selector tabs for the loaded device. */
 function renderClcModuleTabs() {
     const container = document.getElementById('clc-module-tabs');
     container.innerHTML = '';
 
-    for (let i = 1; i <= CLC_MODULE_COUNT; i++) {
+    for (let i = 1; i <= getClcModuleCount(); i++) {
         const btn = document.createElement('button');
         btn.className = 'clc-module-tab';
         if (i === clcActiveModule) btn.classList.add('active');
@@ -367,11 +381,12 @@ function updateClcRegisters() {
 
 /** Collect the CLC configuration for save/codegen. Returns null if no modules configured. */
 function getClcConfig() {
-    return clcModel.collectConfiguredModules(clcConfig);
+    return clcModel.collectConfiguredModules(clcConfig, getClcModuleCount());
 }
 
 /** Re-apply saved CLC configuration after device load. */
 function applyClcConfig(saved) {
-    clcConfig = clcModel.normalizeSavedConfig(saved);
+    const moduleCount = Math.max(getClcModuleCount(), getSavedClcModuleCount(saved));
+    clcConfig = clcModel.normalizeSavedConfig(saved, moduleCount);
     clcActiveModule = 1;
 }

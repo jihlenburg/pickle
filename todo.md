@@ -13,6 +13,7 @@
 - Verify in the Tauri app that the package selector now stays visible for single-package devices and that the attached package-actions menu cleanly replaces the old standalone `Edit Name...` button.
 - Verify in the Tauri app that the left-panel `Pin View` / `Peripheral View` control now reads as real section tabs connected to the content pane instead of detached pill buttons.
 - Verify in the Tauri app that dsPIC33AK devices with visible CLC endpoints no longer show the right-side `CLC` tab as disabled after a stale cache reload.
+- Verify in the Tauri app that dsPIC33AK256MPS205 now exposes all 10 CLC modules in the CLC designer instead of the old fixed 4-tab limit, and that loading a saved config preserves higher-numbered CLC modules until the device reload completes.
 
 ## Backlog
 

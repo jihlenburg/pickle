@@ -43,9 +43,52 @@
         };
     }
 
-    function createDefaultConfig() {
+    function sanitizeModuleCount(moduleCount) {
+        const numeric = Number(moduleCount);
+        if (Number.isFinite(numeric) && numeric >= 1) {
+            return Math.trunc(numeric);
+        }
+        return MODULE_COUNT;
+    }
+
+    /**
+     * Resolve the runtime CLC module count for the loaded device.
+     *
+     * Older device caches and generic fallback parts may still omit the CLC
+     * inventory count, so the designer first derives the highest visible
+     * `CLCxOUT` endpoint before falling back to the historical 4-module
+     * baseline.
+     */
+    function resolveModuleCount(device) {
+        const inventoryCount = Number(device?.device_info?.clc);
+        if (Number.isFinite(inventoryCount) && inventoryCount >= 1) {
+            return Math.trunc(inventoryCount);
+        }
+        const derivedCount = (device?.remappable_outputs || []).reduce((maxCount, output) => {
+            const match = String(output?.name || '').match(/^CLC(\d+)OUT$/i);
+            if (!match) return maxCount;
+            return Math.max(maxCount, Number.parseInt(match[1], 10) || 0);
+        }, 0);
+        if (derivedCount >= 1) {
+            return derivedCount;
+        }
+        return MODULE_COUNT;
+    }
+
+    function resolveSavedModuleCount(saved) {
+        return Object.keys(saved || {}).reduce((maxCount, idx) => {
+            const moduleIndex = parseInt(idx, 10);
+            if (!Number.isInteger(moduleIndex) || moduleIndex < 1) {
+                return maxCount;
+            }
+            return Math.max(maxCount, moduleIndex);
+        }, 0);
+    }
+
+    function createDefaultConfig(moduleCount) {
+        const resolvedCount = sanitizeModuleCount(moduleCount);
         const config = {};
-        for (let i = 1; i <= MODULE_COUNT; i++) {
+        for (let i = 1; i <= resolvedCount; i++) {
             config[i] = defaultModule();
         }
         return config;
@@ -73,11 +116,12 @@
         };
     }
 
-    function normalizeSavedConfig(saved) {
-        const config = createDefaultConfig();
+    function normalizeSavedConfig(saved, moduleCount) {
+        const resolvedCount = sanitizeModuleCount(moduleCount);
+        const config = createDefaultConfig(resolvedCount);
         for (const [idx, module] of Object.entries(saved || {})) {
             const moduleIndex = parseInt(idx, 10);
-            if (moduleIndex >= 1 && moduleIndex <= MODULE_COUNT) {
+            if (moduleIndex >= 1 && moduleIndex <= resolvedCount) {
                 config[moduleIndex] = normalizeModule(module);
             }
         }
@@ -95,9 +139,19 @@
         return Boolean(module.lcpol || module.intp || module.intn);
     }
 
-    function collectConfiguredModules(config) {
+    function collectConfiguredModules(config, moduleCount) {
         const modules = {};
-        for (let i = 1; i <= MODULE_COUNT; i++) {
+        const resolvedCount = moduleCount == null
+            ? null
+            : sanitizeModuleCount(moduleCount);
+        const moduleIndexes = resolvedCount == null
+            ? Object.keys(config || {})
+                .map((idx) => parseInt(idx, 10))
+                .filter((idx) => Number.isInteger(idx) && idx >= 1)
+                .sort((left, right) => left - right)
+            : Array.from({ length: resolvedCount }, (_, index) => index + 1);
+
+        for (const i of moduleIndexes) {
             const module = config?.[i];
             if (isModuleConfigured(module)) {
                 modules[i] = normalizeModule(module);
@@ -146,6 +200,9 @@
         MODULE_COUNT,
         MODES,
         defaultModule,
+        sanitizeModuleCount,
+        resolveModuleCount,
+        resolveSavedModuleCount,
         createDefaultConfig,
         normalizeModule,
         normalizeSavedConfig,

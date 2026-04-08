@@ -152,7 +152,7 @@ fn compute_clc_register_values_ak(config: &ClcModuleConfig) -> ClcAkRegisterValu
     }
 }
 
-/// Configuration for a single CLC module (CLC1-4).
+/// Configuration for a single CLC module (`CLCn` for the selected device).
 /// Field values map directly to register bits as documented in DS70005298A.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClcModuleConfig {

@@ -9,7 +9,15 @@ const assert = require('node:assert/strict');
 
 const clcModel = require('../static/app/05-clc-model.js');
 
-test('default config builds four normalized modules', () => {
+test('default config builds normalized modules for the requested count', () => {
+    const config = clcModel.createDefaultConfig(10);
+
+    assert.equal(Object.keys(config).length, 10);
+    assert.deepEqual(config[10], clcModel.defaultModule());
+    assert.equal(clcModel.isModuleConfigured(config[10]), false);
+});
+
+test('default config falls back to the historical four-module baseline', () => {
     const config = clcModel.createDefaultConfig();
 
     assert.equal(Object.keys(config).length, clcModel.MODULE_COUNT);
@@ -29,7 +37,10 @@ test('normalizeSavedConfig coerces sparse and partial modules into canonical sha
             lcpol: 1,
             lcoe: false,
         },
-    });
+        9: {
+            mode: 1,
+        },
+    }, 10);
 
     assert.equal(config[2].ds[0], 1);
     assert.equal(config[2].ds[1], 1);
@@ -42,6 +53,7 @@ test('normalizeSavedConfig coerces sparse and partial modules into canonical sha
     assert.equal(config[2].lcpol, true);
     assert.equal(config[2].lcoe, false);
     assert.equal(config[2].lcen, true);
+    assert.equal(config[9].mode, 1);
 });
 
 test('computeRegisters packs CLC control and gate bits as expected', () => {
@@ -71,12 +83,34 @@ test('computeRegisters packs CLC control and gate bits as expected', () => {
 });
 
 test('collectConfiguredModules omits default modules and preserves configured ones', () => {
-    const config = clcModel.createDefaultConfig();
+    const config = clcModel.createDefaultConfig(10);
     config[3] = clcModel.normalizeModule({
         mode: 1,
+    });
+    config[8] = clcModel.normalizeModule({
+        intp: true,
     });
 
     assert.deepEqual(clcModel.collectConfiguredModules(config), {
         3: config[3],
+        8: config[8],
     });
+});
+
+test('resolveModuleCount prefers device inventory and falls back cleanly', () => {
+    assert.equal(clcModel.resolveModuleCount({ device_info: { clc: 10 } }), 10);
+    assert.equal(
+        clcModel.resolveModuleCount({
+            device_info: { clc: 0 },
+            remappable_outputs: [{ name: 'CLC1OUT' }, { name: 'CLC10OUT' }],
+        }),
+        10
+    );
+    assert.equal(clcModel.resolveModuleCount({ device_info: { clc: 0 } }), clcModel.MODULE_COUNT);
+    assert.equal(clcModel.resolveModuleCount(null), clcModel.MODULE_COUNT);
+});
+
+test('resolveSavedModuleCount keeps higher-indexed modules alive during config restore', () => {
+    assert.equal(clcModel.resolveSavedModuleCount({ 10: { mode: 1 }, 3: { mode: 2 } }), 10);
+    assert.equal(clcModel.resolveSavedModuleCount({ foo: {}, 0: {} }), 0);
 });

@@ -25,3 +25,4 @@
 - Synced the top-level `VERSION` file to `0.5.0` after the build script caught it lagging behind `Cargo.toml` and `tauri.conf.json`.
 - Aligned the left-panel `Pin View` / `Peripheral View` styling with the right-panel tab strip so both sides now use the same underline-tab language.
 - Fixed CLC capability detection so stale AK caches with visible `CLCINx` / `CLCxOUT` endpoints are reparsed and no longer keep the right-side CLC tab disabled just because `clc_module_id` was still `null`.
+- Lifted the frontend CLC designer off its old hardcoded 4-module limit by deriving the module count from `device_info.clc` or visible `CLCxOUT` endpoints, updated the pure CLC model tests for higher-count devices, and preserved higher-numbered saved modules during config restore until the real device reload finishes.
