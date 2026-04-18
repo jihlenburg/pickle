@@ -1,5 +1,10 @@
 # Logbook
 
+## 2026-04-09
+
+- Wrapped the CLC module tab strip so devices with more than four modules, such as dsPIC33AK parts, keep all selector tabs visible after the device-driven module-count change.
+- Re-ran the frontend Node test suite and `cargo test`; both passed after the CLC tab-strip follow-up.
+
 ## 2026-04-07
 
 - Adopted repo-local `todo.md` and `logbook.md` tracking for `pickle`.

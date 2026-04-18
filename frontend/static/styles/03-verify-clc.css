@@ -258,10 +258,13 @@
     gap: 10px;
 }
 
+/* Device-driven CLC counts can exceed one row on AK parts, so tabs wrap. */
 .clc-module-tabs {
     display: flex;
-    gap: 4px;
+    flex-wrap: wrap;
+    gap: 6px 4px;
     margin-bottom: 4px;
+    align-items: flex-end;
 }
 
 .clc-module-tab {
