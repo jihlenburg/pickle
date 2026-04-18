@@ -1,5 +1,10 @@
 # Logbook
 
+## 2026-04-19
+
+- Committed the CLC module tab-strip wrap change as `68d0c21` and pushed `main` to origin.
+- Tagged the commit as `pre-claude-4.7` (space-separated name rejected by git, so slugified) to snapshot the state before switching to Claude Opus 4.7, and pushed the tag.
+
 ## 2026-04-09
 
 - Wrapped the CLC module tab strip so devices with more than four modules, such as dsPIC33AK parts, keep all selector tabs visible after the device-driven module-count change.
