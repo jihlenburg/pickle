@@ -1287,7 +1287,7 @@ If a generic `input { ... }` rule lives in `00-foundation.css`, trim it to just 
 Expanded from PR #2's class-only gate to catch ID selectors too:
 
 ```bash
-rg '^\s*(\.|#)(key-input|package-name-input)(\b|:|,|\s)' frontend/static/styles/
+rg '^\s*(\.|#)(key-input|package-name-input|part-input)(\b|:|,|\s)' frontend/static/styles/
 ```
 
 Expected: zero matches.

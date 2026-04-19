@@ -121,3 +121,49 @@ test('PickleUI.select labels the trigger with the selected option', () => {
     handle.setValue('b');
     assert.equal(trigger.textContent, 'Beta');
 });
+
+test('PickleUI.select closes on outside click', () => {
+    const source = loadForm();
+    const document = makeDom();
+    const trigger = document.createElement('button');
+    const outside = document.createElement('div');
+    const sandbox = { window: {}, document };
+    sandbox.window.document = document;
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox);
+
+    sandbox.window.PickleUI.select(trigger, {
+        options: [{ value: 'a', label: 'Alpha' }],
+        onSelect: () => {},
+    });
+
+    trigger.click();
+    assert.equal(trigger.attributes['aria-expanded'], 'true');
+
+    // Simulate mousedown on an element outside both trigger and menu.
+    document.dispatch('mousedown', { target: outside });
+
+    assert.equal(trigger.attributes['aria-expanded'], 'false');
+});
+
+test('PickleUI.select closes on Escape key', () => {
+    const source = loadForm();
+    const document = makeDom();
+    const trigger = document.createElement('button');
+    const sandbox = { window: {}, document };
+    sandbox.window.document = document;
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox);
+
+    sandbox.window.PickleUI.select(trigger, {
+        options: [{ value: 'a', label: 'Alpha' }],
+        onSelect: () => {},
+    });
+
+    trigger.click();
+    assert.equal(trigger.attributes['aria-expanded'], 'true');
+
+    document.dispatch('keydown', { key: 'Escape' });
+
+    assert.equal(trigger.attributes['aria-expanded'], 'false');
+});
