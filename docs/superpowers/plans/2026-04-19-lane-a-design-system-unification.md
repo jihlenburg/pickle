@@ -663,12 +663,12 @@ Adds `components/form.css` and `ui/form.js` (exposing `PickleUI.select`). Migrat
     font-weight: var(--weight-semibold);
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: var(--text-secondary);
+    color: var(--text-dim);
 }
 
 .field-hint {
     font-size: var(--text-sm);
-    color: var(--text-tertiary);
+    color: var(--text-dim);
     line-height: var(--leading-normal);
 }
 
@@ -679,7 +679,7 @@ Adds `components/form.css` and `ui/form.js` (exposing `PickleUI.select`). Migrat
     padding: 0 var(--space-5);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    background: var(--bg-secondary);
+    background: var(--bg-card);
     color: var(--text);
     font-size: var(--text-md);
     font-family: inherit;
@@ -724,7 +724,7 @@ Adds `components/form.css` and `ui/form.js` (exposing `PickleUI.select`). Migrat
     padding: 0 var(--space-5);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    background: var(--bg-secondary);
+    background: var(--bg-card);
     color: var(--text);
     font-size: var(--text-md);
     font-family: inherit;
@@ -735,7 +735,7 @@ Adds `components/form.css` and `ui/form.js` (exposing `PickleUI.select`). Migrat
 .select-trigger::after {
     content: "▾";
     font-size: var(--text-sm);
-    color: var(--text-secondary);
+    color: var(--text-dim);
 }
 
 .select-trigger:focus-visible {
@@ -759,7 +759,7 @@ Adds `components/form.css` and `ui/form.js` (exposing `PickleUI.select`). Migrat
 .stepper-btn {
     width: 24px;
     border: 0;
-    background: var(--bg-secondary);
+    background: var(--bg-card);
     color: var(--text);
     font-size: var(--text-md);
     cursor: pointer;
@@ -795,7 +795,7 @@ Adds `components/form.css` and `ui/form.js` (exposing `PickleUI.select`). Migrat
     height: 16px;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    background: var(--bg-secondary);
+    background: var(--bg-card);
     cursor: pointer;
     position: relative;
     flex-shrink: 0;
@@ -884,7 +884,7 @@ Adds `components/form.css` and `ui/form.js` (exposing `PickleUI.select`). Migrat
 
 .labeled-row-desc {
     font-size: var(--text-sm);
-    color: var(--text-tertiary);
+    color: var(--text-dim);
     line-height: var(--leading-normal);
 }
 ```
@@ -1264,13 +1264,32 @@ The native `<select>` pickers for `#osc-source` and `#osc-poscmd` remain native 
 
 - [ ] **Step 1: Remove now-dead rules**
 
-Delete rules for `.key-input`, `.key-reveal` (covered by `.btn`), `.key-actions` button styling (kept: flex layout), `.package-name-input` / `.package-dialog-input-wrap` input-specific properties (kept: wrapper margin). Any `input { ... }` global reset in foundation that conflicts with `.input` must either be scoped or removed.
+Delete the following from `frontend/static/styles/04-shell-layout.css`:
 
-- [ ] **Step 2: Sanity gate**
+- `.key-input` rule block (currently around line 1299) — all input styling now comes from `.input`
+- `.key-reveal` button-specific rules — already covered by `.btn` in PR #2 but verify
+- `.key-actions` button-specific properties only; keep the `display: flex` / `gap` layout rule
+
+Delete the following **ID-selector** rules from the same file (note: they are `#package-name-input`, not `.package-name-input` — the PR #2 class-only sanity gate taught us that ID rules can override the primitive via specificity):
+
+- `#package-name-input { ... }` base rule (currently around lines 998–1006)
+- `#package-name-input:focus { ... }` (lines 1008–1011)
+- `#package-name-input:disabled { ... }` (lines 1023–1026)
+
+Keep `.package-dialog-input-wrap` — it holds the grid layout, not input styling.
+
+In `frontend/static/styles/02-package-config.css`, scan for any `input { ... }` or `input[type="..."] { ... }` global resets that would conflict with `.input`. Scope them (e.g. restrict to `.pin-input`) or delete them outright.
+
+If a generic `input { ... }` rule lives in `00-foundation.css`, trim it to just the resets `.input` does NOT own (e.g. `font: inherit`).
+
+- [ ] **Step 2: Sanity gate (class + ID coverage)**
+
+Expanded from PR #2's class-only gate to catch ID selectors too:
 
 ```bash
-rg '^\s*\.(key-input|package-name-input)\b' frontend/static/styles/
+rg '^\s*(\.|#)(key-input|package-name-input)(\b|:|,|\s)' frontend/static/styles/
 ```
+
 Expected: zero matches.
 
 ### Task 3.7: Commit PR #3
@@ -1742,15 +1761,15 @@ Expected: FAIL.
 .status-bar {
     padding: var(--space-3) var(--space-7);
     border-top: 1px solid var(--border);
-    background: var(--bg-secondary);
+    background: var(--bg-card);
     font-size: var(--text-sm);
-    color: var(--text-secondary);
+    color: var(--text-dim);
     display: flex;
     align-items: center;
     gap: var(--space-3);
 }
 
-.status-bar-tone-idle { color: var(--text-secondary); }
+.status-bar-tone-idle { color: var(--text-dim); }
 .status-bar-tone-success { color: var(--success); }
 .status-bar-tone-warn { color: var(--warning); }
 .status-bar-tone-error { color: var(--error); }
@@ -2063,7 +2082,7 @@ Expected: FAIL.
     gap: var(--space-4);
     align-items: start;
     padding: var(--space-5) var(--space-6);
-    background: var(--bg-secondary);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-left-width: 3px;
     border-radius: var(--radius-md);
@@ -2079,7 +2098,7 @@ Expected: FAIL.
     to   { opacity: 1; transform: translateY(0); }
 }
 
-.toast-info     { border-left-color: var(--text-secondary); }
+.toast-info     { border-left-color: var(--text-dim); }
 .toast-success  { border-left-color: var(--success); }
 .toast-warn     { border-left-color: var(--warning); }
 .toast-error    { border-left-color: var(--error); }
@@ -2088,11 +2107,11 @@ Expected: FAIL.
 .toast-icon {
     font-size: var(--text-xl);
     line-height: 1;
-    color: var(--text-secondary);
+    color: var(--text-dim);
     align-self: start;
 }
 
-.toast-info     .toast-icon { color: var(--text-secondary); }
+.toast-info     .toast-icon { color: var(--text-dim); }
 .toast-success  .toast-icon { color: var(--success); }
 .toast-warn     .toast-icon { color: var(--warning); }
 .toast-error    .toast-icon { color: var(--error); }
@@ -2107,7 +2126,7 @@ Expected: FAIL.
 
 .toast-body {
     font-size: var(--text-sm);
-    color: var(--text-tertiary);
+    color: var(--text-dim);
     margin-top: var(--space-1);
     line-height: var(--leading-normal);
 }
@@ -2124,7 +2143,7 @@ Expected: FAIL.
     border: 0;
     padding: 0;
     background: transparent;
-    color: var(--text-tertiary);
+    color: var(--text-dim);
     font-size: var(--text-lg);
     cursor: pointer;
 }
@@ -2538,7 +2557,7 @@ Expected: FAIL.
     z-index: var(--z-dropdown);
     min-width: 160px;
     padding: var(--space-2) 0;
-    background: var(--bg-secondary);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-md);
@@ -2571,7 +2590,7 @@ Expected: FAIL.
 }
 
 .dropdown-item-icon {
-    color: var(--text-secondary);
+    color: var(--text-dim);
     font-size: var(--text-sm);
     width: 16px;
     text-align: center;
@@ -3071,7 +3090,7 @@ Expected: FAIL.
  *
  * Two variants:
  *   - underline (default): bottom border, active cell gets a 2 px accent underline
- *   - segmented: bordered group, active cell has tertiary bg fill
+ *   - segmented: bordered group, active cell has elevated card bg fill
  *
  * Apply .tab-strip-segmented modifier on the container to switch style.
  * Keyboard navigation (arrows/Home/End) is Lane B scope — this primitive
@@ -3091,7 +3110,7 @@ Expected: FAIL.
     padding: 0 var(--space-7);
     border: 0;
     background: transparent;
-    color: var(--text-secondary);
+    color: var(--text-dim);
     font-size: var(--text-md);
     font-weight: var(--weight-regular);
     cursor: pointer;
@@ -3388,7 +3407,7 @@ Adds `components/empty-state.css`. No JS. Migrates all four placeholder empties 
     text-align: center;
     border: 1px dashed var(--border);
     border-radius: var(--radius-md);
-    color: var(--text-secondary);
+    color: var(--text-dim);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -3398,7 +3417,7 @@ Adds `components/empty-state.css`. No JS. Migrates all four placeholder empties 
 .empty-state-icon {
     font-size: 28px;
     line-height: 1;
-    color: var(--text-tertiary);
+    color: var(--text-dim);
     margin-bottom: var(--space-6);
 }
 
@@ -3412,7 +3431,7 @@ Adds `components/empty-state.css`. No JS. Migrates all four placeholder empties 
 .empty-state-body {
     font-size: var(--text-sm);
     line-height: var(--leading-normal);
-    color: var(--text-tertiary);
+    color: var(--text-dim);
     max-width: 40ch;
     margin: 0 auto var(--space-7);
 }
@@ -3750,7 +3769,7 @@ Expected: FAIL.
     gap: var(--space-4);
     padding: var(--space-7) var(--space-8);
     border-bottom: 1px solid var(--border);
-    background: var(--bg-secondary);
+    background: var(--bg-card);
 }
 
 .modal-title {
@@ -3761,7 +3780,7 @@ Expected: FAIL.
 
 .modal-subtitle {
     font-size: var(--text-sm);
-    color: var(--text-secondary);
+    color: var(--text-dim);
     margin: var(--space-1) 0 0;
 }
 
@@ -3786,7 +3805,7 @@ Expected: FAIL.
 .modal-nav {
     padding: var(--space-6) var(--space-4);
     border-right: 1px solid var(--border);
-    background: var(--bg-secondary);
+    background: var(--bg-card);
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
@@ -3801,7 +3820,7 @@ Expected: FAIL.
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
-    color: var(--text-secondary);
+    color: var(--text-dim);
     font-size: var(--text-md);
     font-family: inherit;
     text-align: left;
