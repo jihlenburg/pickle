@@ -10,6 +10,7 @@
 - Brainstormed Lane A design-system-unification (frontend/). Settled on CSS-only primitives with small JS helpers under `window.PickleUI`; Comfortable (28 px) base density with Tight (22 px) tables; Flat-BEM naming; 8-PR staged migration (scaffolding+tokens → button → form → tooltip+status+toast → dropdown → tab strip → empty state → modal); status bar and toast primitives coexist with semantic APIs.
 - Spec landed at `docs/superpowers/specs/2026-04-19-lane-a-design-system-unification-design.md`; implementation plan next.
 - Added `.superpowers/` to `.gitignore` for brainstorming session artifacts (mockups + state).
+- Lane A PR #2 follow-up: removed legacy ID-keyed button styling from 00-foundation.css and 01-pin-code.css so `.btn` tokens take effect (the PR #2 class-only sanity gate had missed these ID overrides).
 
 ## 2026-04-09
 
