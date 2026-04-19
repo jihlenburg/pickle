@@ -1,0 +1,66 @@
+/*
+ * Lane A design-system tokens.
+ *
+ * Shape, size, and motion scales used by every primitive in
+ * frontend/static/styles/components/*.css. Color tokens live in
+ * frontend/static/app/config.js and cascade independently on :root.
+ */
+:root {
+    /* Spacing */
+    --space-1: 2px;
+    --space-2: 4px;
+    --space-3: 6px;
+    --space-4: 8px;
+    --space-5: 10px;
+    --space-6: 12px;
+    --space-7: 14px;
+    --space-8: 16px;
+    --space-9: 20px;
+    --space-10: 24px;
+
+    /* Radius */
+    --radius-sm: 3px;
+    --radius-md: 5px;
+    --radius-lg: 8px;
+    --radius-full: 9999px;
+
+    /* Control heights */
+    --control-h-sm: 22px;
+    --control-h-md: 28px;
+
+    /* Font size */
+    --text-xs: 10px;
+    --text-sm: 11px;
+    --text-md: 12px;
+    --text-lg: 13px;
+    --text-xl: 14px;
+
+    /* Weight & leading */
+    --weight-regular: 400;
+    --weight-medium: 500;
+    --weight-semibold: 600;
+    --leading-tight: 1.3;
+    --leading-normal: 1.5;
+
+    /* Focus ring */
+    --focus-ring-width: 2px;
+    --focus-ring-offset: 2px;
+    --focus-ring-color: var(--accent, #4a9eff);
+
+    /* Z-layer */
+    --z-dropdown: 100;
+    --z-sticky: 200;
+    --z-overlay: 1000;
+    --z-modal: 1010;
+    --z-tooltip: 1500;
+    --z-toast: 2000;
+
+    /* Shadow */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.1);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.2);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.25);
+
+    /* Motion */
+    --motion-fast: 150ms;
+    --motion-medium: 250ms;
+}

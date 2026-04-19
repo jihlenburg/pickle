@@ -23,8 +23,8 @@ fi
 )
 
 node --check frontend/static/pin_descriptions.js
-for file in frontend/static/app/*.js; do
+for file in frontend/static/app/*.js frontend/static/app/ui/*.js; do
     node --check "$file"
 done
 
-node --test frontend/tests/*.test.js tests/*.test.js
+node --test frontend/tests/*.test.js frontend/tests/ui/*.test.js tests/*.test.js

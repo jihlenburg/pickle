@@ -2,6 +2,8 @@
 
 ## 2026-04-19
 
+- Lane A PR #1: scaffolding + tokens landed. Added components/tokens.css, ui/00-namespace.js, tests/ui/ folder; extended validate.sh.
+- Frontend + Rust tests pass.
 - Committed the CLC module tab-strip wrap change as `68d0c21` and pushed `main` to origin.
 - Tagged the commit to snapshot the state before a model upgrade and pushed the tag.
 - Brainstormed Lane A design-system-unification (frontend/). Settled on CSS-only primitives with small JS helpers under `window.PickleUI`; Comfortable (28 px) base density with Tight (22 px) tables; Flat-BEM naming; 8-PR staged migration (scaffolding+tokens → button → form → tooltip+status+toast → dropdown → tab strip → empty state → modal); status bar and toast primitives coexist with semantic APIs.
