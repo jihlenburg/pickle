@@ -995,21 +995,6 @@ body.welcome-active .panel {
     line-height: 1.5;
 }
 
-#package-name-input {
-    height: 36px;
-    padding: 0 12px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: color-mix(in srgb, var(--surface-strong) 82%, transparent);
-    color: var(--text);
-    font-size: 13px;
-}
-
-#package-name-input:focus {
-    outline: none;
-    border-color: var(--accent2);
-}
-
 .package-dialog-actions {
     border-top: 1px solid var(--border);
 }
@@ -1018,11 +1003,6 @@ body.welcome-active .panel {
     display: flex;
     align-items: center;
     gap: 8px;
-}
-
-#package-name-input:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
 }
 
 .about-dialog {
@@ -1294,23 +1274,6 @@ body.welcome-active .panel {
     display: flex;
     gap: 4px;
     margin-bottom: 8px;
-}
-
-.key-input {
-    flex: 1;
-    height: 32px;
-    padding: 0 10px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--bg);
-    color: var(--text);
-    font-family: var(--font-mono);
-    font-size: 12px;
-}
-
-.key-input:focus {
-    outline: none;
-    border-color: var(--accent2);
 }
 
 .key-actions {

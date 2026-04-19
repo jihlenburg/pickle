@@ -21,7 +21,7 @@
             <div class="part-control">
                 <div class="part-picker">
                     <div class="part-picker-field">
-                        <input type="text" id="part-input" placeholder="Part number (e.g. DSPIC33CK64MP102)" autocomplete="off" spellcheck="false" aria-autocomplete="list" aria-controls="part-suggestions" aria-expanded="false">
+                        <input type="text" id="part-input" class="input" placeholder="Part number (e.g. DSPIC33CK64MP102)" autocomplete="off" spellcheck="false" aria-autocomplete="list" aria-controls="part-suggestions" aria-expanded="false">
                         <div id="part-suggestions" class="part-suggestions" role="listbox" hidden></div>
                     </div>
                     <button id="load-btn" class="btn btn-primary">Load</button>
@@ -144,7 +144,7 @@
                     </div>
                     <div class="osc-row" id="osc-crystal-row" style="display:none">
                         <label>Crystal Freq (MHz)</label>
-                        <input type="number" id="osc-crystal" value="8" min="0.032" max="64" step="0.001">
+                        <input type="number" id="osc-crystal" class="input" value="8" min="0.032" max="64" step="0.001">
                         <select id="osc-poscmd">
                             <option value="EC" title="External clock signal input on OSC1 pin">EC (External Clock)</option>
                             <option value="XT" title="Crystal oscillator, typically 3.5–10 MHz">XT (Crystal)</option>
@@ -153,7 +153,7 @@
                     </div>
                     <div class="osc-row" id="osc-target-row" style="display:none">
                         <label>Target Fosc (MHz)</label>
-                        <input type="number" id="osc-target" value="200" min="1" max="200" step="0.001">
+                        <input type="number" id="osc-target" class="input" value="200" min="1" max="200" step="0.001">
                         <span class="osc-hint" id="osc-fcy-hint"></span>
                     </div>
                 </div>
@@ -245,7 +245,7 @@
                 <p id="package-dialog-note" class="package-dialog-note"></p>
                 <label class="package-dialog-input-wrap" for="package-name-input">
                     <span id="package-dialog-name-label" class="package-dialog-label">Displayed package name</span>
-                    <input id="package-name-input" type="text" placeholder="Enter the name to show in the UI" autocomplete="off">
+                    <input id="package-name-input" type="text" class="input" placeholder="Enter the name to show in the UI" autocomplete="off">
                 </label>
             </div>
             <div class="package-dialog-actions">
@@ -318,11 +318,8 @@
                     <div class="key-row" data-setting="verification-provider">
                         <label class="key-label" for="verify-provider-select">Verification Provider</label>
                         <div class="key-field">
-                            <select class="key-input" id="verify-provider-select">
-                                <option value="auto">Auto (prefer OpenAI)</option>
-                                <option value="openai">OpenAI only</option>
-                                <option value="anthropic">Anthropic only</option>
-                            </select>
+                            <button id="verify-provider-select" type="button" class="btn select-trigger"
+                                    aria-haspopup="listbox" aria-expanded="false">Auto (prefer OpenAI)</button>
                         </div>
                         <div class="key-status" id="verify-provider-status">
                             Choose which provider pickle should use for datasheet verification.
@@ -332,7 +329,7 @@
                     <div class="key-row" data-provider="openai">
                         <label class="key-label">OpenAI</label>
                         <div class="key-field">
-                            <input type="password" class="key-input" id="key-input-openai"
+                            <input type="password" class="input key-input" id="key-input-openai"
                                    placeholder="sk-proj-..." autocomplete="off" spellcheck="false">
                             <button class="btn btn-icon btn-ghost key-reveal" id="key-reveal-openai" title="Show / hide key">&#x1f441;</button>
                         </div>
@@ -346,7 +343,7 @@
                     <div class="key-row" data-provider="anthropic">
                         <label class="key-label">Anthropic</label>
                         <div class="key-field">
-                            <input type="password" class="key-input" id="key-input-anthropic"
+                            <input type="password" class="input key-input" id="key-input-anthropic"
                                    placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
                             <button class="btn btn-icon btn-ghost key-reveal" id="key-reveal-anthropic" title="Show / hide key">&#x1f441;</button>
                         </div>
@@ -373,6 +370,7 @@
     <script src="static/pin_descriptions.js"></script>
     <script src="static/app/model.js"></script>
     <script src="static/app/ui/00-namespace.js"></script>
+    <script src="static/app/ui/form.js"></script>
     <script src="static/app/00-core.js"></script>
     <script src="static/app/01-reservation-policy.js"></script>
     <script src="static/app/01-reservations.js"></script>

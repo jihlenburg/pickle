@@ -2,6 +2,7 @@
 
 ## 2026-04-19
 
+- Lane A PR #3: form primitive landed. Migrated verify-provider to PickleUI.select, swept inputs to .input.
 - Lane A PR #2: button primitive landed. Migrated 21 button call sites; removed legacy .package-dialog-btn/.header-btn/.verify-btn/.key-{save,clear,reveal}/.about-{link,close} CSS.
 - Lane A PR #1: scaffolding + tokens landed. Added components/tokens.css, ui/00-namespace.js, tests/ui/ folder; extended validate.sh.
 - Frontend + Rust tests pass.

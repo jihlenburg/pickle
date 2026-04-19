@@ -105,20 +105,19 @@ function renderVerificationProviderStatus(provider) {
     el.textContent = 'Auto mode prefers OpenAI when both keys are configured, and falls back to Anthropic otherwise.';
 }
 
+// Handle returned by PickleUI.select; populated by wireSettingsDialog().
+let verifyProviderHandle = null;
+
 function refreshVerificationProvider() {
-    const select = $('verify-provider-select');
-    if (!select) return;
+    if (!verifyProviderHandle) return;
 
     const provider = normalizedVerificationProvider(appSettings?.verification?.provider);
-    select.value = provider;
+    verifyProviderHandle.setValue(provider);
     renderVerificationProviderStatus(provider);
 }
 
-async function saveVerificationProvider() {
-    const select = $('verify-provider-select');
-    if (!select) return;
-
-    const provider = normalizedVerificationProvider(select.value);
+async function saveVerificationProvider(rawValue) {
+    const provider = normalizedVerificationProvider(rawValue);
     try {
         await invoke('set_verify_provider', { provider });
         if (!appSettings.verification) {
@@ -215,9 +214,19 @@ function wireSettingsDialog() {
         });
     }
 
-    const providerSelect = $('verify-provider-select');
-    if (providerSelect) {
-        providerSelect.addEventListener('change', () => void saveVerificationProvider());
+    const providerSelectEl = $('verify-provider-select');
+    if (providerSelectEl && window.PickleUI && typeof window.PickleUI.select === 'function') {
+        verifyProviderHandle = window.PickleUI.select(providerSelectEl, {
+            options: [
+                { value: 'auto', label: 'Auto (prefer OpenAI)' },
+                { value: 'openai', label: 'OpenAI only' },
+                { value: 'anthropic', label: 'Anthropic only' },
+            ],
+            onSelect: (value) => { void saveVerificationProvider(value); },
+        });
+        const initialProvider = normalizedVerificationProvider(
+            appSettings?.verification?.provider);
+        verifyProviderHandle.setValue(initialProvider);
     }
 
     // Per-provider key controls
