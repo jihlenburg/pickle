@@ -24,30 +24,30 @@
                         <input type="text" id="part-input" placeholder="Part number (e.g. DSPIC33CK64MP102)" autocomplete="off" spellcheck="false" aria-autocomplete="list" aria-controls="part-suggestions" aria-expanded="false">
                         <div id="part-suggestions" class="part-suggestions" role="listbox" hidden></div>
                     </div>
-                    <button id="load-btn">Load</button>
+                    <button id="load-btn" class="btn btn-primary">Load</button>
                     <div id="pkg-control-group" class="package-split" style="display:none">
                         <select id="pkg-select" aria-label="Package">
                         </select>
-                        <button id="pkg-menu-btn" type="button" class="package-menu-btn" aria-haspopup="menu" aria-expanded="false" aria-label="Package actions" title="Package actions">...</button>
+                        <button id="pkg-menu-btn" type="button" class="btn btn-icon btn-ghost package-menu-btn" aria-haspopup="menu" aria-expanded="false" aria-label="Package actions" title="Package actions">...</button>
                         <div id="pkg-menu" class="package-menu" hidden>
-                            <button id="pkg-edit-name-btn" type="button" class="package-menu-item">Edit Name...</button>
-                            <button id="pkg-reset-name-btn" type="button" class="package-menu-item">Reset Name</button>
-                            <button id="pkg-delete-btn" type="button" class="package-menu-item">Delete Overlay</button>
+                            <button id="pkg-edit-name-btn" type="button" class="btn btn-ghost btn-sm package-menu-item">Edit Name...</button>
+                            <button id="pkg-reset-name-btn" type="button" class="btn btn-ghost btn-sm package-menu-item">Reset Name</button>
+                            <button id="pkg-delete-btn" type="button" class="btn btn-ghost btn-sm package-menu-item">Delete Overlay</button>
                         </div>
                     </div>
                 </div>
             </div>
 
             <div class="header-actions">
-                <button id="verify-btn" class="verify-btn" style="display:none" title="Cross-check pinout against the datasheet using the configured verifier">Verify Pinout</button>
-                <button id="load-btn-file">Open Config</button>
+                <button id="verify-btn" class="btn btn-secondary" style="display:none" title="Cross-check pinout against the datasheet using the configured verifier">Verify Pinout</button>
+                <button id="load-btn-file" class="btn btn-secondary">Open Config</button>
                 <div id="save-action-group" class="save-action-group" style="display:none">
                     <div class="save-split">
-                        <button id="save-btn" title="Save current configuration (Ctrl+S)">Save Config</button>
-                        <button id="save-menu-btn" type="button" class="save-menu-btn" aria-haspopup="menu" aria-expanded="false" title="More save actions">▾</button>
+                        <button id="save-btn" class="btn btn-primary" title="Save current configuration (Ctrl+S)">Save Config</button>
+                        <button id="save-menu-btn" type="button" class="btn btn-icon btn-primary save-menu-btn" aria-haspopup="menu" aria-expanded="false" title="More save actions">▾</button>
                         <div id="save-menu" class="save-menu" hidden>
-                            <button id="save-as-btn" type="button" class="save-menu-item">Save As...</button>
-                            <button id="rename-btn" type="button" class="save-menu-item">Rename...</button>
+                            <button id="save-as-btn" type="button" class="btn btn-ghost btn-sm save-menu-item">Save As...</button>
+                            <button id="rename-btn" type="button" class="btn btn-ghost btn-sm save-menu-item">Rename...</button>
                         </div>
                     </div>
                 </div>
@@ -55,9 +55,9 @@
         </div>
 
         <div class="header-meta">
-            <button id="index-badge" type="button" class="index-badge" style="display:none" title="Click to refresh"></button>
-            <button id="settings-btn" type="button" class="header-btn" title="Settings (Cmd+,)">Settings</button>
-            <button id="theme-toggle">System</button>
+            <button id="index-badge" type="button" class="btn btn-sm btn-ghost index-badge" style="display:none" title="Click to refresh"></button>
+            <button id="settings-btn" type="button" class="btn btn-ghost" title="Settings (Cmd+,)">Settings</button>
+            <button id="theme-toggle" class="btn btn-secondary">System</button>
         </div>
     </header>
 
@@ -86,13 +86,13 @@
                         <span class="summary-value" id="sum-pkg">—</span>
                     </div>
                     <div class="summary-item">
-                        <button id="pinlist-btn" class="summary-btn">Save Pin List</button>
+                        <button id="pinlist-btn" class="btn btn-sm btn-secondary">Save Pin List</button>
                         <label class="summary-check"><input type="checkbox" id="pinlist-grid" checked> Grid</label>
                     </div>
                 </div>
                 <div id="view-toggle" class="view-toggle" style="display:none">
-                    <button class="view-toggle-btn active" data-view="pin">Pin View</button>
-                    <button class="view-toggle-btn" data-view="peripheral">Peripheral View</button>
+                    <button class="btn btn-sm btn-ghost view-toggle-btn active" data-view="pin">Pin View</button>
+                    <button class="btn btn-sm btn-ghost view-toggle-btn" data-view="peripheral">Peripheral View</button>
                 </div>
             </div>
             <div class="panel-left-scroll" id="pin-view-container">
@@ -202,10 +202,10 @@
             <div class="right-tab-content" data-tab="code">
                 <div class="code-shell">
                     <div class="toolbar">
-                        <button id="gen-btn">Generate C Code</button>
-                        <button id="check-btn" style="display:none">Compiler Check</button>
-                        <button id="copy-btn">Copy</button>
-                        <button id="export-btn">Export Files</button>
+                        <button id="gen-btn" class="btn btn-primary">Generate C Code</button>
+                        <button id="check-btn" class="btn btn-secondary" style="display:none">Compiler Check</button>
+                        <button id="copy-btn" class="btn btn-secondary">Copy</button>
+                        <button id="export-btn" class="btn btn-secondary">Export Files</button>
                     </div>
                     <div id="compile-result" class="compile-result"></div>
                     <div class="code-tabs" id="code-tabs" style="display:none"></div>
@@ -227,7 +227,7 @@
         <div class="package-dialog-card">
             <div class="package-dialog-header">
                 <h2 id="package-dialog-title">Edit Package Name</h2>
-                <button id="package-close-btn" type="button" class="package-dialog-close" aria-label="Close package dialog">Close</button>
+                <button id="package-close-btn" type="button" class="btn btn-icon btn-ghost package-dialog-close" aria-label="Close package dialog">Close</button>
             </div>
             <div class="package-dialog-body">
                 <div class="package-dialog-field">
@@ -249,11 +249,11 @@
                 </label>
             </div>
             <div class="package-dialog-actions">
-                <button id="package-delete-btn" type="button" class="package-delete-btn">Delete Overlay</button>
+                <button id="package-delete-btn" type="button" class="btn btn-danger">Delete Overlay</button>
                 <div class="package-dialog-action-row">
-                    <button id="package-cancel-btn" type="button">Close</button>
-                    <button id="package-reset-btn" type="button">Reset Name</button>
-                    <button id="package-save-btn" type="button">Save Name</button>
+                    <button id="package-cancel-btn" type="button" class="btn btn-secondary">Close</button>
+                    <button id="package-reset-btn" type="button" class="btn btn-secondary">Reset Name</button>
+                    <button id="package-save-btn" type="button" class="btn btn-primary">Save Name</button>
                 </div>
             </div>
         </div>
@@ -278,7 +278,7 @@
             <span class="about-tag">PIC24</span>
         </div>
         <div class="about-links">
-            <button class="about-link" id="about-github-btn">GitHub</button>
+            <button class="btn btn-secondary about-link" id="about-github-btn">GitHub</button>
         </div>
         <p class="about-copy">&copy; 2026 J. Ihlenburg &middot; GPLv3</p>
         <p class="about-legal">
@@ -286,7 +286,7 @@
             Technology&nbsp;Inc. Microchip, dsPIC33, PIC24, and related names
             are trademarks of Microchip Technology&nbsp;Inc.
         </p>
-        <button class="about-close" id="about-close-btn">Close</button>
+        <button class="btn btn-primary about-close" id="about-close-btn">Close</button>
     </dialog>
 
     <!-- Settings dialog ------------------------------------------------- -->
@@ -300,7 +300,7 @@
         <div class="settings-layout">
             <nav class="settings-nav" id="settings-nav">
                 <h2 class="settings-nav-title">Settings</h2>
-                <button class="settings-nav-btn active" data-section="api-keys">API Keys</button>
+                <button class="btn btn-ghost settings-nav-btn active" data-section="api-keys">API Keys</button>
                 <!-- Future sections: add nav buttons here -->
             </nav>
 
@@ -334,11 +334,11 @@
                         <div class="key-field">
                             <input type="password" class="key-input" id="key-input-openai"
                                    placeholder="sk-proj-..." autocomplete="off" spellcheck="false">
-                            <button class="key-reveal" id="key-reveal-openai" title="Show / hide key">&#x1f441;</button>
+                            <button class="btn btn-icon btn-ghost key-reveal" id="key-reveal-openai" title="Show / hide key">&#x1f441;</button>
                         </div>
                         <div class="key-actions">
-                            <button class="key-save" id="key-save-openai">Save</button>
-                            <button class="key-clear" id="key-clear-openai">Clear</button>
+                            <button class="btn btn-sm btn-primary key-save" id="key-save-openai">Save</button>
+                            <button class="btn btn-sm btn-secondary key-clear" id="key-clear-openai">Clear</button>
                         </div>
                         <div class="key-status" id="key-status-openai"></div>
                     </div>
@@ -348,11 +348,11 @@
                         <div class="key-field">
                             <input type="password" class="key-input" id="key-input-anthropic"
                                    placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
-                            <button class="key-reveal" id="key-reveal-anthropic" title="Show / hide key">&#x1f441;</button>
+                            <button class="btn btn-icon btn-ghost key-reveal" id="key-reveal-anthropic" title="Show / hide key">&#x1f441;</button>
                         </div>
                         <div class="key-actions">
-                            <button class="key-save" id="key-save-anthropic">Save</button>
-                            <button class="key-clear" id="key-clear-anthropic">Clear</button>
+                            <button class="btn btn-sm btn-primary key-save" id="key-save-anthropic">Save</button>
+                            <button class="btn btn-sm btn-secondary key-clear" id="key-clear-anthropic">Clear</button>
                         </div>
                         <div class="key-status" id="key-status-anthropic"></div>
                     </div>
@@ -362,7 +362,7 @@
             </div>
         </div>
         <div class="settings-footer">
-            <button class="settings-close" id="settings-close-btn">Done</button>
+            <button class="btn btn-primary settings-close" id="settings-close-btn">Done</button>
         </div>
     </dialog>
 

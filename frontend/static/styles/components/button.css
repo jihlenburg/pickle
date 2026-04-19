@@ -1,0 +1,118 @@
+/*
+ * Button primitive.
+ *
+ * .btn is the base; variants add color/shape. Height and radius come from
+ * tokens; focus ring is 2 px accent outline with 2 px offset on every
+ * variant. No JS — behavior is pure CSS.
+ */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    height: var(--control-h-md);
+    padding: 0 var(--space-6);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text);
+    font-size: var(--text-md);
+    font-weight: var(--weight-medium);
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    transition: background-color var(--motion-fast) ease,
+                border-color var(--motion-fast) ease,
+                color var(--motion-fast) ease;
+}
+
+.btn:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring-color);
+    outline-offset: var(--focus-ring-offset);
+}
+
+.btn[disabled],
+.btn.is-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--on-accent, #fff);
+}
+
+.btn-primary:hover {
+    filter: brightness(1.08);
+}
+
+.btn-secondary {
+    background: transparent;
+    border-color: var(--border);
+    color: var(--text);
+}
+
+.btn-secondary:hover {
+    background: var(--hover-overlay);
+}
+
+.btn-ghost {
+    border-color: transparent;
+    background: transparent;
+    color: var(--text);
+}
+
+.btn-ghost:hover {
+    background: var(--hover-overlay);
+}
+
+.btn-danger {
+    border-color: var(--error);
+    color: var(--error);
+    background: transparent;
+}
+
+.btn-danger:hover {
+    background: color-mix(in srgb, var(--error) 12%, transparent);
+}
+
+.btn-danger.btn-primary {
+    background: var(--error);
+    color: var(--on-accent, #fff);
+    border-color: var(--error);
+}
+
+.btn-icon {
+    width: var(--control-h-md);
+    height: var(--control-h-md);
+    padding: 0;
+}
+
+.btn-sm {
+    height: var(--control-h-sm);
+    padding: 0 var(--space-5);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+}
+
+.btn-sm.btn-icon {
+    width: var(--control-h-sm);
+    padding: 0;
+}
+
+.btn-link {
+    height: auto;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    text-decoration: underline;
+    font-weight: var(--weight-regular);
+}
+
+.btn-link:hover {
+    filter: brightness(1.15);
+}

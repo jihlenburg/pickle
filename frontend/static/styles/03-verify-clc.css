@@ -2,21 +2,6 @@
    Pinout Verification
    ============================================================================= */
 
-.verify-btn {
-    background: transparent;
-    color: var(--accent2);
-    border: 1px solid var(--accent2);
-    padding: 6px 14px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 0.85rem;
-    white-space: nowrap;
-}
-.verify-btn:hover {
-    background: var(--accent2);
-    color: var(--bg);
-}
-
 /* =============================================================================
    Right-panel tabs (Code / Verification)
    ============================================================================= */
