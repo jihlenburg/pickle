@@ -341,7 +341,7 @@ Keep the existing alphabetical-ish ordering the file uses — near `--text-inver
 .btn-primary {
     background: var(--accent);
     border-color: var(--accent);
-    color: var(--on-accent, #fff);
+    color: var(--on-accent);
 }
 
 .btn-primary:hover {
@@ -380,7 +380,7 @@ Keep the existing alphabetical-ish ordering the file uses — near `--text-inver
 
 .btn-danger.btn-primary {
     background: var(--error);
-    color: var(--on-accent, #fff);
+    color: var(--on-accent);
     border-color: var(--error);
 }
 
@@ -813,8 +813,8 @@ Adds `components/form.css` and `ui/form.js` (exposing `PickleUI.select`). Migrat
     top: 1px;
     width: 5px;
     height: 9px;
-    border-right: 2px solid var(--on-accent, #fff);
-    border-bottom: 2px solid var(--on-accent, #fff);
+    border-right: 2px solid var(--on-accent);
+    border-bottom: 2px solid var(--on-accent);
     transform: rotate(45deg);
 }
 
@@ -855,7 +855,7 @@ Adds `components/form.css` and `ui/form.js` (exposing `PickleUI.select`). Migrat
 
 .switch:checked::before {
     transform: translateX(12px);
-    background: var(--on-accent, #fff);
+    background: var(--on-accent);
 }
 
 .switch:focus-visible {
@@ -1314,7 +1314,7 @@ Lane A: form controls primitive
 - Add components/form.css (input, select-trigger, stepper, checkbox, switch, labeled-row, field)
 - Add ui/form.js with PickleUI.select (inline popover; PR #5 moves to PickleUI.dropdown)
 - Migrate verification-provider to PickleUI.select, settings API-key inputs, package-dialog and part-picker inputs, oscillator numeric inputs
-- Delete .key-input and .package-name-input CSS rules
+- Delete .key-input class rule and #package-name-input ID rules
 EOF
 )"
 ```
