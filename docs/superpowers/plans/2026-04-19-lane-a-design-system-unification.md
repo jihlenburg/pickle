@@ -268,9 +268,33 @@ Adds the shared button CSS, migrates every button call site in `index.html` to t
 
 **Files:**
 - Create: `frontend/static/styles/components/button.css`
+- Modify: `frontend/static/app/config.js`
 - Modify: `frontend/static/style.css`
 
-- [ ] **Step 1: Write the button stylesheet**
+- [ ] **Step 1: Add `--error` and `--on-accent` color tokens to `config.js`**
+
+PR #1's `components/tokens.css` holds shape/size/motion tokens only — color tokens live in `frontend/static/app/config.js` under the `themes.dark` and `themes.light` blocks (see the comment at the top of `tokens.css`). The button primitive needs two color tokens that don't exist yet:
+
+- `--error` — danger foreground / background. Must stay visually distinct from `--accent` (which is `#ff6b6b` / `#d9485f` in pickle, already a red) so `.btn-primary` and `.btn-danger` don't collapse to the same color.
+- `--on-accent` — readable text on an `--accent` background. Pickle's accents are saturated enough that pure white reads cleanly in both themes.
+
+In `frontend/static/app/config.js`, add to the `dark` theme block (place after the existing `--text-inverse` line around line 212):
+
+```js
+'--error': '#ef4444',
+'--on-accent': '#ffffff',
+```
+
+Add to the `light` theme block with the dark-variant for `--error` (place after the existing `--text-inverse` line around line 269):
+
+```js
+'--error': '#dc2626',
+'--on-accent': '#ffffff',
+```
+
+Keep the existing alphabetical-ish ordering the file uses — near `--text-inverse` / `--accent` is fine.
+
+- [ ] **Step 2: Write the button stylesheet**
 
 ```css
 /*
@@ -290,7 +314,7 @@ Adds the shared button CSS, migrates every button call site in `index.html` to t
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: transparent;
-    color: var(--text-primary);
+    color: var(--text);
     font-size: var(--text-md);
     font-weight: var(--weight-medium);
     line-height: 1;
@@ -327,21 +351,21 @@ Adds the shared button CSS, migrates every button call site in `index.html` to t
 .btn-secondary {
     background: transparent;
     border-color: var(--border);
-    color: var(--text-primary);
+    color: var(--text);
 }
 
 .btn-secondary:hover {
-    background: var(--bg-tertiary);
+    background: var(--hover-overlay);
 }
 
 .btn-ghost {
     border-color: transparent;
     background: transparent;
-    color: var(--text-primary);
+    color: var(--text);
 }
 
 .btn-ghost:hover {
-    background: var(--bg-tertiary);
+    background: var(--hover-overlay);
 }
 
 .btn-danger {
@@ -393,7 +417,7 @@ Adds the shared button CSS, migrates every button call site in `index.html` to t
 }
 ```
 
-- [ ] **Step 2: Import `button.css` from `style.css`**
+- [ ] **Step 3: Import `button.css` from `style.css`**
 
 After the `components/tokens.css` line add:
 
@@ -509,13 +533,13 @@ Replace every `.key-save` / `.key-clear` / `.key-reveal` / `.settings-close` / `
 
 <!-- (same pattern for -anthropic siblings) -->
 
-<button class="btn btn-ghost settings-nav-btn is-active"
+<button class="btn btn-ghost settings-nav-btn active"
         data-section="api-keys">API Keys</button>
 
 <button class="btn btn-primary settings-close" id="settings-close-btn">Done</button>
 ```
 
-Note: `settings-nav-btn` and `is-active` are temporary hooks retained for existing CSS/JS; they are deleted in PR #8 when modal nav migrates to the modal primitive's `.modal-nav`.
+Note: `settings-nav-btn` and the `active` class are temporary hooks retained for the existing JS in `05-settings.js` (which toggles `.active`); they are deleted in PR #8 when modal nav migrates to the modal primitive's `.modal-nav` with `.is-active`.
 
 ### Task 2.5: Migrate package-select package split + view toggle buttons
 
@@ -589,10 +613,11 @@ Verify visually: header buttons render, Load/Verify/Save row looks right in both
 - [ ] **Step 1: Stage and commit**
 
 ```bash
-git add frontend/static/styles/components/button.css frontend/static/style.css frontend/index.html frontend/static/styles/00-foundation.css frontend/static/styles/02-package-config.css frontend/static/styles/04-shell-layout.css
+git add frontend/static/app/config.js frontend/static/styles/components/button.css frontend/static/style.css frontend/index.html frontend/static/styles/00-foundation.css frontend/static/styles/02-package-config.css frontend/static/styles/04-shell-layout.css
 git commit -m "$(cat <<'EOF'
 Lane A: button primitive
 
+- Add --error and --on-accent color tokens to both themes in config.js
 - Add components/button.css (primary/secondary/ghost/danger/icon/sm/link + focus ring)
 - Migrate every button in index.html to .btn classes with appropriate variants
 - Delete legacy button CSS from 00-foundation, 02-package-config, 04-shell-layout
@@ -655,7 +680,7 @@ Adds `components/form.css` and `ui/form.js` (exposing `PickleUI.select`). Migrat
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: var(--bg-secondary);
-    color: var(--text-primary);
+    color: var(--text);
     font-size: var(--text-md);
     font-family: inherit;
     line-height: 1;
@@ -700,7 +725,7 @@ Adds `components/form.css` and `ui/form.js` (exposing `PickleUI.select`). Migrat
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: var(--bg-secondary);
-    color: var(--text-primary);
+    color: var(--text);
     font-size: var(--text-md);
     font-family: inherit;
     cursor: pointer;
@@ -735,13 +760,13 @@ Adds `components/form.css` and `ui/form.js` (exposing `PickleUI.select`). Migrat
     width: 24px;
     border: 0;
     background: var(--bg-secondary);
-    color: var(--text-primary);
+    color: var(--text);
     font-size: var(--text-md);
     cursor: pointer;
 }
 
 .stepper-btn:hover {
-    background: var(--bg-tertiary);
+    background: var(--hover-overlay);
 }
 
 .stepper-btn + .stepper-input {
@@ -756,7 +781,7 @@ Adds `components/form.css` and `ui/form.js` (exposing `PickleUI.select`). Migrat
     font-family: ui-monospace, monospace;
     font-size: var(--text-md);
     background: transparent;
-    color: var(--text-primary);
+    color: var(--text);
 }
 
 .stepper-input:focus-visible {
@@ -803,7 +828,7 @@ Adds `components/form.css` and `ui/form.js` (exposing `PickleUI.select`). Migrat
     width: 28px;
     height: 16px;
     border-radius: var(--radius-full);
-    background: var(--bg-tertiary);
+    background: var(--hover-overlay);
     border: 1px solid var(--border);
     position: relative;
     cursor: pointer;
@@ -819,7 +844,7 @@ Adds `components/form.css` and `ui/form.js` (exposing `PickleUI.select`). Migrat
     width: 12px;
     height: 12px;
     border-radius: var(--radius-full);
-    background: var(--text-primary);
+    background: var(--text);
     transition: transform var(--motion-fast) ease;
 }
 
@@ -853,7 +878,7 @@ Adds `components/form.css` and `ui/form.js` (exposing `PickleUI.select`). Migrat
 
 .labeled-row-label {
     font-size: var(--text-md);
-    color: var(--text-primary);
+    color: var(--text);
     font-weight: var(--weight-medium);
 }
 
@@ -1406,9 +1431,9 @@ Expected: FAIL.
 /*
  * Tooltip primitive.
  *
- * Inverted surface: text color = --text-primary, background = --bg-primary
+ * Inverted surface: text color = --text, background = --bg-primary
  * read from the *opposite* theme. In practice we set surface to
- * --text-primary and text to --bg-primary so the popover contrasts with
+ * --text and text to --bg-primary so the popover contrasts with
  * the surrounding app regardless of theme.
  */
 .tooltip {
@@ -1416,7 +1441,7 @@ Expected: FAIL.
     z-index: var(--z-tooltip);
     padding: var(--space-3) var(--space-5);
     border-radius: var(--radius-sm);
-    background: var(--text-primary);
+    background: var(--text);
     color: var(--bg-primary);
     font-size: var(--text-sm);
     line-height: 1.4;
@@ -1442,13 +1467,13 @@ Expected: FAIL.
 .tooltip.is-above .tooltip-arrow {
     bottom: -4px;
     left: 8px;
-    border-top: 4px solid var(--text-primary);
+    border-top: 4px solid var(--text);
 }
 
 .tooltip.is-below .tooltip-arrow {
     top: -4px;
     left: 8px;
-    border-bottom: 4px solid var(--text-primary);
+    border-bottom: 4px solid var(--text);
 }
 ```
 
@@ -2076,7 +2101,7 @@ Expected: FAIL.
 .toast-title {
     font-size: var(--text-md);
     font-weight: var(--weight-medium);
-    color: var(--text-primary);
+    color: var(--text);
     line-height: 1.3;
 }
 
@@ -2105,14 +2130,14 @@ Expected: FAIL.
 }
 
 .toast-dismiss:hover {
-    color: var(--text-primary);
+    color: var(--text);
 }
 
 .toast-progress-bar {
     grid-column: 1 / -1;
     height: 3px;
     border-radius: var(--radius-full);
-    background: var(--bg-tertiary);
+    background: var(--hover-overlay);
     margin-top: var(--space-3);
     overflow: hidden;
 }
@@ -2531,7 +2556,7 @@ Expected: FAIL.
     padding: 0 var(--space-5);
     border: 0;
     background: transparent;
-    color: var(--text-primary);
+    color: var(--text);
     font-size: var(--text-md);
     font-family: inherit;
     text-align: left;
@@ -2541,7 +2566,7 @@ Expected: FAIL.
 .dropdown-item:hover,
 .dropdown-item.is-active,
 .dropdown-item:focus-visible {
-    background: var(--bg-tertiary);
+    background: var(--hover-overlay);
     outline: none;
 }
 
@@ -3076,11 +3101,11 @@ Expected: FAIL.
 }
 
 .tab-strip-item:hover {
-    color: var(--text-primary);
+    color: var(--text);
 }
 
 .tab-strip-item.is-active {
-    color: var(--text-primary);
+    color: var(--text);
     font-weight: var(--weight-medium);
     border-bottom-color: var(--accent);
 }
@@ -3117,8 +3142,8 @@ Expected: FAIL.
 }
 
 .tab-strip-segmented .tab-strip-item.is-active {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
+    background: var(--hover-overlay);
+    color: var(--text);
     font-weight: var(--weight-medium);
     border-bottom-color: transparent;
 }
@@ -3380,7 +3405,7 @@ Adds `components/empty-state.css`. No JS. Migrates all four placeholder empties 
 .empty-state-title {
     font-size: var(--text-lg);
     font-weight: var(--weight-semibold);
-    color: var(--text-primary);
+    color: var(--text);
     margin: 0 0 var(--space-2);
 }
 
@@ -3686,7 +3711,7 @@ Expected: FAIL.
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     background: var(--bg-primary);
-    color: var(--text-primary);
+    color: var(--text);
     box-shadow: var(--shadow-lg);
     min-width: 340px;
     max-width: 90vw;
@@ -3784,14 +3809,14 @@ Expected: FAIL.
 }
 
 .modal-nav-item:hover {
-    color: var(--text-primary);
-    background: var(--bg-tertiary);
+    color: var(--text);
+    background: var(--hover-overlay);
 }
 
 .modal-nav-item.is-active {
-    color: var(--text-primary);
+    color: var(--text);
     font-weight: var(--weight-medium);
-    background: var(--bg-tertiary);
+    background: var(--hover-overlay);
 }
 ```
 
