@@ -129,7 +129,7 @@ pub struct LastUsedDevice {
     pub package: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct AppSettings {
     #[serde(default)]
     pub appearance: AppearanceSettings,
@@ -145,20 +145,6 @@ pub struct AppSettings {
     pub onboarding: OnboardingSettings,
     #[serde(default)]
     pub last_used: LastUsedDevice,
-}
-
-impl Default for AppSettings {
-    fn default() -> Self {
-        Self {
-            appearance: AppearanceSettings::default(),
-            startup: StartupSettings::default(),
-            toolchain: ToolchainSettings::default(),
-            codegen: CodegenSettings::default(),
-            verification: VerificationSettings::default(),
-            onboarding: OnboardingSettings::default(),
-            last_used: LastUsedDevice::default(),
-        }
-    }
 }
 
 fn default_theme() -> String {

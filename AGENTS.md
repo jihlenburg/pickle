@@ -80,6 +80,7 @@ cargo tauri build                   # Production build
 - **CSS**: `style.css` is the stable entrypoint and should only coordinate the split `frontend/static/styles/*.css` files. Those modules should consume config-driven CSS variables instead of re-defining theme palettes inline. Peripheral colors still flow through tokens like UART=`--uart`, SPI=`--spi`, I2C=`--i2c`, PWM=`--pwm`.
 - **Code generation output**: MISRA C:2012 compliant C99. All register values use `U` suffix. Comments explain every write.
 - **No auto-commit**: Never commit or push without explicit user permission.
+- **Task tracking**: Maintain repo-root `todo.md` and `logbook.md` during active work. Update `todo.md` when starting, finishing, or reprioritizing concrete tasks. Append concise dated entries to `logbook.md` for substantive investigation, edits, and verification steps.
 
 ## Commenting Strategy
 

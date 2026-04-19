@@ -104,18 +104,19 @@ pub fn get_api_key() -> Option<String> {
     resolve_provider(None).ok().map(|(_, key)| key)
 }
 
-pub(crate) fn call_llm_api(
-    provider: Provider,
-    pdf_bytes: &[u8],
-    datasheet_text: Option<&str>,
-    task: VerifyTask,
-    prompt: &str,
-    api_key: &str,
-    part_number: &str,
-    progress: Option<&ProgressCallback>,
-) -> Result<String, String> {
-    if pdf_bytes.is_empty() {
-        let detail = if datasheet_text.is_some() {
+pub(crate) struct VerifyRequest<'a> {
+    pub pdf_bytes: &'a [u8],
+    pub datasheet_text: Option<&'a str>,
+    pub task: VerifyTask,
+    pub prompt: &'a str,
+    pub api_key: &'a str,
+    pub part_number: &'a str,
+    pub progress: Option<&'a ProgressCallback>,
+}
+
+pub(crate) fn call_llm_api(provider: Provider, req: VerifyRequest<'_>) -> Result<String, String> {
+    if req.pdf_bytes.is_empty() {
+        let detail = if req.datasheet_text.is_some() {
             " Text-only datasheet fallback is disabled."
         } else {
             ""
@@ -127,21 +128,21 @@ pub(crate) fn call_llm_api(
 
     match provider {
         Provider::Anthropic => verify_provider_anthropic::call_anthropic_api(
-            pdf_bytes,
-            task,
-            prompt,
-            api_key,
-            part_number,
-            progress,
+            req.pdf_bytes,
+            req.task,
+            req.prompt,
+            req.api_key,
+            req.part_number,
+            req.progress,
         ),
         Provider::OpenAI => verify_provider_openai::call_openai_api(
-            pdf_bytes,
-            datasheet_text,
-            task,
-            prompt,
-            api_key,
-            part_number,
-            progress,
+            req.pdf_bytes,
+            req.datasheet_text,
+            req.task,
+            req.prompt,
+            req.api_key,
+            req.part_number,
+            req.progress,
         ),
     }
 }

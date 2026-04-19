@@ -23,7 +23,7 @@ use crate::parser::verify_prompt::{
     VerifyTask,
 };
 pub use crate::parser::verify_provider::get_api_key;
-use crate::parser::verify_provider::{call_llm_api, resolve_provider};
+use crate::parser::verify_provider::{call_llm_api, resolve_provider, VerifyRequest};
 
 fn verify_with_task(
     task: VerifyTask,
@@ -78,13 +78,15 @@ fn verify_with_task(
 
     let raw_response = call_llm_api(
         provider,
-        pdf_bytes,
-        datasheet_text,
-        task,
-        &prompt,
-        &key,
-        part_number,
-        progress,
+        VerifyRequest {
+            pdf_bytes,
+            datasheet_text,
+            task,
+            prompt: &prompt,
+            api_key: &key,
+            part_number,
+            progress,
+        },
     )?;
     emit_progress(
         progress,

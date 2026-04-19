@@ -432,8 +432,8 @@ fn cached_device_needs_reparse(
             .unwrap_or(false);
         ficd_missing_bkbug || fdevopt_missing_alti2c
     };
-    let clc_stale = cached.has_clc()
-        && (cached.device_info.clc == 0 || cached.clc_module_id.is_none());
+    let clc_stale =
+        cached.has_clc() && (cached.device_info.clc == 0 || cached.clc_module_id.is_none());
 
     fuse_stale
         || !has_clc_key
@@ -957,29 +957,32 @@ mod tests {
             desc: String::new(),
             addr: 0,
             default_value: 0,
-            fields: vec![crate::parser::edc_parser::DcrField {
-                cname: "JTAGEN".to_string(),
-                desc: String::new(),
-                mask: 1,
-                width: 1,
-                hidden: false,
-                values: vec![crate::parser::edc_parser::DcrFieldValue {
-                    cname: "ON".to_string(),
+            fields: vec![
+                crate::parser::edc_parser::DcrField {
+                    cname: "JTAGEN".to_string(),
                     desc: String::new(),
-                    value: 1,
-                }],
-            }, crate::parser::edc_parser::DcrField {
-                cname: "BKBUG".to_string(),
-                desc: String::new(),
-                mask: 2,
-                width: 1,
-                hidden: false,
-                values: vec![crate::parser::edc_parser::DcrFieldValue {
-                    cname: "OFF".to_string(),
+                    mask: 1,
+                    width: 1,
+                    hidden: false,
+                    values: vec![crate::parser::edc_parser::DcrFieldValue {
+                        cname: "ON".to_string(),
+                        desc: String::new(),
+                        value: 1,
+                    }],
+                },
+                crate::parser::edc_parser::DcrField {
+                    cname: "BKBUG".to_string(),
                     desc: String::new(),
-                    value: 1,
-                }],
-            }],
+                    mask: 2,
+                    width: 1,
+                    hidden: false,
+                    values: vec![crate::parser::edc_parser::DcrFieldValue {
+                        cname: "OFF".to_string(),
+                        desc: String::new(),
+                        value: 1,
+                    }],
+                },
+            ],
         }];
         device
             .remappable_inputs
