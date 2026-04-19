@@ -58,35 +58,6 @@ header h1 {
     border-color: var(--accent2);
 }
 
-#load-btn {
-    background: var(--accent);
-    color: var(--text-inverse);
-    border: none;
-    padding: 6px 16px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 13px;
-}
-
-#load-btn:hover { opacity: 0.85; }
-
-#save-btn, #load-btn-file {
-    background: transparent;
-    color: var(--text-dim);
-    border: 1px solid var(--border);
-    padding: 5px 12px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 12px;
-}
-
-#save-btn:hover, #load-btn-file:hover {
-    color: var(--text);
-    border-color: var(--text-dim);
-}
-
 #pkg-select {
     background: var(--bg);
     color: var(--accent2);

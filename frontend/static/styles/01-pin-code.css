@@ -173,32 +173,6 @@
     tab-size: 4;
 }
 
-#gen-btn {
-    background: var(--accent2);
-    color: var(--text-inverse);
-    border: 1px solid var(--accent2);
-    padding: 7px 20px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 13px;
-}
-
-#gen-btn:hover { opacity: 0.85; }
-
-#copy-btn, #export-btn {
-    background: transparent;
-    color: var(--text-dim);
-    border: 1px solid var(--border);
-    padding: 7px 16px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 13px;
-}
-
-#copy-btn:hover, #export-btn:hover { color: var(--text); border-color: var(--text-dim); }
-
 .toolbar {
     display: flex;
     align-items: stretch;
@@ -278,18 +252,4 @@
     border: 1px solid var(--uart);
     color: var(--uart);
 }
-
-#check-btn {
-    background: transparent;
-    color: var(--spi);
-    border: 1px solid var(--spi);
-    padding: 7px 20px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 13px;
-}
-
-#check-btn:hover { opacity: 0.85; }
-#check-btn:disabled { opacity: 0.4; cursor: default; }
 
