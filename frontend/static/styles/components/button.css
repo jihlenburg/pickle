@@ -24,7 +24,8 @@
     white-space: nowrap;
     transition: background-color var(--motion-fast) ease,
                 border-color var(--motion-fast) ease,
-                color var(--motion-fast) ease;
+                color var(--motion-fast) ease,
+                filter var(--motion-fast) ease;
 }
 
 .btn:focus-visible {
@@ -42,7 +43,7 @@
 .btn-primary {
     background: var(--accent);
     border-color: var(--accent);
-    color: var(--on-accent, #fff);
+    color: var(--on-accent);
 }
 
 .btn-primary:hover {
@@ -81,7 +82,7 @@
 
 .btn-danger.btn-primary {
     background: var(--error);
-    color: var(--on-accent, #fff);
+    color: var(--on-accent);
     border-color: var(--error);
 }
 
