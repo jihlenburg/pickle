@@ -42,22 +42,6 @@ header h1 {
     color: var(--accent);
 }
 
-#part-input {
-    background: var(--bg);
-    color: var(--text);
-    border: 1px solid var(--border);
-    padding: 6px 12px;
-    border-radius: 4px;
-    font-family: inherit;
-    font-size: 13px;
-    width: 220px;
-}
-
-#part-input:focus {
-    outline: none;
-    border-color: var(--accent2);
-}
-
 #pkg-select {
     background: var(--bg);
     color: var(--accent2);

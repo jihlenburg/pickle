@@ -12,6 +12,7 @@
 - Spec landed at `docs/superpowers/specs/2026-04-19-lane-a-design-system-unification-design.md`; implementation plan next.
 - Added `.superpowers/` to `.gitignore` for brainstorming session artifacts (mockups + state).
 - Lane A PR #2 follow-up: removed legacy ID-keyed button styling from 00-foundation.css and 01-pin-code.css so `.btn` tokens take effect (the PR #2 class-only sanity gate had missed these ID overrides).
+- Lane A PR #3 follow-up: removed legacy `#part-input` ID styling from 00-foundation.css and 04-shell-layout.css (including the responsive width override in 05-peripheral-responsive.css) so `.input` tokens take effect, and expanded the sanity gate to cover this case.
 
 ## 2026-04-09
 

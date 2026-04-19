@@ -344,10 +344,6 @@ option.periph-pin-used {
         flex-wrap: wrap;
     }
 
-    #part-input {
-        width: 100%;
-    }
-
     .main {
         padding: 6px;
     }

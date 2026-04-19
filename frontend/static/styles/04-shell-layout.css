@@ -120,7 +120,6 @@ header h1 {
 
 /* --- Inputs & buttons --- */
 
-#part-input,
 #pkg-select,
 .remap-select,
 .signal-input,
@@ -132,13 +131,6 @@ header h1 {
     border: 1px solid var(--border);
     border-radius: 6px;
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
-}
-
-#part-input {
-    width: min(260px, 28vw);
-    height: 32px;
-    padding: 0 10px;
-    font-size: 12px;
 }
 
 .part-suggestions {
