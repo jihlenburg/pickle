@@ -17,5 +17,7 @@
 
 ## Backlog
 
+- Execute Lane A design-system-unification (8-PR staged migration per `docs/superpowers/specs/2026-04-19-lane-a-design-system-unification-design.md`). Implementation plan to follow.
+- Lanes C (feedback & safety policy — toasts, progress, diff-before-apply), B (keyboard nav, undo/redo UI, ARIA polish), D (view density & clarity — Pin/Peripheral legends and filters) — queued after Lane A lands.
 - Continue separating concerns in `src-tauri/src/parser/edc_parser.rs`.
 - Add deeper dsPIC33AK-MPS-specific code generation support beyond the shared AK clock/CLC layer.

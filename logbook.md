@@ -4,6 +4,9 @@
 
 - Committed the CLC module tab-strip wrap change as `68d0c21` and pushed `main` to origin.
 - Tagged the commit as `pre-claude-4.7` (space-separated name rejected by git, so slugified) to snapshot the state before switching to Claude Opus 4.7, and pushed the tag.
+- Brainstormed Lane A design-system-unification (frontend/). Settled on CSS-only primitives with small JS helpers under `window.PickleUI`; Comfortable (28 px) base density with Tight (22 px) tables; Flat-BEM naming; 8-PR staged migration (scaffolding+tokens → button → form → tooltip+status+toast → dropdown → tab strip → empty state → modal); status bar and toast primitives coexist with semantic APIs.
+- Spec landed at `docs/superpowers/specs/2026-04-19-lane-a-design-system-unification-design.md`; implementation plan next.
+- Added `.superpowers/` to `.gitignore` for brainstorming session artifacts (mockups + state).
 
 ## 2026-04-09
 

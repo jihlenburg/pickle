@@ -29,6 +29,9 @@ pinouts/
 # Local assistant settings
 .assistant/
 
+# Superpowers brainstorming session artifacts (mockups, state)
+.superpowers/
+
 # Tauri build output
 src-tauri/target/
 
