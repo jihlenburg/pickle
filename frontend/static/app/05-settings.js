@@ -126,10 +126,10 @@ async function saveVerificationProvider(rawValue) {
             appSettings.verification.provider = provider;
         }
         renderVerificationProviderStatus(provider);
-        setStatus(`Verification provider set to ${provider}.`);
+        setStatus(`Verification provider set to ${provider}.`, 'success');
         if (typeof checkApiKey === 'function') checkApiKey();
     } catch (err) {
-        setStatus(`Failed to save verification provider: ${err}`);
+        setStatus(`Failed to save verification provider: ${err}`, 'error');
     }
 }
 
@@ -139,18 +139,18 @@ async function saveProviderKey(provider) {
     if (!input) return;
     const key = input.value.trim();
     if (!key) {
-        setStatus('Enter a key before saving.');
+        setStatus('Enter a key before saving.', 'warn');
         return;
     }
     try {
         await invoke('save_api_key', { provider, key });
         input.value = '';
-        setStatus(`${provider} key saved to keychain.`);
+        setStatus(`${provider} key saved to keychain.`, 'success');
         await refreshKeyStatuses();
         // Refresh the verify-button tooltip in the main UI
         if (typeof checkApiKey === 'function') checkApiKey();
     } catch (err) {
-        setStatus(`Failed to save key: ${err}`);
+        setStatus(`Failed to save key: ${err}`, 'error');
     }
 }
 
@@ -158,11 +158,11 @@ async function saveProviderKey(provider) {
 async function clearProviderKey(provider) {
     try {
         await invoke('delete_api_key', { provider });
-        setStatus(`${provider} key removed from keychain.`);
+        setStatus(`${provider} key removed from keychain.`, 'success');
         await refreshKeyStatuses();
         if (typeof checkApiKey === 'function') checkApiKey();
     } catch (err) {
-        setStatus(`Failed to clear key: ${err}`);
+        setStatus(`Failed to clear key: ${err}`, 'error');
     }
 }
 

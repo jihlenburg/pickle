@@ -49,7 +49,7 @@ async function verifyClcInBackground({ pdfBase64, datasheetText, pdfName, apiKey
 
     clcVerifyJob = (async () => {
         try {
-            setStatus(`Pinout verified. Looking up CLC sources in background from ${pdfName}...`);
+            setStatus(`Pinout verified. Looking up CLC sources in background from ${pdfName}...`, 'busy');
             const clcResult = await invoke('verify_clc', {
                 pdfBase64: pdfBase64 || null,
                 datasheetText: datasheetText || null,
@@ -80,16 +80,16 @@ async function verifyClcInBackground({ pdfBase64, datasheetText, pdfName, apiKey
                 if (verifyResult) {
                     renderVerifyResult(verifyResult);
                 }
-                setStatus(`Pinout verified. CLC sources imported from ${pdfName}.`);
+                setStatus(`Pinout verified. CLC sources imported from ${pdfName}.`, 'success');
             } else {
                 if (verifyResult) {
                     renderVerifyResult(verifyResult);
                 }
-                setStatus('Pinout verified. Background CLC lookup found no CLC register data.');
+                setStatus('Pinout verified. Background CLC lookup found no CLC register data.', 'warn');
             }
         } catch (error) {
             if (deviceData?.part_number === partNumber) {
-                setStatus(`Pinout verified. Background CLC lookup failed: ${error.message || error}`);
+                setStatus(`Pinout verified. Background CLC lookup failed: ${error.message || error}`, 'warn');
             }
         } finally {
             clcVerifyJob = null;
@@ -101,7 +101,7 @@ async function verifyClcInBackground({ pdfBase64, datasheetText, pdfName, apiKey
 /** Trigger pinout verification — auto-finds datasheet, falls back to file dialog. */
 async function verifyPinout() {
     if (!deviceData) {
-        setStatus('Load a device first');
+        setStatus('Load a device first', 'warn');
         return;
     }
 
@@ -165,7 +165,7 @@ async function verifyPinout() {
         let datasheetText = null;
         let pdfName = null;
 
-        setStatus('Looking for datasheet...');
+        setStatus('Looking for datasheet...', 'busy');
         const found = await invoke('find_datasheet', { partNumber: deviceData.part_number });
 
         if (found?.base64) {
@@ -174,17 +174,17 @@ async function verifyPinout() {
             verifySiblingSource = found.sibling_source || null;
             const source = found.source === 'downloaded' ? 'downloaded' : 'cached';
             if (verifySiblingSource) {
-                setStatus(`Using sibling family datasheet (${source}): ${found.datasheet_title || found.name}`);
+                setStatus(`Using sibling family datasheet (${source}): ${found.datasheet_title || found.name}`, 'idle');
             } else {
-                setStatus(`Found datasheet (${source}): ${found.name}`);
+                setStatus(`Found datasheet (${source}): ${found.name}`, 'idle');
             }
         } else if (found?.text) {
             datasheetText = found.text;
             pdfName = found.name;
-            setStatus(`Using text extraction: ${found.name}`);
+            setStatus(`Using text extraction: ${found.name}`, 'idle');
         } else {
             stopTimer();
-            setStatus('No datasheet found — please select one');
+            setStatus('No datasheet found — please select one', 'warn');
             const file = await invoke('open_binary_file_dialog', {
                 request: {
                     title: 'Select Datasheet PDF',
@@ -205,7 +205,7 @@ async function verifyPinout() {
         }
 
         if (!pdfBase64 && !datasheetText) {
-            setStatus('Could not obtain datasheet input');
+            setStatus('Could not obtain datasheet input', 'error');
             switchRightTab('code');
             if (unlisten) {
                 unlisten();
@@ -214,7 +214,7 @@ async function verifyPinout() {
             return;
         }
         if (!pdfBase64 && datasheetText) {
-            setStatus('Verification requires a datasheet PDF; text-only fallback is disabled');
+            setStatus('Verification requires a datasheet PDF; text-only fallback is disabled', 'warn');
             switchRightTab('code');
             if (unlisten) {
                 unlisten();
@@ -229,7 +229,7 @@ async function verifyPinout() {
             detail: 'pickle will now trim the datasheet and send only the relevant pages to the provider.',
             progress: 0.34,
         });
-        setStatus(`Verifying pinout from ${pdfName}...`);
+        setStatus(`Verifying pinout from ${pdfName}...`, 'busy');
 
         verifyResult = await invoke('verify_pinout', {
             pdfBase64: pdfBase64 || null,
@@ -239,7 +239,7 @@ async function verifyPinout() {
             apiKey: null,
         });
         renderVerifyResult(verifyResult);
-        setStatus(`Verification complete (${elapsed}s)`);
+        setStatus(`Verification complete (${elapsed}s)`, 'success');
         verifyClcInBackground({
             pdfBase64,
             datasheetText,
@@ -254,7 +254,7 @@ async function verifyPinout() {
             '>': '&gt;',
             '"': '&quot;',
         }[ch]))}</div>`;
-        setStatus('Verification error');
+        setStatus('Verification error', 'error');
     } finally {
         if (unlisten) {
             unlisten();
@@ -300,12 +300,12 @@ async function applyVerifiedOverlay(pkgName) {
     try {
         const data = await invoke('apply_overlay', { request });
         if (!data.success) {
-            setStatus('Failed to save overlay');
+            setStatus('Failed to save overlay', 'error');
             return;
         }
 
         const resolvedPackageName = data.packageName || pkgName;
-        setStatus(`Overlay saved for ${pkgName}. Reloading...`);
+        setStatus(`Overlay saved for ${pkgName}. Reloading...`, 'busy');
         if (button) {
             button.disabled = true;
             button.classList.add('applied');
@@ -316,6 +316,6 @@ async function applyVerifiedOverlay(pkgName) {
             renderVerifyResult(verifyResult);
         }
     } catch (error) {
-        setStatus(`Error saving overlay: ${error.message || error}`);
+        setStatus(`Error saving overlay: ${error.message || error}`, 'error');
     }
 }

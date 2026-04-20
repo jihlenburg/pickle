@@ -629,7 +629,7 @@ function switchRightTab(tabName) {
     const targetTab = document.querySelector(`.right-tab[data-tab="${tabName}"]`);
     if (targetTab?.disabled || targetTab?.classList.contains('is-disabled')) {
         if (tabName === 'clc' && typeof setStatus === 'function') {
-            setStatus('This device has no CLC peripheral.');
+            setStatus('This device has no CLC peripheral.', 'idle');
         }
         return;
     }
@@ -746,7 +746,7 @@ async function refreshIndex() {
     if (badge) {
         badge.textContent = catalogConfig.refreshingBadge;
     }
-    setStatus(catalogConfig.refreshingStatus);
+    setStatus(catalogConfig.refreshingStatus, 'busy');
 
     try {
         const data = await invoke('refresh_index');
@@ -754,7 +754,7 @@ async function refreshIndex() {
             if (badge) {
                 badge.textContent = catalogConfig.refreshFailedBadge;
             }
-            setStatus(catalogConfig.refreshFailedStatus);
+            setStatus(catalogConfig.refreshFailedStatus, 'error');
             return;
         }
 
@@ -765,12 +765,12 @@ async function refreshIndex() {
         setStatus(appConfig.format(catalogConfig.refreshedStatus, {
             deviceCount: data.device_count,
             packCount: data.pack_count,
-        }));
+        }), 'success');
     } catch {
         if (badge) {
             badge.textContent = catalogConfig.refreshFailedBadge;
         }
-        setStatus(catalogConfig.refreshFailedStatus);
+        setStatus(catalogConfig.refreshFailedStatus, 'error');
     }
 }
 

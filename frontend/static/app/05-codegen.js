@@ -118,10 +118,10 @@ async function copyCode() {
     const code = $('code-output').textContent;
     try {
         await navigator.clipboard.writeText(code);
-        setStatus('Code copied to clipboard');
+        setStatus('Code copied to clipboard', 'success');
         flashButtonLabel('copy-btn', 'Copied!', 'Copy');
     } catch (e) {
-        setStatus('Error: clipboard access failed');
+        setStatus('Error: clipboard access failed', 'error');
     }
 }
 
@@ -139,10 +139,10 @@ async function exportCode() {
         });
         if (!result) return;
 
-        setStatus(`Exported ${result.writtenFiles.length} files to ${result.directory}`);
+        setStatus(`Exported ${result.writtenFiles.length} files to ${result.directory}`, 'success');
         flashButtonLabel('export-btn', 'Exported!', 'Export Files');
     } catch (e) {
-        setStatus('Error exporting files: ' + (e.message || e));
+        setStatus('Error exporting files: ' + (e.message || e), 'error');
     }
 }
 
@@ -210,9 +210,9 @@ async function exportPinList() {
             },
         });
         if (result) {
-            setStatus(`Saved pin list to ${result.path}`);
+            setStatus(`Saved pin list to ${result.path}`, 'success');
         }
     } catch (e) {
-        setStatus('Error saving pin list: ' + (e.message || e));
+        setStatus('Error saving pin list: ' + (e.message || e), 'error');
     }
 }

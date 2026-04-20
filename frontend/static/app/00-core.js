@@ -382,7 +382,7 @@ async function loadDevice(pkg, options = {}) {
 
     const preserveState = options.preserveState ?? Boolean(pkg);
     const isCached = cachedDevices.has(part);
-    setStatus(isCached ? appConfig.ui.deviceLoad.cachedStatus : appConfig.ui.deviceLoad.remoteStatus);
+    setStatus(isCached ? appConfig.ui.deviceLoad.cachedStatus : appConfig.ui.deviceLoad.remoteStatus, 'busy');
 
     try {
         deviceData = await invoke('load_device', { partNumber: part, package: pkg || null });
@@ -465,9 +465,9 @@ async function loadDevice(pkg, options = {}) {
         renderCurrentEditorView();
         syncConfigDocumentAfterDeviceLoad({ preserveState, markDirty: options.markDirty });
         if (isSyntheticPackage(deviceData.selected_package)) {
-            setStatus(`${deviceData.part_number} — ${displayPackageName(deviceData.selected_package, { long: true })}. Verify against the datasheet to import the actual package.`);
+            setStatus(`${deviceData.part_number} — ${displayPackageName(deviceData.selected_package, { long: true })}. Verify against the datasheet to import the actual package.`, 'warn');
         } else {
-            setStatus(`${deviceData.part_number} — ${displayPackageName(deviceData.selected_package, { long: true })}`);
+            setStatus(`${deviceData.part_number} — ${displayPackageName(deviceData.selected_package, { long: true })}`, 'success');
         }
 
         if (typeof dismissWelcomeIntro === 'function') {
@@ -490,25 +490,13 @@ async function loadDevice(pkg, options = {}) {
         if (typeof closePackageMenu === 'function') {
             closePackageMenu();
         }
-        setStatus('Error: ' + (e.message || e));
+        setStatus('Error: ' + (e.message || e), 'error');
     }
 }
 
-/** Update the bottom status bar text. */
-function setStatus(msg) {
-    const el = $('status');
-    if (!el) return;
-    const text = String(msg || '').trim();
-    const lower = text.toLowerCase();
-    let tone = 'info';
-
-    if (!text) tone = 'info';
-    else if (lower.includes('error') || lower.includes('failed') || lower.includes('not found')) tone = 'error';
-    else if (lower.includes('loading') || lower.includes('downloading') || lower.includes('refreshing') || lower.includes('verifying') || lower.includes('compiling') || lower.includes('analyzing')) tone = 'busy';
-    else if (lower.includes('loaded') || lower.includes('saved') || lower.includes('export') || lower.includes('complete') || lower.includes('success')) tone = 'success';
-
-    el.textContent = text || 'Ready';
-    el.dataset.tone = tone;
+/** Update the bottom status bar with an explicit tone. */
+function setStatus(msg, tone) {
+    window.PickleUI.status(msg == null || msg === '' ? 'Ready' : msg, tone || 'idle');
 }
 
 function packageMeta(name) {
@@ -736,10 +724,10 @@ async function saveSelectedPackageDisplayName() {
             })
             : appConfig.format(appConfig.ui.packageManager.resetStatus, {
                 packageName: defaultDisplayName,
-            }));
+            }), 'success');
         closePackageManagerDialog();
     } catch (error) {
-        setStatus(`Error saving package name: ${error.message || error}`);
+        setStatus(`Error saving package name: ${error.message || error}`, 'error');
     }
 }
 
@@ -768,10 +756,10 @@ async function resetSelectedPackageDisplayName() {
         await loadDevice(result.packageName || packageName, { preserveState: true, markDirty: true });
         setStatus(appConfig.format(appConfig.ui.packageManager.resetStatus, {
             packageName: defaultDisplayName,
-        }));
+        }), 'success');
         closePackageManagerDialog();
     } catch (error) {
-        setStatus(`Error resetting package name: ${error.message || error}`);
+        setStatus(`Error resetting package name: ${error.message || error}`, 'error');
     }
 }
 
@@ -800,9 +788,9 @@ async function deleteSelectedOverlayPackage() {
         await loadDevice(undefined, { preserveState: true, markDirty: true });
         setStatus(appConfig.format(appConfig.ui.packageManager.deletedStatus, {
             packageName: displayPackageName(packageName, { long: true }),
-        }));
+        }), 'success');
     } catch (error) {
-        setStatus(`Error deleting overlay package: ${error.message || error}`);
+        setStatus(`Error deleting overlay package: ${error.message || error}`, 'error');
     }
 }
 

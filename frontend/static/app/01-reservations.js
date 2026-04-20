@@ -359,7 +359,8 @@ function applyFuseReservations() {
         setStatus(
             warnings.length > 0
                 ? 'I2C routing updated; see ALTI2C warnings'
-                : 'I2C pins reallocated for the current ALTI2C fuse settings'
+                : 'I2C pins reallocated for the current ALTI2C fuse settings',
+            warnings.length > 0 ? 'warn' : 'success'
         );
     }
 }

@@ -246,10 +246,10 @@ async function saveConfigAs() {
         });
         if (result) {
             markConfigDocumentSaved(result.path, contents);
-            setStatus(`Saved config to ${result.path}`);
+            setStatus(`Saved config to ${result.path}`, 'success');
         }
     } catch (e) {
-        setStatus('Error saving config: ' + (e.message || e));
+        setStatus('Error saving config: ' + (e.message || e), 'error');
     }
 }
 
@@ -268,9 +268,9 @@ async function saveConfig() {
             contents,
         });
         markConfigDocumentSaved(result.path, contents);
-        setStatus(`Saved config to ${result.path}`);
+        setStatus(`Saved config to ${result.path}`, 'success');
     } catch (e) {
-        setStatus('Error saving config: ' + (e.message || e));
+        setStatus('Error saving config: ' + (e.message || e), 'error');
     }
 }
 
@@ -302,14 +302,14 @@ async function renameConfig() {
             try {
                 await invoke('delete_file_path', { path: oldPath });
             } catch (deleteError) {
-                setStatus(`Renamed config to ${result.path} (old file kept: ${deleteError.message || deleteError})`);
+                setStatus(`Renamed config to ${result.path} (old file kept: ${deleteError.message || deleteError})`, 'warn');
                 return;
             }
         }
 
-        setStatus(`Renamed config to ${result.path}`);
+        setStatus(`Renamed config to ${result.path}`, 'success');
     } catch (e) {
-        setStatus('Error renaming config: ' + (e.message || e));
+        setStatus('Error renaming config: ' + (e.message || e), 'error');
     }
 }
 
@@ -325,7 +325,7 @@ async function openConfigDialog() {
         if (!result) return;
         await loadConfigText(result.contents, result.path);
     } catch (e) {
-        setStatus('Error loading config: ' + (e.message || e));
+        setStatus('Error loading config: ' + (e.message || e), 'error');
     }
 }
 
@@ -339,7 +339,7 @@ async function loadConfigText(text, sourcePath) {
         const config = JSON.parse(text);
 
         if (!config.part_number) {
-            setStatus('Invalid config file: missing part_number');
+            setStatus('Invalid config file: missing part_number', 'error');
             return;
         }
 
@@ -359,8 +359,8 @@ async function loadConfigText(text, sourcePath) {
         applyFuseSelections(config.fuses?.selections);
         markConfigDocumentSaved(sourcePath || null);
         const sourceName = sourcePath ? ` from ${sourcePath.split(/[\\/]/).pop()}` : '';
-        setStatus(`Loaded config${sourceName}: ${config.part_number} — ${config.package || 'default'}`);
+        setStatus(`Loaded config${sourceName}: ${config.part_number} — ${config.package || 'default'}`, 'success');
     } catch (e) {
-        setStatus('Error loading config: ' + (e.message || e));
+        setStatus('Error loading config: ' + (e.message || e), 'error');
     }
 }

@@ -371,7 +371,7 @@ function updateClcRegisters() {
         valSpan.title = 'Click to copy';
         valSpan.addEventListener('click', () => {
             navigator.clipboard.writeText(hex16(reg.value));
-            setStatus(`Copied ${reg.name} = ${hex16(reg.value)}`);
+            setStatus(`Copied ${reg.name} = ${hex16(reg.value)}`, 'success');
         });
         item.appendChild(valSpan);
 
