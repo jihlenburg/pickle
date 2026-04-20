@@ -93,13 +93,32 @@ async function compileCheck() {
             });
         } else {
             resultBox.className = 'compile-result error';
-            resultBox.textContent = appConfig.format(appConfig.ui.compiler.failureMessage, {
+            const errorMessage = appConfig.format(appConfig.ui.compiler.failureMessage, {
                 compiler: compilerCommand,
                 details: data.errors,
+            });
+            resultBox.textContent = errorMessage;
+            window.PickleUI.toast(errorMessage, {
+                tone: 'error',
+                title: 'Compile error',
+                action: { label: 'Show', onClick: () => scrollToCompileResult() },
             });
         }
     } catch (e) {
         resultBox.className = 'compile-result error';
-        resultBox.textContent = 'Error: ' + (e.message || e);
+        const errorMessage = 'Error: ' + (e.message || e);
+        resultBox.textContent = errorMessage;
+        window.PickleUI.toast(errorMessage, {
+            tone: 'error',
+            title: 'Compile error',
+            action: { label: 'Show', onClick: () => scrollToCompileResult() },
+        });
     }
+}
+
+/** Scroll the compile-result panel into view and highlight it briefly. */
+function scrollToCompileResult() {
+    const box = $('compile-result');
+    if (!box || typeof box.scrollIntoView !== 'function') return;
+    box.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }

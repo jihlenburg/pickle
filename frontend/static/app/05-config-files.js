@@ -247,6 +247,11 @@ async function saveConfigAs() {
         if (result) {
             markConfigDocumentSaved(result.path, contents);
             setStatus(`Saved config to ${result.path}`, 'success');
+            window.PickleUI.toast(result.path || 'Config', {
+                tone: 'success',
+                title: 'Saved',
+                duration: 3000,
+            });
         }
     } catch (e) {
         setStatus('Error saving config: ' + (e.message || e), 'error');
@@ -269,6 +274,11 @@ async function saveConfig() {
         });
         markConfigDocumentSaved(result.path, contents);
         setStatus(`Saved config to ${result.path}`, 'success');
+        window.PickleUI.toast(result.path || 'Config', {
+            tone: 'success',
+            title: 'Saved',
+            duration: 3000,
+        });
     } catch (e) {
         setStatus('Error saving config: ' + (e.message || e), 'error');
     }
