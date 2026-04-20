@@ -1461,7 +1461,7 @@ Expected: FAIL.
     padding: var(--space-3) var(--space-5);
     border-radius: var(--radius-sm);
     background: var(--text);
-    color: var(--bg-primary);
+    color: var(--bg);
     font-size: var(--text-sm);
     line-height: 1.4;
     max-width: 240px;
@@ -1631,7 +1631,7 @@ Expected: PASS.
 
 **Files:**
 - Modify: `frontend/static/app/08-bootstrap.js`
-- Modify: `frontend/static/styles/00-foundation.css` (or wherever `.app-tooltip` is currently styled)
+- Modify: `frontend/static/styles/04-shell-layout.css` (where `.app-tooltip` currently lives, around lines 735+)
 
 - [ ] **Step 1: Replace `wireTooltipSystem()` call and body**
 
@@ -1659,7 +1659,7 @@ Expected: PASS.
 - [ ] **Step 1: Commit**
 
 ```bash
-git add frontend/static/styles/components/tooltip.css frontend/static/app/ui/tooltip.js frontend/tests/ui/tooltip.test.js frontend/static/style.css frontend/index.html frontend/static/app/08-bootstrap.js frontend/static/styles/00-foundation.css
+git add frontend/static/styles/components/tooltip.css frontend/static/app/ui/tooltip.js frontend/tests/ui/tooltip.test.js frontend/static/style.css frontend/index.html frontend/static/app/08-bootstrap.js frontend/static/styles/04-shell-layout.css
 git commit -m "$(cat <<'EOF'
 Lane A: tooltip primitive
 
@@ -1770,8 +1770,8 @@ Expected: FAIL.
 }
 
 .status-bar-tone-idle { color: var(--text-dim); }
-.status-bar-tone-success { color: var(--success); }
-.status-bar-tone-warn { color: var(--warning); }
+.status-bar-tone-success { color: var(--status-good); }
+.status-bar-tone-warn { color: var(--status-warn); }
 .status-bar-tone-error { color: var(--error); }
 
 .status-bar-tone-busy {
@@ -2099,8 +2099,8 @@ Expected: FAIL.
 }
 
 .toast-info     { border-left-color: var(--text-dim); }
-.toast-success  { border-left-color: var(--success); }
-.toast-warn     { border-left-color: var(--warning); }
+.toast-success  { border-left-color: var(--status-good); }
+.toast-warn     { border-left-color: var(--status-warn); }
 .toast-error    { border-left-color: var(--error); }
 .toast-progress { border-left-color: var(--accent); }
 
@@ -2112,8 +2112,8 @@ Expected: FAIL.
 }
 
 .toast-info     .toast-icon { color: var(--text-dim); }
-.toast-success  .toast-icon { color: var(--success); }
-.toast-warn     .toast-icon { color: var(--warning); }
+.toast-success  .toast-icon { color: var(--status-good); }
+.toast-warn     .toast-icon { color: var(--status-warn); }
 .toast-error    .toast-icon { color: var(--error); }
 .toast-progress .toast-icon { color: var(--accent); }
 
@@ -3729,7 +3729,7 @@ Expected: FAIL.
     padding: 0;
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    background: var(--bg-primary);
+    background: var(--bg);
     color: var(--text);
     box-shadow: var(--shadow-lg);
     min-width: 340px;
@@ -3799,7 +3799,7 @@ Expected: FAIL.
     gap: var(--space-4);
     padding: var(--space-6) var(--space-8);
     border-top: 1px solid var(--border);
-    background: var(--bg-primary);
+    background: var(--bg);
 }
 
 .modal-nav {
