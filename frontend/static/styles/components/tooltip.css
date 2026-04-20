@@ -1,0 +1,47 @@
+/*
+ * Tooltip primitive.
+ *
+ * Inverted surface: text color = --text, background = --bg-primary
+ * read from the *opposite* theme. In practice we set surface to
+ * --text and text to --bg-primary so the popover contrasts with
+ * the surrounding app regardless of theme.
+ */
+.tooltip {
+    position: fixed;
+    z-index: var(--z-tooltip);
+    padding: var(--space-3) var(--space-5);
+    border-radius: var(--radius-sm);
+    background: var(--text);
+    color: var(--bg);
+    font-size: var(--text-sm);
+    line-height: 1.4;
+    max-width: 240px;
+    box-shadow: var(--shadow-md);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity var(--motion-fast) ease;
+}
+
+.tooltip.is-visible {
+    opacity: 1;
+}
+
+.tooltip-arrow {
+    position: absolute;
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+}
+
+.tooltip.is-above .tooltip-arrow {
+    bottom: -4px;
+    left: 8px;
+    border-top: 4px solid var(--text);
+}
+
+.tooltip.is-below .tooltip-arrow {
+    top: -4px;
+    left: 8px;
+    border-bottom: 4px solid var(--text);
+}
