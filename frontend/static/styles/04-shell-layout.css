@@ -856,16 +856,10 @@ body.welcome-active .panel {
     bottom: 0;
     left: 0;
     right: 0;
-    z-index: 10;
+    z-index: var(--z-sticky);
     height: 24px;
-    display: flex;
-    align-items: center;
-    padding: 0 14px;
     background: color-mix(in srgb, var(--surface-strong) 92%, transparent);
     backdrop-filter: blur(14px);
-    border-top: 1px solid var(--border);
-    font-size: 11px;
-    color: var(--text-dim);
 }
 
 .status-bar #status {
@@ -873,10 +867,6 @@ body.welcome-active .panel {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-
-.status-bar #status[data-tone="busy"] { color: var(--accent2); }
-.status-bar #status[data-tone="success"] { color: var(--spi); }
-.status-bar #status[data-tone="error"] { color: var(--accent); }
 
 /* --- About dialog --- */
 

@@ -116,7 +116,7 @@ async function compileCheck() {
     }
 }
 
-/** Scroll the compile-result panel into view and highlight it briefly. */
+/** Scroll the compile-result panel into view. */
 function scrollToCompileResult() {
     const box = $('compile-result');
     if (!box || typeof box.scrollIntoView !== 'function') return;

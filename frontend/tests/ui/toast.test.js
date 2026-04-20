@@ -118,3 +118,18 @@ test('PickleUI.toast.update mutates title/body/progress', () => {
     assert.equal(titleEl.textContent, 'Verify done');
     assert.equal(bodyEl.textContent, 'All good');
 });
+
+test('PickleUI.toast stack hard-caps sticky toasts at STACK_HARD_CAP', () => {
+    const doc = mkDoc();
+    const sandbox = { window: {}, document: doc, setTimeout: () => 1, clearTimeout: () => {} };
+    sandbox.window.document = doc;
+    vm.createContext(sandbox);
+    vm.runInContext(load(), sandbox);
+
+    for (let i = 0; i < 15; i += 1) {
+        sandbox.window.PickleUI.toast('t' + i, { tone: 'error' });
+    }
+    const stack = doc.body._children[0];
+    assert.ok(stack.children.length <= 10,
+        `expected at most 10 sticky toasts, got ${stack.children.length}`);
+});

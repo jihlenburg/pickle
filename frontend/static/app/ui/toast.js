@@ -3,11 +3,14 @@
  *
  * Stack limit of 5 visible toasts; oldest auto-dismiss toast (info /
  * success / warn) is evicted when a 6th is pushed. error + progress
- * never auto-dismiss and never auto-evict.
+ * never auto-dismiss on their own, but a hard ceiling of 10 forces
+ * the oldest sticky toast out so a runaway error loop can't grow
+ * the stack unbounded.
  */
 (function initToast(global) {
     const PickleUI = global.PickleUI || (global.PickleUI = {});
     const STACK_LIMIT = 5;
+    const STACK_HARD_CAP = 10;
     const DEFAULT_DURATION = 5000;
     const ICONS = {
         info: 'i',
@@ -38,8 +41,16 @@
 
     function evictIfNeeded() {
         if (handles.length <= STACK_LIMIT) return;
-        const idx = handles.findIndex((h) => h.autoDismiss);
-        if (idx !== -1) handles[idx].dismiss();
+        const autoIdx = handles.findIndex((h) => h.autoDismiss);
+        if (autoIdx !== -1) {
+            handles[autoIdx].dismiss();
+            return;
+        }
+        // All remaining handles are sticky — force oldest out past the hard
+        // ceiling so loops of sticky error toasts can't grow unbounded.
+        if (handles.length > STACK_HARD_CAP) {
+            handles[0].dismiss();
+        }
     }
 
     function toast(message, opts) {

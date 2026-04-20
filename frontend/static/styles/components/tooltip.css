@@ -1,9 +1,9 @@
 /*
  * Tooltip primitive.
  *
- * Inverted surface: text color = --text, background = --bg-primary
+ * Inverted surface: text color = --text, background = --bg
  * read from the *opposite* theme. In practice we set surface to
- * --text and text to --bg-primary so the popover contrasts with
+ * --text and text to --bg so the popover contrasts with
  * the surrounding app regardless of theme.
  */
 .tooltip {

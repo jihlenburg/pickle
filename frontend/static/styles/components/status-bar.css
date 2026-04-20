@@ -6,9 +6,8 @@
  * busy adds a rotating spinner via ::before.
  */
 .status-bar {
-    padding: var(--space-3) var(--space-7);
+    padding: 0 var(--space-7);
     border-top: 1px solid var(--border);
-    background: var(--bg-card);
     font-size: var(--text-sm);
     color: var(--text-dim);
     display: flex;
