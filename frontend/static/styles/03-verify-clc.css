@@ -3,45 +3,9 @@
    ============================================================================= */
 
 /* =============================================================================
-   Right-panel tabs (Code / Verification)
+   Right-panel tab content panes
    ============================================================================= */
 
-.right-tabs {
-    display: flex;
-    gap: 2px;
-    margin-bottom: 10px;
-    border-bottom: 2px solid var(--border);
-    padding-bottom: 0;
-}
-.right-tab {
-    background: transparent;
-    color: var(--text-dim);
-    border: none;
-    padding: 6px 16px;
-    font-size: 0.78rem;
-    font-weight: 600;
-    cursor: pointer;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -2px;
-    transition: color 0.15s ease, border-color 0.15s ease;
-}
-.right-tab:hover {
-    color: var(--text);
-}
-.right-tab.active {
-    color: var(--accent2);
-    border-bottom-color: var(--accent2);
-}
-.right-tab.is-disabled,
-.right-tab:disabled {
-    color: var(--text-dim);
-    opacity: 0.45;
-    cursor: not-allowed;
-}
-.right-tab.is-disabled:hover,
-.right-tab:disabled:hover {
-    color: var(--text-dim);
-}
 .right-tab-content {
     display: none;
     flex-direction: column;
@@ -252,29 +216,7 @@
     align-items: flex-end;
 }
 
-.clc-module-tab {
-    background: var(--bg-card);
-    color: var(--text-dim);
-    border: 1px solid var(--border);
-    border-radius: 6px 6px 0 0;
-    padding: 5px 14px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: color 0.15s, border-color 0.15s, background 0.15s;
-    position: relative;
-}
-
-.clc-module-tab:hover { color: var(--text); border-color: var(--text-dim); }
-
-.clc-module-tab.active {
-    color: var(--sys);
-    border-color: var(--sys);
-    border-bottom-color: var(--bg);
-    background: var(--bg);
-}
-
-.clc-module-tab .clc-tab-dot {
+.clc-module-tabs .clc-tab-dot {
     display: inline-block;
     width: 6px;
     height: 6px;

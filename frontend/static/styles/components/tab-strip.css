@@ -1,0 +1,81 @@
+/*
+ * Tab strip primitive.
+ *
+ * Two variants:
+ *   - underline (default): bottom border, active cell gets a 2 px accent underline
+ *   - segmented: bordered group, active cell has elevated card bg fill
+ *
+ * Apply .tab-strip-segmented modifier on the container to switch style.
+ * Keyboard navigation (arrows/Home/End) is Lane B scope — this primitive
+ * only handles click + aria-selected.
+ */
+.tab-strip {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    gap: 0;
+}
+
+.tab-strip-item {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: var(--control-h-md);
+    padding: 0 var(--space-7);
+    border: 0;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: var(--text-md);
+    font-weight: var(--weight-regular);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: color var(--motion-fast) ease, border-color var(--motion-fast) ease;
+}
+
+.tab-strip-item:hover {
+    color: var(--text);
+}
+
+.tab-strip-item.is-active {
+    color: var(--text);
+    font-weight: var(--weight-medium);
+    border-bottom-color: var(--accent);
+}
+
+.tab-strip-item:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring-color);
+    outline-offset: calc(var(--focus-ring-offset) * -1);
+}
+
+.tab-strip-item[disabled],
+.tab-strip-item.is-disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.tab-strip-segmented {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    border-bottom: 1px solid var(--border);
+}
+
+.tab-strip-segmented .tab-strip-item {
+    height: var(--control-h-md);
+    padding: 0 var(--space-7);
+    border-right: 1px solid var(--border);
+    border-bottom: 0;
+    margin-bottom: 0;
+}
+
+.tab-strip-segmented .tab-strip-item:last-child {
+    border-right: 0;
+}
+
+.tab-strip-segmented .tab-strip-item.is-active {
+    background: var(--hover-overlay);
+    color: var(--text);
+    font-weight: var(--weight-medium);
+    border-bottom-color: transparent;
+}

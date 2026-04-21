@@ -83,9 +83,9 @@
                         <label class="summary-check"><input type="checkbox" id="pinlist-grid" checked> Grid</label>
                     </div>
                 </div>
-                <div id="view-toggle" class="view-toggle" style="display:none">
-                    <button class="btn btn-sm btn-ghost view-toggle-btn active" data-view="pin">Pin View</button>
-                    <button class="btn btn-sm btn-ghost view-toggle-btn" data-view="peripheral">Peripheral View</button>
+                <div id="view-toggle" class="tab-strip tab-strip-segmented" style="display:none" role="tablist">
+                    <button class="tab-strip-item is-active" data-tab-id="pin">Pin View</button>
+                    <button class="tab-strip-item" data-tab-id="peripheral">Peripheral View</button>
                 </div>
             </div>
             <div class="panel-left-scroll" id="pin-view-container">
@@ -108,20 +108,20 @@
         </div>
 
         <div class="panel panel-right">
-            <div class="right-tabs" id="right-tabs">
-                <button class="right-tab active" data-tab="info">Info</button>
-                <button class="right-tab" data-tab="fuses">Fuses</button>
-                <button class="right-tab" data-tab="clc">CLC</button>
-                <button class="right-tab" data-tab="code">Code</button>
-                <button class="right-tab" data-tab="verify">Verification</button>
+            <div class="tab-strip" id="right-tabs" role="tablist">
+                <button class="tab-strip-item is-active" data-tab-id="info">Info</button>
+                <button class="tab-strip-item" data-tab-id="fuses">Fuses</button>
+                <button class="tab-strip-item" data-tab-id="clc">CLC</button>
+                <button class="tab-strip-item" data-tab-id="code">Code</button>
+                <button class="tab-strip-item" data-tab-id="verify">Verification</button>
             </div>
 
-            <div class="right-tab-content active" data-tab="info">
+            <div class="right-tab-content active" data-tab-id="info">
                 <div id="device-info-content" class="device-info" style="display:none"></div>
                 <div id="device-info-empty" class="verify-empty">Load a device to view its information.</div>
             </div>
 
-            <div class="right-tab-content fuses-tab-content" data-tab="fuses">
+            <div class="right-tab-content fuses-tab-content" data-tab-id="fuses">
                 <div id="osc-config" class="osc-config" style="display:none">
                     <h2>Oscillator</h2>
                     <div class="osc-row">
@@ -159,7 +159,7 @@
                 <div id="fuses-empty" class="verify-empty">Load a device to configure oscillator and fuse settings.</div>
             </div>
 
-            <div class="right-tab-content clc-tab-content" data-tab="clc">
+            <div class="right-tab-content clc-tab-content" data-tab-id="clc">
                 <div id="clc-designer" class="clc-designer" style="display:none">
                     <div class="clc-module-tabs" id="clc-module-tabs"></div>
 
@@ -192,7 +192,7 @@
                 <div id="clc-empty" class="verify-empty">Load a device to configure CLC modules.</div>
             </div>
 
-            <div class="right-tab-content" data-tab="code">
+            <div class="right-tab-content" data-tab-id="code">
                 <div class="code-shell">
                     <div class="toolbar">
                         <button id="gen-btn" class="btn btn-primary">Generate C Code</button>
@@ -206,7 +206,7 @@
                 </div>
             </div>
 
-            <div class="right-tab-content" data-tab="verify">
+            <div class="right-tab-content" data-tab-id="verify">
                 <div id="verify-panel" class="verify-panel">
                     <div id="verify-output">
                         <div class="verify-empty">Load a device and click <strong>Verify Pinout</strong> to cross-check pin assignments against the datasheet. If the package shows as <strong>default</strong>, that is an EDC fallback and not a real package name.</div>
@@ -365,6 +365,7 @@
     <script src="static/app/ui/00-namespace.js"></script>
     <script src="static/app/ui/dropdown.js"></script>
     <script src="static/app/ui/form.js"></script>
+    <script src="static/app/ui/tab-strip.js"></script>
     <script src="static/app/ui/tooltip.js"></script>
     <script src="static/app/ui/status-bar.js"></script>
     <script src="static/app/ui/toast.js"></script>

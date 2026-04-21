@@ -384,18 +384,18 @@ function wireShellEventListeners() {
         }
     });
 
-    document.querySelectorAll('.right-tab').forEach((tab) => {
-        tab.addEventListener('click', () => switchRightTab(tab.dataset.tab));
+    window.PickleUI.tabStrip(document.getElementById('right-tabs'), {
+        onChange: (id) => switchRightTab(id),
     });
 
-    document.querySelectorAll('.view-toggle-btn').forEach((button) => {
-        button.addEventListener('click', () => switchView(button.dataset.view));
+    window.PickleUI.tabStrip(document.getElementById('view-toggle'), {
+        onChange: (id) => switchView(id),
     });
 }
 
 // Right-panel tab switching (Code / Verification)
 function switchRightTab(tabName) {
-    const targetTab = document.querySelector(`.right-tab[data-tab="${tabName}"]`);
+    const targetTab = document.querySelector(`.tab-strip-item[data-tab-id="${tabName}"]`);
     if (targetTab?.disabled || targetTab?.classList.contains('is-disabled')) {
         if (tabName === 'clc' && typeof setStatus === 'function') {
             setStatus('This device has no CLC peripheral.', 'idle');
@@ -403,11 +403,11 @@ function switchRightTab(tabName) {
         return;
     }
 
-    document.querySelectorAll('.right-tab').forEach((tab) => {
-        tab.classList.toggle('active', tab.dataset.tab === tabName);
+    document.querySelectorAll('#right-tabs .tab-strip-item').forEach((tab) => {
+        tab.classList.toggle('is-active', tab.dataset.tabId === tabName);
     });
     document.querySelectorAll('.right-tab-content').forEach((content) => {
-        content.classList.toggle('active', content.dataset.tab === tabName);
+        content.classList.toggle('active', content.dataset.tabId === tabName);
     });
 }
 
@@ -415,8 +415,8 @@ function switchRightTab(tabName) {
 function switchView(viewName) {
     activeView = viewName;
 
-    document.querySelectorAll('.view-toggle-btn').forEach((button) => {
-        button.classList.toggle('active', button.dataset.view === viewName);
+    document.querySelectorAll('#view-toggle .tab-strip-item').forEach((button) => {
+        button.classList.toggle('is-active', button.dataset.tabId === viewName);
     });
 
     const pinContainer = $('pin-view-container');

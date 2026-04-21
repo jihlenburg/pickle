@@ -57,7 +57,7 @@ function clcEmptyMessage() {
 }
 
 function updateClcTabState() {
-    const tab = document.querySelector('.right-tab[data-tab="clc"]');
+    const tab = document.querySelector('.tab-strip-item[data-tab-id="clc"]');
     if (!tab) return;
 
     const disabled = !!deviceData && !deviceHasClc();
@@ -67,7 +67,7 @@ function updateClcTabState() {
         ? 'This device has no CLC peripheral.'
         : 'Configure CLC modules';
 
-    if (disabled && tab.classList.contains('active') && typeof switchRightTab === 'function') {
+    if (disabled && tab.classList.contains('is-active') && typeof switchRightTab === 'function') {
         switchRightTab('info');
     }
 }
@@ -130,20 +130,22 @@ function renderClcModuleTabs() {
 
     for (let i = 1; i <= getClcModuleCount(); i++) {
         const btn = document.createElement('button');
-        btn.className = 'clc-module-tab';
-        if (i === clcActiveModule) btn.classList.add('active');
-        btn.textContent = `CLC${i}`;
+        btn.type = 'button';
+        btn.classList.add('tab-strip-item');
+        if (i === clcActiveModule) btn.classList.add('is-active');
+        btn.dataset.tabId = String(i);
+        btn.textContent = 'CLC' + i;
         if (isClcModuleConfigured(i)) {
             const dot = document.createElement('span');
             dot.className = 'clc-tab-dot';
             btn.appendChild(dot);
         }
-        btn.addEventListener('click', () => {
-            clcActiveModule = i;
-            renderClcDesigner();
-        });
         container.appendChild(btn);
     }
+
+    window.PickleUI.tabStrip(container, {
+        onChange: (id) => { clcActiveModule = Number(id); renderClcDesigner(); },
+    });
 }
 
 /** Render the 4 input source dropdowns (DS1-DS4). */
