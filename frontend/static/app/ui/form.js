@@ -27,7 +27,12 @@
         if (!trigger.textContent && options[0]) trigger.textContent = options[0].label;
 
         PickleUI.dropdown(trigger, {
-            items: options.map((o) => ({ id: o.value, label: o.label, icon: o.icon })),
+            items: () => options.map((o) => ({
+                id: o.value,
+                label: o.label,
+                icon: o.icon,
+                active: o.value === current,
+            })),
             placement,
             onSelect: (value) => {
                 current = value;

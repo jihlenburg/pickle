@@ -1,9 +1,12 @@
 /*
  * Dropdown helper.
  *
- * Renders a floating .dropdown-menu anchored to a trigger element. Items
- * accept { id, label, icon?, danger?, divider? }. Menu closes on
- * selection, Esc, or click outside.
+ * Renders a floating .dropdown-menu anchored to a trigger element.
+ * Items accept { id, label, icon?, meta?, danger?, active?, divider? }.
+ * `items` may be an Array or a zero-arg function; when a function,
+ * it's re-invoked on every open(), so dynamic state (current
+ * selection, visibility) reflects at render time.
+ * Menu closes on selection, Esc, or click outside.
  */
 (function initDropdown(global) {
     const PickleUI = global.PickleUI || (global.PickleUI = {});
@@ -58,6 +61,7 @@
                 item.setAttribute('role', 'menuitem');
                 item.classList.add('dropdown-item');
                 if (it.danger) item.classList.add('is-danger');
+                if (it.active) item.classList.add('is-active');
                 if (it.icon) {
                     const ic = doc.createElement('span');
                     ic.classList.add('dropdown-item-icon');

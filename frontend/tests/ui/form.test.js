@@ -169,3 +169,26 @@ test('PickleUI.select closes on Escape key', () => {
 
     assert.equal(trigger.attributes['aria-expanded'], 'false');
 });
+
+test('PickleUI.select highlights the selected option after setValue', () => {
+    const source = loadForm();
+    const document = makeDom();
+    const trigger = document.createElement('button');
+    const sandbox = { window: {}, document };
+    sandbox.window.document = document;
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox);
+
+    const handle = sandbox.window.PickleUI.select(trigger, {
+        options: [{ value: 'a', label: 'Alpha' }, { value: 'b', label: 'Beta' }],
+        onSelect: () => {},
+    });
+
+    handle.setValue('b');
+    trigger.click();
+    const menu = document.body._children[document.body._children.length - 1];
+    assert.equal(menu.children[1].classList.contains('is-active'), true,
+        'selected option (Beta) has is-active');
+    assert.equal(menu.children[0].classList.contains('is-active'), false,
+        'non-selected option (Alpha) does not have is-active');
+});

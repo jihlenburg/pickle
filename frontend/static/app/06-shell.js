@@ -259,9 +259,14 @@ function refreshPartPickerSuggestions() {
     if (!input || !partPickerDropdown) return;
     const normalizedValue = input.value.toUpperCase();
     if (normalizedValue !== input.value) input.value = normalizedValue;
-    lastPartSuggestions = findPartSuggestions(normalizedValue);
+    const fresh = findPartSuggestions(normalizedValue);
+    if (fresh.length === lastPartSuggestions.length
+        && fresh.every((d, i) => d === lastPartSuggestions[i])) {
+        return; // no-op: same list, no flicker
+    }
+    lastPartSuggestions = fresh;
     partPickerDropdown.close();
-    if (lastPartSuggestions.length) partPickerDropdown.open();
+    if (fresh.length) partPickerDropdown.open();
 }
 
 function wirePartPicker() {

@@ -122,8 +122,10 @@ test('PickleUI.dropdown accepts items as a factory and rebuilds on open', () => 
     vm.runInContext(source, sandbox);
 
     let includeDelete = false;
+    let callCount = 0;
     sandbox.window.PickleUI.dropdown(trigger, {
         items: () => {
+            callCount += 1;
             const list = [{ id: 'a', label: 'Alpha' }];
             if (includeDelete) list.push({ id: 'd', label: 'Delete', danger: true });
             return list;
@@ -134,12 +136,14 @@ test('PickleUI.dropdown accepts items as a factory and rebuilds on open', () => 
     trigger.click();
     let menu = doc.body._children[doc.body._children.length - 1];
     assert.equal(menu.children.length, 1, 'factory returns 1 item before state change');
+    assert.equal(callCount, 1, 'factory invoked exactly once after first open');
     trigger.click(); // closes
 
     includeDelete = true;
     trigger.click();
     menu = doc.body._children[doc.body._children.length - 1];
     assert.equal(menu.children.length, 2, 'factory returns 2 items after state change');
+    assert.equal(callCount, 2, 'factory re-invoked on second open');
 });
 
 test('PickleUI.dropdown renders optional item.meta as secondary text', () => {
@@ -161,4 +165,50 @@ test('PickleUI.dropdown renders optional item.meta as secondary text', () => {
     const metaSpan = menu.children[0].children.find((c) => c.classList.contains('dropdown-item-meta'));
     assert.ok(metaSpan, 'meta span rendered');
     assert.equal(metaSpan.textContent, 'Cached');
+});
+
+test('PickleUI.dropdown renders is-active on items marked active', () => {
+    const source = load();
+    const doc = mkDoc();
+    const trigger = doc.createElement('button');
+    const sandbox = { window: {}, document: doc };
+    sandbox.window.document = doc;
+    sandbox.window.innerHeight = 600;
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox);
+
+    sandbox.window.PickleUI.dropdown(trigger, {
+        items: [
+            { id: 'a', label: 'Alpha', active: true },
+            { id: 'b', label: 'Beta' },
+        ],
+        onSelect: () => {},
+    });
+    trigger.click();
+    const menu = doc.body._children[doc.body._children.length - 1];
+    assert.equal(menu.children[0].classList.contains('is-active'), true,
+        'first item has is-active');
+    assert.equal(menu.children[1].classList.contains('is-active'), false,
+        'second item does not have is-active');
+});
+
+test('PickleUI.dropdown tolerates no opts and empty items', () => {
+    const source = load();
+    const doc = mkDoc();
+    const trigger = doc.createElement('button');
+    const sandbox = { window: {}, document: doc };
+    sandbox.window.document = doc;
+    sandbox.window.innerHeight = 600;
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox);
+
+    sandbox.window.PickleUI.dropdown(trigger);
+    trigger.click();
+    const menu = doc.body._children[doc.body._children.length - 1];
+    assert.ok(menu, 'menu appended to body');
+    assert.equal(menu.children.length, 0, 'menu has no children');
+    // Escape should close cleanly without throwing.
+    assert.doesNotThrow(() => {
+        doc.dispatch('keydown', { key: 'Escape' });
+    });
 });
