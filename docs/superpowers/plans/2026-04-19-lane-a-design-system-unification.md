@@ -2527,6 +2527,58 @@ test('PickleUI.dropdown renders dividers and danger styling', () => {
     assert.equal(menu.children[1].classList.contains('dropdown-divider'), true);
     assert.equal(menu.children[2].classList.contains('is-danger'), true);
 });
+
+test('PickleUI.dropdown accepts items as a factory and rebuilds on open', () => {
+    const source = load();
+    const doc = mkDoc();
+    const trigger = doc.createElement('button');
+    const sandbox = { window: {}, document: doc };
+    sandbox.window.document = doc;
+    sandbox.window.innerHeight = 600;
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox);
+
+    let includeDelete = false;
+    sandbox.window.PickleUI.dropdown(trigger, {
+        items: () => {
+            const list = [{ id: 'a', label: 'Alpha' }];
+            if (includeDelete) list.push({ id: 'd', label: 'Delete', danger: true });
+            return list;
+        },
+        onSelect: () => {},
+    });
+
+    trigger.click();
+    let menu = doc.body._children[doc.body._children.length - 1];
+    assert.equal(menu.children.length, 1, 'factory returns 1 item before state change');
+    trigger.click(); // closes
+
+    includeDelete = true;
+    trigger.click();
+    menu = doc.body._children[doc.body._children.length - 1];
+    assert.equal(menu.children.length, 2, 'factory returns 2 items after state change');
+});
+
+test('PickleUI.dropdown renders optional item.meta as secondary text', () => {
+    const source = load();
+    const doc = mkDoc();
+    const trigger = doc.createElement('button');
+    const sandbox = { window: {}, document: doc };
+    sandbox.window.document = doc;
+    sandbox.window.innerHeight = 600;
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox);
+
+    sandbox.window.PickleUI.dropdown(trigger, {
+        items: [{ id: 'a', label: 'Alpha', meta: 'Cached' }],
+        onSelect: () => {},
+    });
+    trigger.click();
+    const menu = doc.body._children[doc.body._children.length - 1];
+    const metaSpan = menu.children[0].children.find((c) => c.classList.contains('dropdown-item-meta'));
+    assert.ok(metaSpan, 'meta span rendered');
+    assert.equal(metaSpan.textContent, 'Cached');
+});
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -2605,6 +2657,13 @@ Expected: FAIL.
     color: var(--error);
 }
 
+.dropdown-item-meta {
+    margin-left: auto;
+    color: var(--text-dim);
+    font-size: var(--text-sm);
+    flex-shrink: 0;
+}
+
 .dropdown-divider {
     height: 1px;
     border: 0;
@@ -2630,9 +2689,14 @@ Expected: FAIL.
 
     function dropdown(trigger, opts) {
         if (!trigger) throw new Error('PickleUI.dropdown: trigger required');
-        const items = Array.isArray(opts && opts.items) ? opts.items : [];
+        const itemsSource = opts && opts.items;
         const onSelect = (opts && opts.onSelect) || (() => {});
         const placement = PLACEMENTS.includes(opts && opts.placement) ? opts.placement : 'bottom-start';
+
+        function resolveItems() {
+            const resolved = typeof itemsSource === 'function' ? itemsSource() : itemsSource;
+            return Array.isArray(resolved) ? resolved : [];
+        }
 
         let menu = null;
         let outsideHandler = null;
@@ -2660,7 +2724,7 @@ Expected: FAIL.
             menu.classList.add('dropdown-menu');
             menu.setAttribute('role', 'menu');
 
-            for (const it of items) {
+            for (const it of resolveItems()) {
                 if (it && it.divider) {
                     const div = doc.createElement('div');
                     div.classList.add('dropdown-divider');
@@ -2681,6 +2745,12 @@ Expected: FAIL.
                 const label = doc.createElement('span');
                 label.textContent = it.label;
                 item.appendChild(label);
+                if (it.meta) {
+                    const metaSpan = doc.createElement('span');
+                    metaSpan.classList.add('dropdown-item-meta');
+                    metaSpan.textContent = it.meta;
+                    item.appendChild(metaSpan);
+                }
                 item.addEventListener('click', (event) => {
                     event.stopPropagation();
                     close();
@@ -2756,6 +2826,7 @@ Expected: PASS.
 
 **Files:**
 - Modify: `frontend/static/app/ui/form.js`
+- Modify: `frontend/tests/ui/form.test.js`
 
 - [ ] **Step 1: Replace the inline popover with a dropdown call**
 
@@ -2802,7 +2873,22 @@ Expected: PASS.
 })(typeof window !== 'undefined' ? window : globalThis);
 ```
 
-- [ ] **Step 2: Run tests**
+- [ ] **Step 2: Update `form.test.js` loader**
+
+The form tests load `ui/00-namespace.js` + `ui/form.js`. After this refactor, `form.js` depends on `ui/dropdown.js`. Update the `loadForm()` helper to concat dropdown.js between namespace and form:
+
+```javascript
+function loadForm() {
+    const namespace = fs.readFileSync(path.join(__dirname, '..', '..', 'static', 'app', 'ui', '00-namespace.js'), 'utf8');
+    const dropdown = fs.readFileSync(path.join(__dirname, '..', '..', 'static', 'app', 'ui', 'dropdown.js'), 'utf8');
+    const form = fs.readFileSync(path.join(__dirname, '..', '..', 'static', 'app', 'ui', 'form.js'), 'utf8');
+    return namespace + '\n' + dropdown + '\n' + form;
+}
+```
+
+No test assertions change — outside-click and Escape close still come from the (now delegated) dropdown layer, which sets `aria-expanded="false"` on the trigger just like the old inline popover did.
+
+- [ ] **Step 3: Run tests**
 
 Run: `node --test frontend/tests/ui/form.test.js frontend/tests/ui/dropdown.test.js`
 Expected: PASS for both.
@@ -2828,27 +2914,46 @@ Remove `#pkg-menu`, `#pkg-edit-name-btn`, `#pkg-reset-name-btn`, `#pkg-delete-bt
 
 - [ ] **Step 2: Replace wiring in `06-shell.js`**
 
-Find the block that attaches click handlers to `#pkg-menu-btn`, `#pkg-edit-name-btn`, `#pkg-reset-name-btn`, `#pkg-delete-btn`, and the toggle logic that shows/hides `#pkg-menu`. Replace with:
+Delete `closePackageMenu`, `refreshPackageMenuState`, `wirePackageMenu`, and `packageMenuBound`. Replace the call site (`wirePackageMenu()` in bootstrap sequencing) with a single `PickleUI.dropdown` instance that uses a factory so items reflect current overlay/override state on every open.
+
+Note: in this file `$` is the usual `document.getElementById` helper. Labels come from `appConfig.ui.packageManager`; the existing helpers `selectedPackageIsOverlay()` and `hasPackageDisplayNameOverride(deviceData.selected_package, selectedPackageMeta())` stay.
 
 ```javascript
-const pkgMenuBtn = document.getElementById('pkg-menu-btn');
-window.PickleUI.dropdown(pkgMenuBtn, {
-    placement: 'bottom-end',
-    items: [
-        { id: 'edit', label: 'Edit Name...' },
-        { id: 'reset', label: 'Reset Name' },
-        { divider: true },
-        { id: 'delete', label: 'Delete Overlay', danger: true },
-    ],
-    onSelect: (id) => {
-        if (id === 'edit') return openPackageDialog();
-        if (id === 'reset') return resetPackageName();
-        if (id === 'delete') return deletePackageOverlay();
-    },
-});
+let packageMenuDropdown = null;
+
+function wirePackageMenu() {
+    if (packageMenuDropdown) return;
+    const button = $('pkg-menu-btn');
+    if (!button) return;
+
+    const ui = appConfig.ui.packageManager;
+    button.textContent = ui.menuButtonLabel;
+    button.title = ui.menuButtonTitle;
+    button.setAttribute('aria-label', ui.menuButtonTitle);
+
+    packageMenuDropdown = window.PickleUI.dropdown(button, {
+        placement: 'bottom-end',
+        items: () => {
+            const items = [{ id: 'edit', label: ui.menuEditLabel }];
+            if (hasPackageDisplayNameOverride(deviceData?.selected_package, selectedPackageMeta())) {
+                items.push({ id: 'reset', label: ui.menuResetLabel });
+            }
+            if (selectedPackageIsOverlay()) {
+                items.push({ divider: true });
+                items.push({ id: 'delete', label: ui.menuDeleteLabel, danger: true });
+            }
+            return items;
+        },
+        onSelect: (id) => {
+            if (id === 'edit') return showPackageManagerDialog();
+            if (id === 'reset') return void resetSelectedPackageDisplayName();
+            if (id === 'delete') return void deleteSelectedOverlayPackage();
+        },
+    });
+}
 ```
 
-Delete the `#pkg-menu`-specific show/hide helpers. The existing `openPackageDialog` / `resetPackageName` / `deletePackageOverlay` functions stay.
+The trigger's `group` visibility was previously driven by `refreshPackageMenuState`. Its one remaining job — hiding `#pkg-control-group` when no package is selected — moves to the caller that currently invokes `refreshPackageMenuState()`. Grep for `refreshPackageMenuState(` and replace each call site with a plain `hideElement($('pkg-control-group'))` / `showElement($('pkg-control-group'))` based on `Boolean(deviceData?.selected_package)`. The factory handles everything else on open.
 
 ### Task 5.5: Migrate save menu to `PickleUI.dropdown`
 
@@ -2873,74 +2978,128 @@ Remove `#save-menu`, `#save-as-btn`, `#rename-btn`.
 
 - [ ] **Step 2: Wire**
 
-```javascript
-const saveMenuBtn = document.getElementById('save-menu-btn');
-window.PickleUI.dropdown(saveMenuBtn, {
-    placement: 'bottom-end',
-    items: [
-        { id: 'save-as', label: 'Save As...' },
-        { id: 'rename', label: 'Rename...' },
-    ],
-    onSelect: (id) => {
-        if (id === 'save-as') return saveConfigAs();
-        if (id === 'rename') return renameConfig();
-    },
-});
-```
+Delete `closeSaveMenu`, `toggleSaveMenu`, and `saveMenuBound`. Replace `wireSaveMenu`'s body — the existing `bindClick('save-menu-btn', ...)` toggle + `bindClick('save-as-btn', ...)` / `bindClick('rename-btn', ...)` + the `document.addEventListener('click'/'keydown', ...)` handlers all go away.
 
-Delete any `#save-menu`-specific show/hide code.
+Since save menu labels are static, use a static items array:
+
+```javascript
+let saveMenuDropdown = null;
+
+function wireSaveMenu() {
+    if (saveMenuDropdown) return;
+    const button = $('save-menu-btn');
+    if (!button) return;
+    saveMenuDropdown = window.PickleUI.dropdown(button, {
+        placement: 'bottom-end',
+        items: [
+            { id: 'save-as', label: 'Save As...' },
+            { id: 'rename', label: 'Rename...' },
+        ],
+        onSelect: (id) => {
+            if (id === 'save-as') return runShellAction('save_as');
+            if (id === 'rename') return runShellAction('rename');
+        },
+    });
+}
+```
 
 ### Task 5.6: Migrate part picker suggestion list to `PickleUI.dropdown`
 
 **Files:**
-- Modify: `frontend/static/app/06-shell.js` (or wherever the part-suggestions rendering lives)
+- Modify: `frontend/static/app/06-shell.js`
 - Modify: `frontend/index.html`
 
-- [ ] **Step 1: Replace the in-HTML `#part-suggestions` div with the dropdown primitive**
+**Scope note:** the current part picker implements keyboard navigation (ArrowUp/Down/Enter/Tab within the suggestion list). Per spec §Future Work (Lane B), custom-dropdown keyboard navigation is deferred — this migration loses ArrowUp/Down/Tab-to-accept behavior. Enter (submit-to-load) must keep working because it's on the input itself, not the suggestion list. Click-to-select autocomplete and the cached badge must survive via `item.meta`.
 
-Remove the inline `<div id="part-suggestions" class="part-suggestions" role="listbox" hidden>` and the CSS that styles it. The part picker now calls `PickleUI.dropdown` on focus / input, rebuilding items as the user types.
+- [ ] **Step 1: Delete the hidden `#part-suggestions` container and rewrite the helpers**
 
-```javascript
-let pickerDropdown = null;
-const partInput = document.getElementById('part-input');
-
-function refreshSuggestions(query) {
-    const items = matchParts(query).slice(0, 20).map((p) => ({ id: p, label: p }));
-    if (pickerDropdown) pickerDropdown.close();
-    pickerDropdown = window.PickleUI.dropdown(partInput, {
-        items,
-        placement: 'bottom-start',
-        onSelect: (id) => {
-            partInput.value = id;
-            triggerLoadDevice();
-        },
-    });
-    pickerDropdown.open();
-}
-
-partInput.addEventListener('input', () => refreshSuggestions(partInput.value));
-partInput.addEventListener('focus', () => refreshSuggestions(partInput.value));
-partInput.addEventListener('blur', () => setTimeout(() => pickerDropdown && pickerDropdown.close(), 100));
+Remove from `index.html` (line 25):
+```html
+<div id="part-suggestions" class="part-suggestions" role="listbox" hidden></div>
 ```
 
-Keep `matchParts()` / `triggerLoadDevice()` as they exist today — only the suggestion-rendering code is replaced.
+Also remove the `aria-controls="part-suggestions"` / `aria-expanded="false"` / `aria-autocomplete="list"` attributes from `#part-input` since the dropdown sets its own `aria-expanded`.
+
+In `06-shell.js`, delete these helpers and the module-scoped state they touch (`visiblePartSuggestions`, `activePartSuggestionIndex`):
+
+- `hidePartSuggestions`
+- `setActivePartSuggestion`
+- `applyPartSuggestion`
+- `renderPartSuggestions`
+- `updatePartSuggestions`
+- `handlePartPickerKeydown`
+- the existing `wirePartPicker`
+
+Keep `rankDeviceSuggestion` and `findPartSuggestions` (they ship the matching logic) and `cachedDevices` / `catalogDeviceNames` references.
+
+- [ ] **Step 2: Rewrite `wirePartPicker` to use `PickleUI.dropdown`**
+
+```javascript
+let partPickerDropdown = null;
+let lastPartSuggestions = [];
+
+function wirePartPicker() {
+    const input = $('part-input');
+    if (!input || partPickerDropdown) return;
+
+    const cachedLabel = appConfig.ui.partPicker.cachedLabel;
+    partPickerDropdown = window.PickleUI.dropdown(input, {
+        placement: 'bottom-start',
+        items: () => lastPartSuggestions.map((deviceName) => ({
+            id: deviceName,
+            label: deviceName,
+            meta: cachedDevices.has(deviceName) ? cachedLabel : undefined,
+        })),
+        onSelect: (deviceName) => {
+            if (!deviceName) return;
+            input.value = deviceName;
+            input.focus();
+        },
+    });
+
+    function refresh() {
+        const normalizedValue = input.value.toUpperCase();
+        if (normalizedValue !== input.value) input.value = normalizedValue;
+        lastPartSuggestions = findPartSuggestions(normalizedValue);
+        partPickerDropdown.close();
+        if (lastPartSuggestions.length) partPickerDropdown.open();
+    }
+
+    input.addEventListener('input', refresh);
+    input.addEventListener('focus', refresh);
+    input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            dismissWelcomeIntro({ persist: true });
+            void loadDevice();
+        }
+    });
+}
+```
+
+`findPartSuggestions` already applies `maxSuggestions` capping, so no extra slicing. The dropdown's click-outside handler replaces the old `document.addEventListener('click', ...)` close behavior, and Escape handling comes from the dropdown primitive itself.
 
 ### Task 5.7: Delete legacy dropdown CSS
 
 **Files:**
-- Modify: `frontend/static/styles/02-package-config.css`
 - Modify: `frontend/static/styles/04-shell-layout.css`
 
 - [ ] **Step 1: Remove rules**
 
-Delete `.package-menu`, `.package-menu-item`, `.save-menu`, `.save-menu-item`, `.part-suggestions`, `.part-suggestion-item` rules.
+Delete the `.package-menu`, `.package-menu-item`, `.save-menu`, `.save-menu-item`, `.part-suggestions`, `.part-suggestion`, `.part-suggestion-part`, `.part-suggestion-meta` rule blocks (including their `:hover`, `.is-active`, `[hidden]`, and `:disabled` variants). All currently live in `04-shell-layout.css`.
+
+Also remove the feature-level hook classes from `index.html`: `class="btn ... package-menu-btn"` → `class="btn ..."` on `#pkg-menu-btn`, and `class="btn ... save-menu-btn"` → `class="btn ..."` on `#save-menu-btn`. The dropdown primitive needs no feature-level hook.
 
 - [ ] **Step 2: Sanity gate**
 
+CSS — no surviving legacy class rules:
 ```bash
-rg '^\s*\.(package-menu|save-menu|part-suggestions)\b' frontend/static/styles/
+rg '\.(package-menu|save-menu|part-suggestion)' frontend/static/styles/
 ```
-Expected: zero matches.
+HTML — no legacy hook classes or container ids remain (trigger `#pkg-menu-btn` / `#save-menu-btn` are kept):
+```bash
+rg '\b(package-menu|save-menu|part-suggestions?)\b' frontend/index.html | rg -v '(pkg|save)-menu-btn'
+```
+Both expected: zero matches.
 
 ### Task 5.8: Commit PR #5
 
@@ -2956,14 +3115,14 @@ Run: `cargo tauri dev`. Exercise package menu, save menu, part picker autocomple
 - [ ] **Step 3: Commit**
 
 ```bash
-git add frontend/static/styles/components/dropdown-menu.css frontend/static/app/ui/dropdown.js frontend/tests/ui/dropdown.test.js frontend/static/style.css frontend/index.html frontend/static/app/ui/form.js frontend/static/app/06-shell.js frontend/static/styles/02-package-config.css frontend/static/styles/04-shell-layout.css
+git add frontend/static/styles/components/dropdown-menu.css frontend/static/app/ui/dropdown.js frontend/tests/ui/dropdown.test.js frontend/static/style.css frontend/index.html frontend/static/app/ui/form.js frontend/static/app/06-shell.js frontend/static/styles/04-shell-layout.css
 git commit -m "$(cat <<'EOF'
 Lane A: dropdown menu primitive
 
-- Add components/dropdown-menu.css + ui/dropdown.js with items/divider/danger + placement
+- Add components/dropdown-menu.css + ui/dropdown.js with items factory, item.meta, divider, danger, placement
 - Refactor ui/form.js (PickleUI.select) to delegate popover to PickleUI.dropdown
 - Migrate package actions menu, save menu, part-picker suggestions
-- Delete .package-menu, .save-menu, .part-suggestions CSS
+- Delete .package-menu, .save-menu, .part-suggestion CSS
 EOF
 )"
 ```
