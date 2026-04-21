@@ -149,8 +149,6 @@ function configDocumentDirty() {
 
 function refreshConfigDocumentUi() {
     const saveButton = $('save-btn');
-    const saveAsButton = $('save-as-btn');
-    const renameButton = $('rename-btn');
     const saveMenuButton = $('save-menu-btn');
     const hasDevice = Boolean(deviceData);
     const hasPath = Boolean(configDocument.path);
@@ -162,14 +160,6 @@ function refreshConfigDocumentUi() {
         saveButton.disabled = !hasDevice;
         saveButton.textContent = configFileUi.saveButton;
         saveButton.title = configFileUi.saveShortcutHint;
-    }
-    if (saveAsButton) {
-        saveAsButton.textContent = configFileUi.saveAsButton;
-        saveAsButton.disabled = !hasDevice;
-    }
-    if (renameButton) {
-        renameButton.textContent = configFileUi.renameButton;
-        renameButton.disabled = !hasPath;
     }
     if (saveMenuButton) {
         saveMenuButton.title = configFileUi.moreActionsTitle;

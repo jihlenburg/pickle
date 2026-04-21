@@ -79,9 +79,6 @@ test('index.html exposes the file-action controls in the expected order', () => 
         'save-action-group',
         'save-btn',
         'save-menu-btn',
-        'save-menu',
-        'save-as-btn',
-        'rename-btn',
     ];
 
     for (const id of requiredIds) {

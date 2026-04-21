@@ -17,7 +17,7 @@
 
 ## Backlog
 
-- Execute Lane A design-system-unification PRs #2–#8 (button → form → tooltip+status+toast → dropdown → tab strip → empty state → modal), per `docs/superpowers/plans/2026-04-19-lane-a-design-system-unification.md`. PR #1 scaffolding + tokens is DONE.
+- Execute Lane A design-system-unification PRs #6–#8 (tab strip → empty state → modal), per `docs/superpowers/plans/2026-04-19-lane-a-design-system-unification.md`. PRs #1–#5 are DONE.
 - Lanes C (feedback & safety policy — toasts, progress, diff-before-apply), B (keyboard nav, undo/redo UI, ARIA polish), D (view density & clarity — Pin/Peripheral legends and filters) — queued after Lane A lands.
 - Continue separating concerns in `src-tauri/src/parser/edc_parser.rs`.
 - Add deeper dsPIC33AK-MPS-specific code generation support beyond the shared AK clock/CLC layer.

@@ -1,5 +1,9 @@
 # Logbook
 
+## 2026-04-21
+
+- Lane A PR #5: dropdown primitive landed. Migrated package menu, save menu, part picker. Removed ad-hoc menu markup and CSS.
+
 ## 2026-04-19
 
 - Lane A PR #4: feedback-atoms primitive trio landed (tooltip, status bar, toast). Captured [title] + [data-tip], replaced keyword-sniffing with PickleUI.status(text, tone), added PickleUI.toast with stack limit 5.

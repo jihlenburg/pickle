@@ -582,11 +582,8 @@ function refreshPackageManagerUi() {
     button.title = appConfig.ui.packageManager.menuButtonTitle;
     showElement(group, 'inline-flex');
 
-    // Keep the shell-owned package menu state in sync with backend-driven
-    // package reloads and overlay updates.
-    if (typeof refreshPackageMenuState === 'function') {
-        refreshPackageMenuState();
-    }
+    // Dropdown factory rebuilds menu items on each open from current
+    // overlay/override state, so no eager sync is needed here.
 
     const dialog = $('package-dialog');
     if (dialog?.open) {

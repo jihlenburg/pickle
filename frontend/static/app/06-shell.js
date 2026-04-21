@@ -10,12 +10,11 @@
 let cachedDevices = new Set();
 /** @type {string[]} Full device catalog used by the custom part picker suggestions. */
 let catalogDeviceNames = [];
-/** @type {string[]} Currently visible suggestion strings in the part picker popup. */
-let visiblePartSuggestions = [];
-let activePartSuggestionIndex = -1;
 let shellEventsBound = false;
-let saveMenuBound = false;
-let packageMenuBound = false;
+let saveMenuDropdown = null;
+let packageMenuDropdown = null;
+let partPickerDropdown = null;
+let lastPartSuggestions = [];
 let welcomeIntroBound = false;
 const shellActionHandlers = {
     load: async () => {
@@ -121,7 +120,6 @@ function focusPartSearchFromWelcome() {
     }
     input.focus();
     input.select();
-    updatePartSuggestions();
 }
 
 function loadWelcomeSample(partNumber) {
@@ -132,7 +130,6 @@ function loadWelcomeSample(partNumber) {
 
     input.value = String(partNumber).trim().toUpperCase();
     dismissWelcomeIntro({ persist: true });
-    updatePartSuggestions();
     void loadDevice();
 }
 
@@ -226,53 +223,6 @@ function wireWelcomeIntro() {
     });
 }
 
-function hidePartSuggestions() {
-    const input = $('part-input');
-    const popup = $('part-suggestions');
-    if (!input || !popup) {
-        return;
-    }
-
-    popup.hidden = true;
-    popup.innerHTML = '';
-    visiblePartSuggestions = [];
-    activePartSuggestionIndex = -1;
-    input.setAttribute('aria-expanded', 'false');
-    input.removeAttribute('aria-activedescendant');
-}
-
-function setActivePartSuggestion(index) {
-    const input = $('part-input');
-    const popup = $('part-suggestions');
-    if (!input || !popup || !visiblePartSuggestions.length) {
-        return;
-    }
-
-    const clampedIndex = Math.max(0, Math.min(index, visiblePartSuggestions.length - 1));
-    activePartSuggestionIndex = clampedIndex;
-
-    popup.querySelectorAll('.part-suggestion').forEach((button, buttonIndex) => {
-        const isActive = buttonIndex === clampedIndex;
-        button.classList.toggle('is-active', isActive);
-        button.setAttribute('aria-selected', String(isActive));
-        if (isActive) {
-            input.setAttribute('aria-activedescendant', button.id);
-            button.scrollIntoView({ block: 'nearest' });
-        }
-    });
-}
-
-function applyPartSuggestion(deviceName) {
-    const input = $('part-input');
-    if (!input || !deviceName) {
-        return;
-    }
-
-    input.value = deviceName;
-    hidePartSuggestions();
-    input.focus();
-}
-
 function rankDeviceSuggestion(deviceName, query) {
     const matchIndex = deviceName.indexOf(query);
     if (matchIndex < 0) {
@@ -304,281 +254,95 @@ function findPartSuggestions(query) {
         .map((entry) => entry.deviceName);
 }
 
-function renderPartSuggestions(matches) {
+function refreshPartPickerSuggestions() {
     const input = $('part-input');
-    const popup = $('part-suggestions');
-    if (!input || !popup) {
-        return;
-    }
-
-    if (!matches.length) {
-        hidePartSuggestions();
-        return;
-    }
-
-    visiblePartSuggestions = matches;
-    popup.innerHTML = '';
-
-    matches.forEach((deviceName, index) => {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.id = `part-suggestion-${index}`;
-        button.className = 'part-suggestion';
-        button.setAttribute('role', 'option');
-        button.dataset.part = deviceName;
-
-        const partLabel = document.createElement('span');
-        partLabel.className = 'part-suggestion-part';
-        partLabel.textContent = deviceName;
-        button.appendChild(partLabel);
-
-        if (cachedDevices.has(deviceName)) {
-            const metaLabel = document.createElement('span');
-            metaLabel.className = 'part-suggestion-meta';
-            metaLabel.textContent = appConfig.ui.partPicker.cachedLabel;
-            button.appendChild(metaLabel);
-        }
-
-        popup.appendChild(button);
-    });
-
-    popup.hidden = false;
-    input.setAttribute('aria-expanded', 'true');
-    setActivePartSuggestion(0);
-}
-
-function updatePartSuggestions() {
-    const input = $('part-input');
-    if (!input) {
-        return;
-    }
-
+    if (!input || !partPickerDropdown) return;
     const normalizedValue = input.value.toUpperCase();
-    if (normalizedValue !== input.value) {
-        input.value = normalizedValue;
-    }
-
-    renderPartSuggestions(findPartSuggestions(normalizedValue));
-}
-
-function handlePartPickerKeydown(event) {
-    const hasSuggestions = visiblePartSuggestions.length > 0;
-
-    if (event.key === 'ArrowDown') {
-        event.preventDefault();
-        if (!hasSuggestions) {
-            updatePartSuggestions();
-            return;
-        }
-        setActivePartSuggestion((activePartSuggestionIndex + 1) % visiblePartSuggestions.length);
-        return;
-    }
-
-    if (event.key === 'ArrowUp') {
-        event.preventDefault();
-        if (!hasSuggestions) {
-            updatePartSuggestions();
-            return;
-        }
-        setActivePartSuggestion(
-            (activePartSuggestionIndex - 1 + visiblePartSuggestions.length) % visiblePartSuggestions.length
-        );
-        return;
-    }
-
-    if (event.key === 'Escape') {
-        if (hasSuggestions) {
-            event.preventDefault();
-            hidePartSuggestions();
-        }
-        return;
-    }
-
-    if (event.key === 'Tab' && hasSuggestions && activePartSuggestionIndex >= 0) {
-        applyPartSuggestion(visiblePartSuggestions[activePartSuggestionIndex]);
-        return;
-    }
-
-    if (event.key === 'Enter') {
-        if (hasSuggestions && activePartSuggestionIndex >= 0) {
-            event.preventDefault();
-            applyPartSuggestion(visiblePartSuggestions[activePartSuggestionIndex]);
-        }
-        dismissWelcomeIntro({ persist: true });
-        void loadDevice();
-    }
+    if (normalizedValue !== input.value) input.value = normalizedValue;
+    lastPartSuggestions = findPartSuggestions(normalizedValue);
+    partPickerDropdown.close();
+    if (lastPartSuggestions.length) partPickerDropdown.open();
 }
 
 function wirePartPicker() {
     const input = $('part-input');
-    const popup = $('part-suggestions');
-    if (!input || !popup) {
-        return;
-    }
+    if (!input || partPickerDropdown) return;
 
-    input.addEventListener('input', () => {
-        updatePartSuggestions();
-    });
-    input.addEventListener('focus', () => {
-        updatePartSuggestions();
-    });
-    input.addEventListener('keydown', handlePartPickerKeydown);
-
-    popup.addEventListener('mousedown', (event) => {
-        event.preventDefault();
-    });
-    popup.addEventListener('click', (event) => {
-        const button = event.target.closest('.part-suggestion');
-        if (!button?.dataset.part) {
-            return;
-        }
-        applyPartSuggestion(button.dataset.part);
+    const cachedLabel = appConfig.ui.partPicker.cachedLabel;
+    partPickerDropdown = window.PickleUI.dropdown(input, {
+        placement: 'bottom-start',
+        items: () => lastPartSuggestions.map((deviceName) => ({
+            id: deviceName,
+            label: deviceName,
+            meta: cachedDevices.has(deviceName) ? cachedLabel : undefined,
+        })),
+        onSelect: (deviceName) => {
+            if (!deviceName) return;
+            input.value = deviceName;
+            input.focus();
+        },
     });
 
-    document.addEventListener('click', (event) => {
-        if (!event.target.closest('.part-picker-field')) {
-            hidePartSuggestions();
+    input.addEventListener('input', refreshPartPickerSuggestions);
+    input.addEventListener('focus', refreshPartPickerSuggestions);
+    input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            dismissWelcomeIntro({ persist: true });
+            void loadDevice();
         }
     });
-}
-
-function closeSaveMenu() {
-    const menu = $('save-menu');
-    const button = $('save-menu-btn');
-    if (!menu || !button) {
-        return;
-    }
-    menu.hidden = true;
-    button.setAttribute('aria-expanded', 'false');
-}
-
-function toggleSaveMenu() {
-    const menu = $('save-menu');
-    const button = $('save-menu-btn');
-    if (!menu || !button) {
-        return;
-    }
-    const willOpen = menu.hidden;
-    menu.hidden = !willOpen;
-    button.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
 }
 
 function wireSaveMenu() {
-    if (saveMenuBound) {
-        return;
-    }
-    saveMenuBound = true;
-
-    bindClick('save-menu-btn', (event) => {
-        event.stopPropagation();
-        toggleSaveMenu();
-    });
-    bindClick('save-as-btn', () => {
-        closeSaveMenu();
-        runShellAction('save_as');
-    });
-    bindClick('rename-btn', () => {
-        closeSaveMenu();
-        runShellAction('rename');
-    });
-
-    document.addEventListener('click', (event) => {
-        if (!event.target.closest('.save-split')) {
-            closeSaveMenu();
-        }
-    });
-    document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') {
-            closeSaveMenu();
-        }
+    if (saveMenuDropdown) return;
+    const button = $('save-menu-btn');
+    if (!button) return;
+    const configFileUi = appConfig.ui.configFiles;
+    saveMenuDropdown = window.PickleUI.dropdown(button, {
+        placement: 'bottom-end',
+        items: [
+            { id: 'save-as', label: configFileUi.saveAsButton },
+            { id: 'rename', label: configFileUi.renameButton },
+        ],
+        onSelect: (id) => {
+            if (id === 'save-as') return runShellAction('save_as');
+            if (id === 'rename') return runShellAction('rename');
+        },
     });
 }
 
 function closePackageMenu() {
-    const menu = $('pkg-menu');
-    const button = $('pkg-menu-btn');
-    if (!menu || !button) {
-        return;
-    }
-
-    menu.hidden = true;
-    button.setAttribute('aria-expanded', 'false');
+    packageMenuDropdown?.close();
 }
 
-function refreshPackageMenuState() {
-    const group = $('pkg-control-group');
-    const menu = $('pkg-menu');
+function wirePackageMenu() {
+    if (packageMenuDropdown) return;
     const button = $('pkg-menu-btn');
-    const editButton = $('pkg-edit-name-btn');
-    const resetButton = $('pkg-reset-name-btn');
-    const deleteButton = $('pkg-delete-btn');
-    if (!group || !menu || !button || !editButton || !resetButton || !deleteButton) {
-        return;
-    }
-
-    const hasPackage = Boolean(deviceData?.selected_package);
-    if (!hasPackage) {
-        closePackageMenu();
-        hideElement(group);
-        return;
-    }
+    if (!button) return;
 
     const ui = appConfig.ui.packageManager;
     button.textContent = ui.menuButtonLabel;
     button.title = ui.menuButtonTitle;
     button.setAttribute('aria-label', ui.menuButtonTitle);
-    editButton.textContent = ui.menuEditLabel;
-    resetButton.textContent = ui.menuResetLabel;
-    deleteButton.textContent = ui.menuDeleteLabel;
-    resetButton.disabled = !hasPackageDisplayNameOverride(deviceData.selected_package, selectedPackageMeta());
-    deleteButton.hidden = !selectedPackageIsOverlay();
-    deleteButton.disabled = !selectedPackageIsOverlay();
-}
 
-function wirePackageMenu() {
-    if (packageMenuBound) {
-        return;
-    }
-
-    const menu = $('pkg-menu');
-    const button = $('pkg-menu-btn');
-    if (!menu || !button) {
-        return;
-    }
-
-    packageMenuBound = true;
-    refreshPackageMenuState();
-
-    button.addEventListener('click', (event) => {
-        event.stopPropagation();
-        refreshPackageMenuState();
-        const nextOpen = button.getAttribute('aria-expanded') !== 'true';
-        menu.hidden = !nextOpen;
-        button.setAttribute('aria-expanded', String(nextOpen));
-    });
-
-    $('pkg-edit-name-btn')?.addEventListener('click', () => {
-        closePackageMenu();
-        showPackageManagerDialog();
-    });
-    $('pkg-reset-name-btn')?.addEventListener('click', () => {
-        closePackageMenu();
-        void resetSelectedPackageDisplayName();
-    });
-    $('pkg-delete-btn')?.addEventListener('click', () => {
-        closePackageMenu();
-        void deleteSelectedOverlayPackage();
-    });
-
-    document.addEventListener('click', (event) => {
-        if (!event.target.closest('.package-split')) {
-            closePackageMenu();
-        }
-    });
-    document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') {
-            closePackageMenu();
-        }
+    packageMenuDropdown = window.PickleUI.dropdown(button, {
+        placement: 'bottom-end',
+        items: () => {
+            const items = [{ id: 'edit', label: ui.menuEditLabel }];
+            if (hasPackageDisplayNameOverride(deviceData?.selected_package, selectedPackageMeta())) {
+                items.push({ id: 'reset', label: ui.menuResetLabel });
+            }
+            if (selectedPackageIsOverlay()) {
+                items.push({ divider: true });
+                items.push({ id: 'delete', label: ui.menuDeleteLabel, danger: true });
+            }
+            return items;
+        },
+        onSelect: (id) => {
+            if (id === 'edit') return showPackageManagerDialog();
+            if (id === 'reset') return void resetSelectedPackageDisplayName();
+            if (id === 'delete') return void deleteSelectedOverlayPackage();
+        },
     });
 }
 
@@ -604,7 +368,7 @@ function wireShellEventListeners() {
     wirePartPicker();
 
     $('pkg-select')?.addEventListener('change', (event) => {
-        closePackageMenu();
+        packageMenuDropdown?.close();
         void loadDevice(event.target.value, { preserveState: true, markDirty: true });
     });
 
@@ -680,7 +444,7 @@ function populateDeviceList() {
         catalogDeviceNames = Array.isArray(data.devices) ? data.devices.slice() : [];
 
         if (document.activeElement === $('part-input')) {
-            updatePartSuggestions();
+            refreshPartPickerSuggestions();
         }
 
         updateIndexBadge(data.total, data.cached_count);

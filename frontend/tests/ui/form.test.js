@@ -7,9 +7,11 @@ const vm = require('node:vm');
 function loadForm() {
     const namespace = fs.readFileSync(
         path.join(__dirname, '..', '..', 'static', 'app', 'ui', '00-namespace.js'), 'utf8');
+    const dropdown = fs.readFileSync(
+        path.join(__dirname, '..', '..', 'static', 'app', 'ui', 'dropdown.js'), 'utf8');
     const form = fs.readFileSync(
         path.join(__dirname, '..', '..', 'static', 'app', 'ui', 'form.js'), 'utf8');
-    return namespace + '\n' + form;
+    return namespace + '\n' + dropdown + '\n' + form;
 }
 
 function makeDom() {

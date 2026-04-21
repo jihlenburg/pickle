@@ -21,19 +21,14 @@
             <div class="part-control">
                 <div class="part-picker">
                     <div class="part-picker-field">
-                        <input type="text" id="part-input" class="input" placeholder="Part number (e.g. DSPIC33CK64MP102)" autocomplete="off" spellcheck="false" aria-autocomplete="list" aria-controls="part-suggestions" aria-expanded="false">
-                        <div id="part-suggestions" class="part-suggestions" role="listbox" hidden></div>
+                        <input type="text" id="part-input" class="input" placeholder="Part number (e.g. DSPIC33CK64MP102)" autocomplete="off" spellcheck="false">
                     </div>
                     <button id="load-btn" class="btn btn-primary">Load</button>
                     <div id="pkg-control-group" class="package-split" style="display:none">
-                        <select id="pkg-select" aria-label="Package">
-                        </select>
-                        <button id="pkg-menu-btn" type="button" class="btn btn-icon btn-ghost package-menu-btn" aria-haspopup="menu" aria-expanded="false" aria-label="Package actions" title="Package actions">...</button>
-                        <div id="pkg-menu" class="package-menu" hidden>
-                            <button id="pkg-edit-name-btn" type="button" class="btn btn-ghost btn-sm package-menu-item">Edit Name...</button>
-                            <button id="pkg-reset-name-btn" type="button" class="btn btn-ghost btn-sm package-menu-item">Reset Name</button>
-                            <button id="pkg-delete-btn" type="button" class="btn btn-ghost btn-sm package-menu-item">Delete Overlay</button>
-                        </div>
+                        <select id="pkg-select" aria-label="Package"></select>
+                        <button id="pkg-menu-btn" type="button" class="btn btn-icon btn-ghost"
+                                aria-haspopup="menu" aria-expanded="false" aria-label="Package actions"
+                                title="Package actions">...</button>
                     </div>
                 </div>
             </div>
@@ -43,12 +38,10 @@
                 <button id="load-btn-file" class="btn btn-secondary">Open Config</button>
                 <div id="save-action-group" class="save-action-group" style="display:none">
                     <div class="save-split">
-                        <button id="save-btn" class="btn btn-primary" title="Save current configuration (Ctrl+S)">Save Config</button>
-                        <button id="save-menu-btn" type="button" class="btn btn-icon btn-primary save-menu-btn" aria-haspopup="menu" aria-expanded="false" title="More save actions">▾</button>
-                        <div id="save-menu" class="save-menu" hidden>
-                            <button id="save-as-btn" type="button" class="btn btn-ghost btn-sm save-menu-item">Save As...</button>
-                            <button id="rename-btn" type="button" class="btn btn-ghost btn-sm save-menu-item">Rename...</button>
-                        </div>
+                        <button id="save-btn" class="btn btn-primary"
+                                title="Save current configuration (Ctrl+S)">Save Config</button>
+                        <button id="save-menu-btn" type="button" class="btn btn-icon btn-primary"
+                                aria-haspopup="menu" aria-expanded="false" title="More save actions">▾</button>
                     </div>
                 </div>
             </div>
@@ -370,6 +363,7 @@
     <script src="static/pin_descriptions.js"></script>
     <script src="static/app/model.js"></script>
     <script src="static/app/ui/00-namespace.js"></script>
+    <script src="static/app/ui/dropdown.js"></script>
     <script src="static/app/ui/form.js"></script>
     <script src="static/app/ui/tooltip.js"></script>
     <script src="static/app/ui/status-bar.js"></script>
