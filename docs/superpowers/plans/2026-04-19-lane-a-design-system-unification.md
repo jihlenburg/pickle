@@ -3643,7 +3643,7 @@ EOF
 
 ## PR #7 — Empty state primitive
 
-Adds `components/empty-state.css`. No JS. Migrates all four placeholder empties (`#device-info-empty`, `#fuses-empty`, `#clc-empty`, `#verify-empty` inside `#verify-output`).
+Adds `components/empty-state.css`. CSS-led, but also touches two JS files: `07-verification-render.js` (rebuilds the post-verify empty on every render) and `05-clc-designer.js` (writes state-specific copy into `#clc-empty`). Migrates all four placeholder empties (`#device-info-empty`, `#fuses-empty`, `#clc-empty`, `#verify-empty` inside `#verify-output`).
 
 ### Task 7.1: Write `components/empty-state.css`
 
@@ -3740,8 +3740,11 @@ Adds `components/empty-state.css`. No JS. Migrates all four placeholder empties 
 
 **Files:**
 - Modify: `frontend/index.html`
+- Modify: `frontend/static/app/05-clc-designer.js`
 
-- [ ] **Step 1: Rewrite**
+`renderClcDesigner` currently calls `empty.textContent = clcEmptyMessage()` at two spots, which would destroy the new structured children (icon/title/body). And `clcEmptyMessage()` returns three different strings depending on state (no device / no CLC / CLC unparsed), so a single static title hardcoded in the HTML would misdescribe two of those states. Refactor the message helper to return `{title, body}` and have the render function write each into its matching `.empty-state-*` child.
+
+- [ ] **Step 1: Rewrite the HTML scaffold**
 
 ```html
 <div id="clc-empty" class="empty-state">
@@ -3749,6 +3752,52 @@ Adds `components/empty-state.css`. No JS. Migrates all four placeholder empties 
     <h3 class="empty-state-title">No device loaded</h3>
     <p class="empty-state-body">Load a device with CLC peripherals to configure logic modules.</p>
 </div>
+```
+
+The title/body text here is the *default* for the "no device" state — `renderClcDesigner` will overwrite it on every render.
+
+- [ ] **Step 2: Refactor `clcEmptyMessage()` to return `{title, body}`**
+
+`frontend/static/app/05-clc-designer.js` near line 49:
+
+```javascript
+function clcEmptyMessage() {
+    if (!deviceData) {
+        return {
+            title: 'No device loaded',
+            body: 'Load a device to configure CLC modules.',
+        };
+    }
+    if (!deviceHasClc()) {
+        return {
+            title: 'No CLC peripheral',
+            body: 'This device has no CLC peripheral. The CLC editor and datasheet CLC lookup are disabled for this part.',
+        };
+    }
+    return {
+        title: 'CLC sources unavailable',
+        body: 'CLC input sources are not available yet. Verify the datasheet to import them if needed.',
+    };
+}
+```
+
+- [ ] **Step 3: Update `renderClcDesigner` to write into the structured children**
+
+`frontend/static/app/05-clc-designer.js` near line 100 — replace both `empty.textContent = clcEmptyMessage();` sites. The second one (line 114) runs right after the empty is hidden, so it's dead weight — delete it entirely. The first one becomes:
+
+```javascript
+if (!deviceData || !deviceHasClc()) {
+    designer.style.display = 'none';
+    empty.style.display = '';
+    const msg = clcEmptyMessage();
+    empty.querySelector('.empty-state-title').textContent = msg.title;
+    empty.querySelector('.empty-state-body').textContent = msg.body;
+    return;
+}
+
+designer.style.display = '';
+empty.style.display = 'none';
+syncClcDesignerState();
 ```
 
 ### Task 7.5: Migrate verify empty
@@ -3781,11 +3830,12 @@ Edit each occurrence.
 
 **Files:**
 - Modify: `frontend/static/styles/03-verify-clc.css`
-- Modify: `frontend/static/styles/04-shell-layout.css`
 
-- [ ] **Step 1: Remove rules**
+Only `.verify-empty` currently has a CSS rule (at `03-verify-clc.css:43-49`). `.clc-empty`, `.device-info-empty`, and `.fuses-empty` were never CSS selectors — just id targets. Keep them in the sanity-gate regex anyway to catch future strays.
 
-Delete every rule matching `.verify-empty`, `.clc-empty`, `.device-info-empty`, `.fuses-empty`.
+- [ ] **Step 1: Remove the `.verify-empty` rule**
+
+Delete the entire `.verify-empty { ... }` block from `03-verify-clc.css`.
 
 - [ ] **Step 2: Sanity gate**
 
@@ -3808,13 +3858,14 @@ Run: `cargo tauri dev`. Open the app fresh (no device). All four empty states sh
 - [ ] **Step 3: Commit**
 
 ```bash
-git add frontend/static/styles/components/empty-state.css frontend/static/style.css frontend/index.html frontend/static/app/07-verification-render.js frontend/static/styles/03-verify-clc.css frontend/static/styles/04-shell-layout.css
+git add frontend/static/styles/components/empty-state.css frontend/static/style.css frontend/index.html frontend/static/app/05-clc-designer.js frontend/static/app/07-verification-render.js frontend/static/styles/03-verify-clc.css
 git commit -m "$(cat <<'EOF'
 Lane A: empty state primitive
 
 - Add components/empty-state.css (dashed border, icon, title, body, action slot)
 - Migrate device-info, fuses, clc, verification empty states to .empty-state
-- Delete .verify-empty, .clc-empty, .device-info-empty, .fuses-empty CSS
+- Refactor clcEmptyMessage() to {title, body} so state copy maps to the structured scaffold
+- Delete the legacy .verify-empty CSS rule
 EOF
 )"
 ```
