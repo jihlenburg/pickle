@@ -78,3 +78,19 @@ test('PickleUI.tabStrip.activate can programmatically select', () => {
     assert.equal(container.children[1].classList.contains('is-active'), true);
     assert.deepEqual(seen, []);
 });
+
+test('PickleUI.tabStrip ignores clicks on is-disabled items', () => {
+    const source = load();
+    const container = makeContainer(['a', 'b', 'c'], 'a');
+    container.children[2].classList.add('is-disabled');
+    const seen = [];
+    const sandbox = { window: {} };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox);
+
+    sandbox.window.PickleUI.tabStrip(container, { onChange: (id) => seen.push(id) });
+    container.children[2].click();
+    assert.deepEqual(seen, []);
+    assert.equal(container.children[0].classList.contains('is-active'), true);
+    assert.equal(container.children[2].classList.contains('is-active'), false);
+});

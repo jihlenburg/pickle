@@ -14,6 +14,8 @@ let shellEventsBound = false;
 let saveMenuDropdown = null;
 let packageMenuDropdown = null;
 let partPickerDropdown = null;
+let rightTabsHandle = null;
+let viewToggleHandle = null;
 let lastPartSuggestions = [];
 let welcomeIntroBound = false;
 const shellActionHandlers = {
@@ -384,11 +386,11 @@ function wireShellEventListeners() {
         }
     });
 
-    window.PickleUI.tabStrip(document.getElementById('right-tabs'), {
+    rightTabsHandle = window.PickleUI.tabStrip(document.getElementById('right-tabs'), {
         onChange: (id) => switchRightTab(id),
     });
 
-    window.PickleUI.tabStrip(document.getElementById('view-toggle'), {
+    viewToggleHandle = window.PickleUI.tabStrip(document.getElementById('view-toggle'), {
         onChange: (id) => switchView(id),
     });
 }
@@ -403,9 +405,7 @@ function switchRightTab(tabName) {
         return;
     }
 
-    document.querySelectorAll('#right-tabs .tab-strip-item').forEach((tab) => {
-        tab.classList.toggle('is-active', tab.dataset.tabId === tabName);
-    });
+    rightTabsHandle?.activate(tabName, { silent: true });
     document.querySelectorAll('.right-tab-content').forEach((content) => {
         content.classList.toggle('active', content.dataset.tabId === tabName);
     });
@@ -415,9 +415,7 @@ function switchRightTab(tabName) {
 function switchView(viewName) {
     activeView = viewName;
 
-    document.querySelectorAll('#view-toggle .tab-strip-item').forEach((button) => {
-        button.classList.toggle('is-active', button.dataset.tabId === viewName);
-    });
+    viewToggleHandle?.activate(viewName, { silent: true });
 
     const pinContainer = $('pin-view-container');
     const periphContainer = $('periph-view-container');

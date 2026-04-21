@@ -44,13 +44,7 @@
             if (changed && !silent) onChange(id);
         }
 
-        return {
-            activate,
-            current() {
-                const match = items.find((i) => i.classList.contains('is-active'));
-                return match ? match.dataset.tabId : null;
-            },
-        };
+        return { activate };
     }
 
     PickleUI.tabStrip = tabStrip;
