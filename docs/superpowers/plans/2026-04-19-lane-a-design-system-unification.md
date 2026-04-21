@@ -3409,10 +3409,15 @@ Expected: PASS.
 ### Task 6.3: Migrate right-panel 5-tab strip
 
 **Files:**
-- Modify: `frontend/index.html`
-- Modify: `frontend/static/app/06-shell.js` (or wherever right-tab click wiring lives)
+- Modify: `frontend/index.html` (tab buttons + 5 content-pane wrappers)
+- Modify: `frontend/static/app/06-shell.js` (click wiring + `switchRightTab` body, currently at lines 387-412)
+- Modify: `frontend/static/app/05-clc-designer.js` (CLC-disable selector, currently at lines 60 and 70)
+
+> **Rename note:** The shell's existing helper is `switchRightTab(tabName)` — NOT `showRightTabContent`. Both the buttons and their matching content panes currently use `data-tab`; this task renames that attribute to `data-tab-id` on both sides so the tab-strip primitive's `dataset.tabId` lookups work uniformly with the other strips in Tasks 6.4 and 6.5. The `.right-tab-content` class itself and its `.right-tab-content.active { display: flex; }` display rule stay (they are not part of the primitive).
 
 - [ ] **Step 1: Update markup**
+
+Swap button classes (`right-tab active` → `tab-strip-item is-active`) and rename `data-tab` → `data-tab-id` on the five buttons:
 
 ```html
 <div class="tab-strip" id="right-tabs" role="tablist">
@@ -3424,27 +3429,62 @@ Expected: PASS.
 </div>
 ```
 
-Also update the content panel selectors from `[data-tab=info]` to match — keep the attribute name stable by renaming these content panes to `[data-tab-id]` as well. Update the existing show/hide helper that matches tab buttons to tab content by attribute.
+Rename `data-tab` → `data-tab-id` on the five `.right-tab-content` panels as well (lines 119, 124, 162, 195, 209 of index.html). Keep their `.right-tab-content` class; only the attribute changes.
 
-- [ ] **Step 2: Wire tab strip in shell**
+- [ ] **Step 2: Replace click-binding block and update `switchRightTab`**
 
-Find the existing `.right-tab` click-binding block and replace with:
+At `06-shell.js:387-389` replace the existing click-binding loop with:
 
 ```javascript
-const tabs = window.PickleUI.tabStrip(document.getElementById('right-tabs'), {
-    onChange: (id) => showRightTabContent(id),
+window.PickleUI.tabStrip(document.getElementById('right-tabs'), {
+    onChange: (id) => switchRightTab(id),
 });
 ```
 
-`showRightTabContent(id)` is the existing helper that flips `[data-tab-id="<id>"] .is-active`. Update the disabled-tab handling (e.g. CLC tab disable) to call `document.querySelector('[data-tab-id=clc]').classList.add('is-disabled')` instead of the old `.disabled` state.
+Rewrite the `switchRightTab` body (currently `06-shell.js:397-412`) so the button-state toggle reads the new class/attribute pair. Content panes still flip their `.active` class:
+
+```javascript
+function switchRightTab(tabName) {
+    const targetTab = document.querySelector(`.tab-strip-item[data-tab-id="${tabName}"]`);
+    if (targetTab?.disabled || targetTab?.classList.contains('is-disabled')) {
+        if (tabName === 'clc' && typeof setStatus === 'function') {
+            setStatus('This device has no CLC peripheral.', 'idle');
+        }
+        return;
+    }
+
+    document.querySelectorAll('#right-tabs .tab-strip-item').forEach((tab) => {
+        tab.classList.toggle('is-active', tab.dataset.tabId === tabName);
+    });
+    document.querySelectorAll('.right-tab-content').forEach((content) => {
+        content.classList.toggle('active', content.dataset.tabId === tabName);
+    });
+}
+```
+
+Update the CLC-disable lookup in `05-clc-designer.js` (currently `.right-tab[data-tab="clc"]` at line 60 and `.active` class check at line 70):
+
+```javascript
+const tab = document.querySelector('.tab-strip-item[data-tab-id="clc"]');
+// ...
+if (disabled && tab.classList.contains('is-active') && typeof switchRightTab === 'function') {
+    switchRightTab('info');
+}
+```
+
+`07-verification.js` calls `switchRightTab('verify'|'code')` by name — no changes needed there.
 
 ### Task 6.4: Migrate Pin/Peripheral view toggle (segmented)
 
 **Files:**
-- Modify: `frontend/index.html`
-- Modify: `frontend/static/app/02-view-model.js` or wherever view-toggle click wiring lives
+- Modify: `frontend/index.html` (view-toggle markup at lines 87-88)
+- Modify: `frontend/static/app/06-shell.js` (click wiring at lines 391-393 + `switchView` body at lines 415-435)
+
+> **Rename note:** The shell's existing helper is `switchView(viewName)` — NOT `setView` — and it lives in `06-shell.js`, not `02-view-model.js`. The buttons currently carry `btn btn-sm btn-ghost view-toggle-btn` classes plus a `data-view` attribute; this task drops all four of those classes (the segmented primitive styles them now) and renames `data-view` → `data-tab-id`.
 
 - [ ] **Step 1: Update markup**
+
+Replace the two buttons' markup (lines 87-88 of index.html):
 
 ```html
 <div id="view-toggle" class="tab-strip tab-strip-segmented" style="display:none" role="tablist">
@@ -3453,62 +3493,121 @@ const tabs = window.PickleUI.tabStrip(document.getElementById('right-tabs'), {
 </div>
 ```
 
-- [ ] **Step 2: Wire**
+- [ ] **Step 2: Wire the primitive and rewrite `switchView`**
 
-Replace the existing `.view-toggle-btn` click handler block with:
+Replace the click-binding loop at `06-shell.js:391-393` with:
 
 ```javascript
 window.PickleUI.tabStrip(document.getElementById('view-toggle'), {
-    onChange: (id) => setView(id),
+    onChange: (id) => switchView(id),
 });
 ```
 
-`setView(id)` is the existing helper.
+Rewrite the `switchView` body (currently `06-shell.js:415-435`) so the button-state toggle reads the new class/attribute pair. The container/body rendering logic (`activeView`, pin vs peripheral containers, `renderPeripheralView` / `renderDevice` calls) stays unchanged:
+
+```javascript
+function switchView(viewName) {
+    activeView = viewName;
+
+    document.querySelectorAll('#view-toggle .tab-strip-item').forEach((button) => {
+        button.classList.toggle('is-active', button.dataset.tabId === viewName);
+    });
+
+    const pinContainer = $('pin-view-container');
+    const periphContainer = $('periph-view-container');
+
+    if (viewName === 'peripheral') {
+        hideElement(pinContainer);
+        showElement(periphContainer);
+        renderPeripheralView();
+        return;
+    }
+
+    hideElement(periphContainer);
+    showElement(pinContainer);
+    renderDevice();
+}
+```
 
 ### Task 6.5: Migrate CLC module tab strip
 
 **Files:**
-- Modify: `frontend/static/app/05-clc-designer.js`
+- Modify: `frontend/static/app/05-clc-designer.js` (`renderClcModuleTabs` at lines 127-147)
 
-- [ ] **Step 1: Update the render function**
+> **Rename note:** There is no `selectModule` helper. `renderClcModuleTabs` currently attaches a per-button click handler inline (`clcActiveModule = i; renderClcDesigner();`); this task moves that body into the primitive's `onChange`. Module ids are 1-indexed (CLC1-CLC6) in the current code and remain so post-migration. The `.clc-tab-dot` configured-state indicator stays — only the container/button classes change.
 
-In the function that builds `.clc-module-tabs` markup, replace the current per-tab `.clc-module-tab` class with `.tab-strip-item` and the container class with `tab-strip`:
+- [ ] **Step 1: Rewrite `renderClcModuleTabs`**
+
+Replace the whole function body (`05-clc-designer.js:127-147`):
 
 ```javascript
-container.classList.add('tab-strip');
-for (let i = 0; i < moduleCount; i += 1) {
-    const tab = document.createElement('button');
-    tab.type = 'button';
-    tab.classList.add('tab-strip-item');
-    if (i === active) tab.classList.add('is-active');
-    tab.dataset.tabId = String(i);
-    tab.textContent = 'CLC' + (i + 1);
-    container.appendChild(tab);
-}
+function renderClcModuleTabs() {
+    const container = document.getElementById('clc-module-tabs');
+    container.innerHTML = '';
 
-window.PickleUI.tabStrip(container, {
-    onChange: (id) => selectModule(Number(id)),
-});
+    for (let i = 1; i <= getClcModuleCount(); i++) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.classList.add('tab-strip-item');
+        if (i === clcActiveModule) btn.classList.add('is-active');
+        btn.dataset.tabId = String(i);
+        btn.textContent = 'CLC' + i;
+        if (isClcModuleConfigured(i)) {
+            const dot = document.createElement('span');
+            dot.className = 'clc-tab-dot';
+            btn.appendChild(dot);
+        }
+        container.appendChild(btn);
+    }
+
+    window.PickleUI.tabStrip(container, {
+        onChange: (id) => { clcActiveModule = Number(id); renderClcDesigner(); },
+    });
+}
 ```
 
-Delete the old manual `classList.toggle('active', ...)` loop; the primitive's `activate(id)` (returned handle) replaces it.
+The primitive adds `.tab-strip` to the container and wires clicks per rebuild. `renderClcDesigner` re-enters `renderClcModuleTabs` on selection, so the rebuild-and-rewire pattern is preserved. The container's `clc-module-tabs` class stays on the element (id + class are kept) so sizing rules scoped to `.clc-module-tabs` survive, and the tab-strip primitive adds its own `.tab-strip` class alongside.
 
 ### Task 6.6: Delete legacy tab CSS
 
 **Files:**
 - Modify: `frontend/static/styles/03-verify-clc.css`
 - Modify: `frontend/static/styles/04-shell-layout.css`
+- Modify: `frontend/static/styles/05-peripheral-responsive.css` (the `.view-toggle-btn` rules actually live here — lines 12-32 — NOT in 04-shell-layout.css; the plan originally missed this file)
 
-- [ ] **Step 1: Remove `.right-tab`, `.right-tab.active`, `.view-toggle-btn`, `.view-toggle-btn.active`, `.clc-module-tab`, `.clc-module-tab.active`, `.right-tabs` container styles that duplicate `.tab-strip` rules.**
+> **Keep notes:**
+> - `.right-tab-content` / `.right-tab-content.active` / `.fuses-tab-content` (in 03-verify-clc.css) stay — they control content-pane display, not the tab bar.
+> - `.clc-module-tabs` container rule (03-verify-clc.css:247-253) stays — it provides the wrap behavior required for AK parts with >4 CLC modules (see 2026-04-09 logbook entry). The tab-strip primitive adds `.tab-strip` onto the same element, and because `components/tab-strip.css` imports before `03-verify-clc.css`, the wrap rule still wins.
+> - `.clc-tab-dot` survives, but its selector (`.clc-module-tab .clc-tab-dot`) no longer matches post-migration — rescope to `.clc-module-tabs .clc-tab-dot` below.
 
-Keep the `.view-toggle` container's own layout rules (margins, visibility) since they aren't part of the primitive.
+- [ ] **Step 1: Delete legacy button rules**
+
+From `03-verify-clc.css`: remove `.right-tabs` (container layout, lines 9-15), `.right-tab`, `.right-tab:hover`, `.right-tab.active`, `.right-tab.is-disabled`, `.right-tab:disabled`, `.right-tab.is-disabled:hover`, `.right-tab:disabled:hover` (lines 16-44); and `.clc-module-tab`, `.clc-module-tab:hover`, `.clc-module-tab.active` (lines 255-275). Rescope the dot selector:
+
+```css
+.clc-module-tabs .clc-tab-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--sys);
+    margin-left: 5px;
+    vertical-align: middle;
+}
+```
+
+From `05-peripheral-responsive.css`: remove `.view-toggle` (container layout, lines 3-10), `.view-toggle-btn`, `.view-toggle-btn:hover`, `.view-toggle-btn.active` (lines 12-32). Keep `#periph-view` and the `.periph-toolbar*` rules below that block.
+
+From `04-shell-layout.css`: sweep for any duplicates of the above selectors (there shouldn't be any, but confirm).
 
 - [ ] **Step 2: Sanity gate**
 
 ```bash
-rg '^\s*\.(right-tab|view-toggle-btn|clc-module-tab)(\.|$|:|\s|\{)' frontend/static/styles/
+rg '^\s*\.(right-tab|view-toggle|view-toggle-btn|clc-module-tab)(\.|:|\s|\{|$)' frontend/static/styles/
 ```
-Expected: zero matches.
+Expected: zero matches. (The trailing char class excludes `.right-tab-content` and `.clc-module-tabs` because `-content` / `-tabs` starts with `-`, which isn't in the allowed follow set — those stay in place.)
+
+> **Visual change to verify during smoke test:** The tab-strip primitive uses `--accent` for active-tab color, while the legacy rules used `--accent2` (right tab bar and view toggle) and `--sys` (CLC module tabs). Expect the three strips to shift toward the primary accent. Raise a follow-up if a per-strip accent alias is wanted.
 
 ### Task 6.7: Commit PR #6
 
@@ -3524,7 +3623,7 @@ Run: `cargo tauri dev`. Switch through all five right-panel tabs, toggle Pin/Per
 - [ ] **Step 3: Commit**
 
 ```bash
-git add frontend/static/styles/components/tab-strip.css frontend/static/app/ui/tab-strip.js frontend/tests/ui/tab-strip.test.js frontend/static/style.css frontend/index.html frontend/static/app/06-shell.js frontend/static/app/02-view-model.js frontend/static/app/05-clc-designer.js frontend/static/styles/03-verify-clc.css frontend/static/styles/04-shell-layout.css
+git add frontend/static/styles/components/tab-strip.css frontend/static/app/ui/tab-strip.js frontend/tests/ui/tab-strip.test.js frontend/static/style.css frontend/index.html frontend/static/app/06-shell.js frontend/static/app/05-clc-designer.js frontend/static/styles/03-verify-clc.css frontend/static/styles/04-shell-layout.css frontend/static/styles/05-peripheral-responsive.css
 git commit -m "$(cat <<'EOF'
 Lane A: tab strip primitive
 
