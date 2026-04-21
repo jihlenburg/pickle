@@ -118,7 +118,11 @@
 
             <div class="right-tab-content active" data-tab-id="info">
                 <div id="device-info-content" class="device-info" style="display:none"></div>
-                <div id="device-info-empty" class="verify-empty">Load a device to view its information.</div>
+                <div id="device-info-empty" class="empty-state">
+                    <div class="empty-state-icon">&#9432;</div>
+                    <h3 class="empty-state-title">No device loaded</h3>
+                    <p class="empty-state-body">Load a device to view its information, peripherals, and datasheet metadata.</p>
+                </div>
             </div>
 
             <div class="right-tab-content fuses-tab-content" data-tab-id="fuses">
@@ -156,7 +160,11 @@
                     <div id="fuse-fields"></div>
                 </div>
 
-                <div id="fuses-empty" class="verify-empty">Load a device to configure oscillator and fuse settings.</div>
+                <div id="fuses-empty" class="empty-state">
+                    <div class="empty-state-icon">&#9881;</div>
+                    <h3 class="empty-state-title">No device loaded</h3>
+                    <p class="empty-state-body">Load a device to configure oscillator and fuse settings.</p>
+                </div>
             </div>
 
             <div class="right-tab-content clc-tab-content" data-tab-id="clc">
@@ -189,7 +197,11 @@
                         <div class="clc-registers" id="clc-registers"></div>
                     </div>
                 </div>
-                <div id="clc-empty" class="verify-empty">Load a device to configure CLC modules.</div>
+                <div id="clc-empty" class="empty-state">
+                    <div class="empty-state-icon">&#9636;</div>
+                    <h3 class="empty-state-title">No device loaded</h3>
+                    <p class="empty-state-body">Load a device with CLC peripherals to configure logic modules.</p>
+                </div>
             </div>
 
             <div class="right-tab-content" data-tab-id="code">
@@ -209,7 +221,11 @@
             <div class="right-tab-content" data-tab-id="verify">
                 <div id="verify-panel" class="verify-panel">
                     <div id="verify-output">
-                        <div class="verify-empty">Load a device and click <strong>Verify Pinout</strong> to cross-check pin assignments against the datasheet. If the package shows as <strong>default</strong>, that is an EDC fallback and not a real package name.</div>
+                        <div class="empty-state">
+                            <div class="empty-state-icon">&#10003;</div>
+                            <h3 class="empty-state-title">No verification yet</h3>
+                            <p class="empty-state-body">Load a device and click <strong>Verify Pinout</strong> to cross-check pin assignments against the datasheet. If the package shows as <strong>default</strong>, that is an EDC fallback and not a real package name.</p>
+                        </div>
                     </div>
                 </div>
             </div>

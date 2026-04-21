@@ -2,6 +2,7 @@
 
 ## 2026-04-21
 
+- Lane A PR #7: empty state primitive landed. Unified all four empties (info, fuses, CLC, verify).
 - Lane A PR #6: tab strip primitive landed. Migrated three strips (right-panel, view toggle, CLC modules).
 - Lane A PR #5: dropdown primitive landed. Migrated package menu, save menu, part picker. Removed ad-hoc menu markup and CSS.
 - Lane A PR #5 polish: restored the `is-active` highlight on `PickleUI.select` by teaching the dropdown primitive to honor `item.active` and passing `items` as a factory from form.js (closure-captures `current`); guarded `refreshPartPickerSuggestions` with a same-list early return to stop part-picker flicker on catalog rebuilds while typing; refreshed dropdown.js header doc-comment to cover `meta?`, `active?`, and factory `items`; hardened the factory-rebuilds test with a `callCount` counter; added a smoke test that `dropdown(trigger)` with no opts tolerates an empty menu and Escape-close. Full suite: 92/92 green (12/12 dropdown + form).

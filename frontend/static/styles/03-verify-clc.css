@@ -40,14 +40,6 @@
     color: var(--accent2);
     letter-spacing: 0.01em;
 }
-.verify-empty {
-    color: var(--text-dim);
-    font-size: 0.82rem;
-    padding: 40px 20px;
-    text-align: center;
-    line-height: 1.6;
-}
-
 /* --- Device Info tab --- */
 .device-info {
     padding: 16px 20px;

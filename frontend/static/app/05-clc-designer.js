@@ -48,12 +48,21 @@ function syncClcDesignerState() {
 
 function clcEmptyMessage() {
     if (!deviceData) {
-        return 'Load a device to configure CLC modules.';
+        return {
+            title: 'No device loaded',
+            body: 'Load a device to configure CLC modules.',
+        };
     }
     if (!deviceHasClc()) {
-        return 'This device has no CLC peripheral. The CLC editor and datasheet CLC lookup are disabled for this part.';
+        return {
+            title: 'No CLC peripheral',
+            body: 'This device has no CLC peripheral. The CLC editor and datasheet CLC lookup are disabled for this part.',
+        };
     }
-    return 'CLC input sources are not available yet. Verify the datasheet to import them if needed.';
+    return {
+        title: 'CLC sources unavailable',
+        body: 'CLC input sources are not available yet. Verify the datasheet to import them if needed.',
+    };
 }
 
 function updateClcTabState() {
@@ -105,13 +114,14 @@ function renderClcDesigner() {
     if (!deviceData || !deviceHasClc()) {
         designer.style.display = 'none';
         empty.style.display = '';
-        empty.textContent = clcEmptyMessage();
+        const msg = clcEmptyMessage();
+        empty.querySelector('.empty-state-title').textContent = msg.title;
+        empty.querySelector('.empty-state-body').textContent = msg.body;
         return;
     }
 
     designer.style.display = '';
     empty.style.display = 'none';
-    empty.textContent = clcEmptyMessage();
     syncClcDesignerState();
 
     renderClcModuleTabs();
