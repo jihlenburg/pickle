@@ -2,10 +2,15 @@
 /*
  * Modal helper.
  *
- * open(id): showModal() on the <dialog> and remember focused element.
- * close(id): close() on the <dialog>; focus restoration happens on the
- *   dialog's 'close' event, so it also fires for Esc and backdrop-click.
+ * open(id, opts): showModal() on the <dialog>, capture prior focus, restore
+ *   on the dialog's 'close' event — fires for Esc, backdrop-click, header
+ *   close button, and programmatic close alike. Calling open() on a dialog
+ *   that's already open is a no-op.
+ * close(id): close() on the <dialog>; the shared 'close' event listener
+ *   handles focus restoration.
  * confirm(opts): build a small transient dialog, return Promise<boolean>.
+ *   Resolves false if document is unavailable, if the user cancels, or if
+ *   the dialog closes without a button click.
  */
 (function initModal(global) {
     const PickleUI = global.PickleUI || (global.PickleUI = {});
@@ -16,9 +21,10 @@
         if (!doc) return;
         const dialog = doc.getElementById(id);
         if (!dialog) { console.warn('PickleUI.modal.open: no dialog', id); return; }
+        if (focusStack.has(id)) return; // already open; don't stack anchors or listeners
         const prior = doc.activeElement || null;
         focusStack.set(id, prior);
-        dialog.showModal && dialog.showModal();
+        if (typeof dialog.showModal === 'function') dialog.showModal();
         const onClose = () => {
             dialog.removeEventListener('close', onClose);
             const p = focusStack.get(id);
@@ -41,9 +47,14 @@
         const options = opts || {};
         return new Promise((resolve) => {
             const doc = global.document;
+            if (!doc || !doc.body) {
+                resolve(false);
+                return;
+            }
             const dialog = doc.createElement('dialog');
             dialog.classList.add('modal');
             dialog.classList.add('modal-sm');
+            dialog.setAttribute('aria-label', options.title || 'Confirm');
 
             const header = doc.createElement('div');
             header.classList.add('modal-header');
