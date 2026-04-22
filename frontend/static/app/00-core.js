@@ -624,8 +624,6 @@ function populatePackageManagerDialog() {
     setTextContent('package-dialog-stored-label', ui.storedLabel);
     setTextContent('package-dialog-source-label', ui.sourceLabel);
     setTextContent('package-dialog-name-label', ui.nameLabel);
-    setTextContent('package-close-btn', ui.closeButton);
-    setTextContent('package-cancel-btn', ui.closeButton);
     setTextContent('package-save-btn', ui.saveButton);
     setTextContent('package-reset-btn', ui.resetButton);
     setTextContent('package-delete-btn', ui.deleteButton);
@@ -823,7 +821,6 @@ function wirePackageManagerDialog() {
         }
     });
     $('package-close-btn')?.addEventListener('click', closePackageManagerDialog);
-    $('package-cancel-btn')?.addEventListener('click', closePackageManagerDialog);
     $('package-save-btn')?.addEventListener('click', () => {
         void saveSelectedPackageDisplayName();
     });

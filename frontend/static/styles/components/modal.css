@@ -5,7 +5,18 @@
  * size variants (.modal-sm/md/lg) set width; .modal-with-nav adds the
  * two-column layout used by Settings.
  */
+
+/*
+ * Keep closed dialogs out of the flow. The UA sets `dialog:not([open]) {
+ * display: none }` but author-origin rules like `.modal-with-nav { display:
+ * grid }` beat UA origin regardless of specificity, so we restate it here.
+ */
+dialog.modal:not([open]) {
+    display: none;
+}
+
 .modal {
+    margin: auto;
     padding: 0;
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);

@@ -49,7 +49,7 @@
 
         <div class="header-meta">
             <button id="index-badge" type="button" class="btn btn-sm btn-ghost index-badge" style="display:none" title="Click to refresh"></button>
-            <button id="settings-btn" type="button" class="btn btn-ghost" title="Settings (Cmd+,)">Settings</button>
+            <button id="settings-btn" type="button" class="btn btn-secondary" title="Settings (Cmd+,)">Settings</button>
             <button id="theme-toggle" class="btn btn-secondary">System</button>
         </div>
     </header>
@@ -264,17 +264,20 @@
         </div>
         <div class="modal-footer">
             <button id="package-delete-btn" type="button" class="btn btn-danger">Delete Overlay</button>
-            <button id="package-cancel-btn" type="button" class="btn btn-secondary" style="margin-left: auto">Close</button>
-            <button id="package-reset-btn" type="button" class="btn btn-secondary">Reset Name</button>
+            <button id="package-reset-btn" type="button" class="btn btn-secondary" style="margin-left: auto">Reset Name</button>
             <button id="package-save-btn" type="button" class="btn btn-primary">Save Name</button>
         </div>
     </dialog>
 
     <!-- About dialog -->
     <dialog id="about-dialog" class="modal modal-md" aria-label="About pickle">
+        <div class="modal-header">
+            <h2 class="modal-title">pickle</h2>
+            <button id="about-close-btn" type="button" class="btn btn-icon btn-ghost modal-close"
+                    aria-label="Close about dialog">✕</button>
+        </div>
         <div class="modal-body" style="text-align:center;">
             <img src="static/pickle-icon.png" alt="pickle" class="about-icon">
-            <h2 class="modal-title">pickle</h2>
             <p class="modal-subtitle">Pin Configurator</p>
             <p class="about-version" id="about-version"></p>
             <p class="about-desc">
@@ -298,9 +301,6 @@
                 Technology&nbsp;Inc. Microchip, dsPIC33, PIC24, and related
                 names are trademarks of Microchip Technology&nbsp;Inc.
             </p>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-primary" id="about-close-btn">Close</button>
         </div>
     </dialog>
 
