@@ -2,6 +2,7 @@
 
 ## 2026-04-21
 
+- Lane A PR #8: modal primitive landed. All three dialogs (Package, About, Settings) migrated. window.confirm replaced with PickleUI.modal.confirm for delete-overlay. Lane A complete.
 - Lane A PR #7: empty state primitive landed. Unified all four empties (info, fuses, CLC, verify).
 - Lane A PR #6: tab strip primitive landed. Migrated three strips (right-panel, view toggle, CLC modules).
 - Lane A PR #5: dropdown primitive landed. Migrated package menu, save menu, part picker. Removed ad-hoc menu markup and CSS.

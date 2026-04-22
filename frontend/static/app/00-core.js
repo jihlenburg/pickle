@@ -668,13 +668,13 @@ function showPackageManagerDialog() {
     }
 
     populatePackageManagerDialog();
-    dialog.showModal();
+    window.PickleUI.modal.open('package-dialog');
     $('package-name-input')?.focus();
     $('package-name-input')?.select();
 }
 
 function closePackageManagerDialog() {
-    $('package-dialog')?.close();
+    window.PickleUI.modal.close('package-dialog');
 }
 
 function syncVerificationPackageDelete(packageName) {
@@ -766,9 +766,14 @@ async function deleteSelectedOverlayPackage() {
     }
 
     const packageName = deviceData.selected_package;
-    const confirmed = window.confirm(appConfig.format(appConfig.ui.packageManager.deleteConfirm, {
-        packageName: displayPackageName(packageName, { long: true }),
-    }));
+    const confirmed = await window.PickleUI.modal.confirm({
+        title: 'Delete overlay?',
+        message: appConfig.format(appConfig.ui.packageManager.deleteConfirm, {
+            packageName: displayPackageName(packageName, { long: true }),
+        }),
+        action: 'Delete',
+        tone: 'danger',
+    });
     if (!confirmed) {
         return;
     }

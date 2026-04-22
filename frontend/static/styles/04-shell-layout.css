@@ -723,71 +723,6 @@ body.welcome-active .panel {
 
 /* --- About dialog --- */
 
-.package-dialog {
-    margin: auto;
-    width: min(520px, calc(100vw - 32px));
-    padding: 0;
-    border: 1px solid var(--chip-border);
-    border-radius: 16px;
-    background: color-mix(in srgb, var(--surface-strong) 96%, transparent);
-    box-shadow: var(--shadow);
-    color: var(--text);
-}
-
-.package-dialog[open] {
-    display: block;
-}
-
-.package-dialog::backdrop {
-    background: rgba(7, 12, 22, 0.62);
-    backdrop-filter: blur(6px);
-}
-
-.package-dialog-card {
-    display: flex;
-    flex-direction: column;
-}
-
-.package-dialog-header,
-.package-dialog-actions {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 16px 18px;
-}
-
-.package-dialog-header {
-    border-bottom: 1px solid var(--border);
-}
-
-.package-dialog-header h2 {
-    margin: 0;
-    font-size: 14px;
-    font-weight: 700;
-    color: var(--text);
-}
-
-.package-dialog-body {
-    display: grid;
-    gap: 14px;
-    padding: 18px;
-}
-
-.package-dialog-field,
-.package-dialog-input-wrap {
-    display: grid;
-    gap: 6px;
-}
-
-.package-dialog-label {
-    color: var(--text-dim);
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-
 .package-dialog-value {
     font-size: 13px;
     font-weight: 600;
@@ -797,95 +732,6 @@ body.welcome-active .panel {
 .package-dialog-value-mono {
     font-family: var(--font-mono);
     font-size: 12px;
-}
-
-.package-dialog-note {
-    padding: 12px 14px;
-    border-radius: 10px;
-    border: 1px solid var(--border);
-    background: color-mix(in srgb, var(--bg) 78%, transparent);
-    color: var(--text-dim);
-    line-height: 1.5;
-}
-
-.package-dialog-actions {
-    border-top: 1px solid var(--border);
-}
-
-.package-dialog-action-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.about-dialog {
-    margin: auto;
-    width: 360px;
-    max-width: 90vw;
-    padding: 32px 28px 24px;
-    border-radius: 16px;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
-    text-align: center;
-    opacity: 0;
-    transform: scale(0.94) translateY(8px);
-    transition: opacity 0.2s ease, transform 0.2s ease,
-                overlay 0.2s ease allow-discrete,
-                display 0.2s ease allow-discrete;
-}
-
-.about-dialog[open] {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-}
-
-@starting-style {
-    .about-dialog[open] {
-        opacity: 0;
-        transform: scale(0.94) translateY(8px);
-    }
-}
-
-.about-dialog::backdrop {
-    background: rgba(0, 0, 0, 0.45);
-    backdrop-filter: blur(6px);
-    opacity: 0;
-    transition: opacity 0.2s ease,
-                overlay 0.2s ease allow-discrete,
-                display 0.2s ease allow-discrete;
-}
-
-.about-dialog[open]::backdrop {
-    opacity: 1;
-}
-
-@starting-style {
-    .about-dialog[open]::backdrop {
-        opacity: 0;
-    }
-}
-
-.about-icon {
-    width: 80px;
-    height: 80px;
-    margin-bottom: 12px;
-    border-radius: 16px;
-}
-
-.about-title {
-    margin: 0 0 2px;
-    font-size: 22px;
-    font-weight: 700;
-    color: var(--text);
-    letter-spacing: 0.02em;
-}
-
-.about-subtitle {
-    margin: 0 0 6px;
-    font-size: 13px;
-    color: var(--text-dim);
-    font-weight: 500;
 }
 
 .about-version {
@@ -943,125 +789,16 @@ body.welcome-active .panel {
 /* ===================================================================== */
 /* Settings dialog                                                       */
 /*                                                                       */
-/* Extendable sidebar + content-area layout.  Each section is a pair:    */
-/*   nav:  <button class="settings-nav-btn" data-section="id">          */
-/*   body: <div class="settings-section" data-section="id">             */
-/* Only the `.active` pair is visible at a time.                         */
+/* Sections within the dialog are <div> pairs with a matching            */
+/* data-section attribute: only the `.is-active` panel is visible.       */
 /* ===================================================================== */
-
-.settings-dialog {
-    margin: auto;
-    width: 580px;
-    max-width: 92vw;
-    max-height: 80vh;
-    padding: 0;
-    border-radius: 14px;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
-    overflow: hidden;
-    opacity: 0;
-    transform: scale(0.96) translateY(6px);
-    transition: opacity 0.2s ease, transform 0.2s ease,
-                overlay 0.2s ease allow-discrete,
-                display 0.2s ease allow-discrete;
-}
-
-.settings-dialog[open] {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-}
-
-@starting-style {
-    .settings-dialog[open] {
-        opacity: 0;
-        transform: scale(0.96) translateY(6px);
-    }
-}
-
-.settings-dialog::backdrop {
-    background: rgba(0, 0, 0, 0.4);
-    backdrop-filter: blur(6px);
-    opacity: 0;
-    transition: opacity 0.2s ease,
-                overlay 0.2s ease allow-discrete,
-                display 0.2s ease allow-discrete;
-}
-
-.settings-dialog[open]::backdrop {
-    opacity: 1;
-}
-
-@starting-style {
-    .settings-dialog[open]::backdrop {
-        opacity: 0;
-    }
-}
-
-/* ── Layout: sidebar + content ──────────────────────────────────────── */
-
-.settings-layout {
-    display: flex;
-    min-height: 320px;
-    max-height: calc(80vh - 56px);     /* leave room for Done button */
-}
-
-.settings-nav {
-    width: 160px;
-    flex-shrink: 0;
-    padding: 20px 12px;
-    background: var(--bg);
-    border-right: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.settings-nav-title {
-    margin: 0 0 14px 6px;
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-dim);
-}
-
-/* ── Content area ───────────────────────────────────────────────────── */
-
-.settings-content {
-    flex: 1;
-    padding: 24px;
-    overflow-y: auto;
-}
 
 .settings-section {
     display: none;
 }
 
-.settings-section.active {
+.settings-section.is-active {
     display: block;
-}
-
-.settings-section-title {
-    margin: 0 0 6px;
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--text);
-}
-
-.settings-section-desc {
-    margin: 0 0 20px;
-    font-size: 11px;
-    line-height: 1.6;
-    color: var(--text-dim);
-}
-
-.settings-section-desc code {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    padding: 1px 4px;
-    border-radius: 3px;
-    background: var(--hover-overlay);
 }
 
 /* ── API-key rows ───────────────────────────────────────────────────── */
@@ -1113,14 +850,5 @@ body.welcome-active .panel {
 .key-status-badge.keychain { background: #2d7d46; color: #fff; }
 .key-status-badge.env      { background: #6b5b00; color: #fff; }
 .key-status-badge.dotenv   { background: #5b4700; color: #fff; }
-
-/* ── Done button ────────────────────────────────────────────────────── */
-
-.settings-footer {
-    display: flex;
-    justify-content: flex-end;
-    padding: 10px 24px 16px;
-    border-top: 1px solid var(--border);
-}
 
 /* --- Responsive --- */

@@ -609,7 +609,7 @@ function showAboutDialog() {
         }
     }
 
-    dialog.showModal();
+    window.PickleUI.modal.open('about-dialog');
 }
 
 function wireAboutDialog() {

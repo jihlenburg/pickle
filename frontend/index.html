@@ -232,70 +232,77 @@
         </div>
     </div>
 
-    <dialog id="package-dialog" class="package-dialog" aria-label="Edit package name">
-        <div class="package-dialog-card">
-            <div class="package-dialog-header">
-                <h2 id="package-dialog-title">Edit Package Name</h2>
-                <button id="package-close-btn" type="button" class="btn btn-icon btn-ghost package-dialog-close" aria-label="Close package dialog">Close</button>
+    <dialog id="package-dialog" class="modal modal-md" aria-label="Edit package name">
+        <div class="modal-header">
+            <div>
+                <h2 id="package-dialog-title" class="modal-title">Edit Package Name</h2>
             </div>
-            <div class="package-dialog-body">
-                <div class="package-dialog-field">
-                    <span class="package-dialog-label" id="package-dialog-current-label">Shown in UI</span>
-                    <div id="package-dialog-current" class="package-dialog-value">—</div>
-                </div>
-                <div class="package-dialog-field" id="package-dialog-stored-row" hidden>
-                    <span class="package-dialog-label" id="package-dialog-stored-label">Backend key</span>
-                    <div id="package-dialog-stored" class="package-dialog-value package-dialog-value-mono">—</div>
-                </div>
-                <div class="package-dialog-field">
-                    <span class="package-dialog-label" id="package-dialog-source-label">Source</span>
-                    <div id="package-dialog-source" class="package-dialog-value">—</div>
-                </div>
-                <p id="package-dialog-note" class="package-dialog-note"></p>
-                <label class="package-dialog-input-wrap" for="package-name-input">
-                    <span id="package-dialog-name-label" class="package-dialog-label">Displayed package name</span>
-                    <input id="package-name-input" type="text" class="input" placeholder="Enter the name to show in the UI" autocomplete="off">
+            <button id="package-close-btn" type="button" class="btn btn-icon btn-ghost modal-close"
+                    aria-label="Close package dialog">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="field">
+                <span class="field-label" id="package-dialog-current-label">Shown in UI</span>
+                <div id="package-dialog-current" class="package-dialog-value">—</div>
+            </div>
+            <div class="field" id="package-dialog-stored-row" hidden>
+                <span class="field-label" id="package-dialog-stored-label">Backend key</span>
+                <div id="package-dialog-stored" class="package-dialog-value package-dialog-value-mono">—</div>
+            </div>
+            <div class="field">
+                <span class="field-label" id="package-dialog-source-label">Source</span>
+                <div id="package-dialog-source" class="package-dialog-value">—</div>
+            </div>
+            <p id="package-dialog-note" class="field-hint"></p>
+            <div class="field">
+                <label class="field-label" for="package-name-input" id="package-dialog-name-label">
+                    Displayed package name
                 </label>
+                <input id="package-name-input" type="text" class="input"
+                       placeholder="Enter the name to show in the UI" autocomplete="off">
             </div>
-            <div class="package-dialog-actions">
-                <button id="package-delete-btn" type="button" class="btn btn-danger">Delete Overlay</button>
-                <div class="package-dialog-action-row">
-                    <button id="package-cancel-btn" type="button" class="btn btn-secondary">Close</button>
-                    <button id="package-reset-btn" type="button" class="btn btn-secondary">Reset Name</button>
-                    <button id="package-save-btn" type="button" class="btn btn-primary">Save Name</button>
-                </div>
-            </div>
+        </div>
+        <div class="modal-footer">
+            <button id="package-delete-btn" type="button" class="btn btn-danger">Delete Overlay</button>
+            <span style="flex:1"></span>
+            <button id="package-cancel-btn" type="button" class="btn btn-secondary">Close</button>
+            <button id="package-reset-btn" type="button" class="btn btn-secondary">Reset Name</button>
+            <button id="package-save-btn" type="button" class="btn btn-primary">Save Name</button>
         </div>
     </dialog>
 
     <!-- About dialog -->
-    <dialog id="about-dialog" class="about-dialog" aria-label="About pickle">
-        <img src="static/pickle-icon.png" alt="pickle" class="about-icon">
-        <h2 class="about-title">pickle</h2>
-        <p class="about-subtitle">Pin Configurator</p>
-        <p class="about-version" id="about-version"></p>
-        <p class="about-desc">
-            Native desktop pin multiplexing configurator for Microchip
-            dsPIC33 and PIC24 devices. Parses Device Family Pack files,
-            presents an interactive pin assignment UI, and generates
-            MISRA&nbsp;C:2012 compliant initialization code.
-        </p>
-        <div class="about-tech">
-            <span class="about-tag">Rust</span>
-            <span class="about-tag">Tauri</span>
-            <span class="about-tag">dsPIC33</span>
-            <span class="about-tag">PIC24</span>
+    <dialog id="about-dialog" class="modal modal-md" aria-label="About pickle">
+        <div class="modal-body" style="text-align:center;">
+            <img src="static/pickle-icon.png" alt="pickle" class="about-icon">
+            <h2 class="modal-title">pickle</h2>
+            <p class="modal-subtitle">Pin Configurator</p>
+            <p class="about-version" id="about-version"></p>
+            <p class="about-desc">
+                Native desktop pin multiplexing configurator for Microchip
+                dsPIC33 and PIC24 devices. Parses Device Family Pack files,
+                presents an interactive pin assignment UI, and generates
+                MISRA&nbsp;C:2012 compliant initialization code.
+            </p>
+            <div class="about-tech">
+                <span class="about-tag">Rust</span>
+                <span class="about-tag">Tauri</span>
+                <span class="about-tag">dsPIC33</span>
+                <span class="about-tag">PIC24</span>
+            </div>
+            <div class="about-links">
+                <button class="btn btn-secondary" id="about-github-btn">GitHub</button>
+            </div>
+            <p class="about-copy">&copy; 2026 J. Ihlenburg &middot; GPLv3</p>
+            <p class="about-legal">
+                Not affiliated with, endorsed by, or approved by Microchip
+                Technology&nbsp;Inc. Microchip, dsPIC33, PIC24, and related
+                names are trademarks of Microchip Technology&nbsp;Inc.
+            </p>
         </div>
-        <div class="about-links">
-            <button class="btn btn-secondary about-link" id="about-github-btn">GitHub</button>
+        <div class="modal-footer">
+            <button class="btn btn-primary" id="about-close-btn">Close</button>
         </div>
-        <p class="about-copy">&copy; 2026 J. Ihlenburg &middot; GPLv3</p>
-        <p class="about-legal">
-            Not affiliated with, endorsed by, or approved by Microchip
-            Technology&nbsp;Inc. Microchip, dsPIC33, PIC24, and related names
-            are trademarks of Microchip Technology&nbsp;Inc.
-        </p>
-        <button class="btn btn-primary about-close" id="about-close-btn">Close</button>
     </dialog>
 
     <!-- Settings dialog ------------------------------------------------- -->
@@ -305,70 +312,68 @@
         in #settings-nav.  To add a new section, add a nav button and a
         content div — the JS section registry picks them up automatically.
     -->
-    <dialog id="settings-dialog" class="settings-dialog" aria-label="Settings">
-        <div class="settings-layout">
-            <nav class="settings-nav" id="settings-nav">
-                <h2 class="settings-nav-title">Settings</h2>
-                <button class="btn btn-ghost settings-nav-btn active" data-section="api-keys">API Keys</button>
-                <!-- Future sections: add nav buttons here -->
-            </nav>
+    <dialog id="settings-dialog" class="modal modal-with-nav" aria-label="Settings">
+        <div class="modal-header">
+            <h2 class="modal-title">Settings</h2>
+            <button id="settings-close-header-btn" type="button"
+                    class="btn btn-icon btn-ghost modal-close" aria-label="Close">✕</button>
+        </div>
 
-            <div class="settings-content" id="settings-content">
-                <!-- ── API Keys section ──────────────────────────── -->
-                <div class="settings-section active" data-section="api-keys">
-                    <h3 class="settings-section-title">API Keys</h3>
-                    <p class="settings-section-desc">
-                        Keys are stored in your operating system's secure credential
-                        store (macOS&nbsp;Keychain, Windows&nbsp;Credential&nbsp;Manager,
-                        Linux&nbsp;Secret&nbsp;Service). Environment variables and
-                        <code>.env</code> files are still honoured as fallbacks.
+        <nav class="modal-nav" id="settings-nav">
+            <button class="modal-nav-item is-active" data-section="api-keys">API Keys</button>
+        </nav>
+
+        <div class="modal-body" id="settings-content">
+            <div class="settings-section is-active" data-section="api-keys">
+                <h3 class="field-label" style="font-size:var(--text-lg); text-transform:none;">API Keys</h3>
+                <p class="field-hint">
+                    Keys are stored in your operating system's secure credential
+                    store (macOS Keychain, Windows Credential Manager, Linux Secret
+                    Service). Environment variables and <code>.env</code> files are
+                    still honoured as fallbacks.
+                </p>
+
+                <div class="labeled-row" data-setting="verification-provider">
+                    <label class="labeled-row-label" for="verify-provider-select">Verification Provider</label>
+                    <p class="labeled-row-desc" id="verify-provider-status">
+                        Choose which provider pickle should use for datasheet verification.
                     </p>
-
-                    <div class="key-row" data-setting="verification-provider">
-                        <label class="key-label" for="verify-provider-select">Verification Provider</label>
-                        <div class="key-field">
-                            <button id="verify-provider-select" type="button" class="select-trigger"
-                                    aria-haspopup="listbox" aria-expanded="false">Auto (prefer OpenAI)</button>
-                        </div>
-                        <div class="key-status" id="verify-provider-status">
-                            Choose which provider pickle should use for datasheet verification.
-                        </div>
-                    </div>
-
-                    <div class="key-row" data-provider="openai">
-                        <label class="key-label">OpenAI</label>
-                        <div class="key-field">
-                            <input type="password" class="input" id="key-input-openai"
-                                   placeholder="sk-proj-..." autocomplete="off" spellcheck="false">
-                            <button class="btn btn-icon btn-ghost key-reveal" id="key-reveal-openai" title="Show / hide key">&#x1f441;</button>
-                        </div>
-                        <div class="key-actions">
-                            <button class="btn btn-sm btn-primary key-save" id="key-save-openai">Save</button>
-                            <button class="btn btn-sm btn-secondary key-clear" id="key-clear-openai">Clear</button>
-                        </div>
-                        <div class="key-status" id="key-status-openai"></div>
-                    </div>
-
-                    <div class="key-row" data-provider="anthropic">
-                        <label class="key-label">Anthropic</label>
-                        <div class="key-field">
-                            <input type="password" class="input" id="key-input-anthropic"
-                                   placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
-                            <button class="btn btn-icon btn-ghost key-reveal" id="key-reveal-anthropic" title="Show / hide key">&#x1f441;</button>
-                        </div>
-                        <div class="key-actions">
-                            <button class="btn btn-sm btn-primary key-save" id="key-save-anthropic">Save</button>
-                            <button class="btn btn-sm btn-secondary key-clear" id="key-clear-anthropic">Clear</button>
-                        </div>
-                        <div class="key-status" id="key-status-anthropic"></div>
-                    </div>
+                    <button id="verify-provider-select" type="button" class="btn select-trigger"
+                            aria-haspopup="listbox" aria-expanded="false">Auto (prefer OpenAI)</button>
                 </div>
 
-                <!-- Future sections: add content divs here -->
+                <div class="labeled-row" data-provider="openai">
+                    <label class="labeled-row-label">OpenAI</label>
+                    <div class="input-with-action">
+                        <input type="password" class="input" id="key-input-openai"
+                               placeholder="sk-proj-..." autocomplete="off" spellcheck="false">
+                        <button class="btn btn-icon btn-ghost" id="key-reveal-openai" title="Show / hide key">👁</button>
+                    </div>
+                    <div style="display:flex; gap:var(--space-3);">
+                        <button class="btn btn-sm btn-primary" id="key-save-openai">Save</button>
+                        <button class="btn btn-sm btn-secondary" id="key-clear-openai">Clear</button>
+                    </div>
+                    <div class="field-hint" id="key-status-openai" style="grid-column:1/-1;"></div>
+                </div>
+
+                <div class="labeled-row" data-provider="anthropic">
+                    <label class="labeled-row-label">Anthropic</label>
+                    <div class="input-with-action">
+                        <input type="password" class="input" id="key-input-anthropic"
+                               placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
+                        <button class="btn btn-icon btn-ghost" id="key-reveal-anthropic" title="Show / hide key">👁</button>
+                    </div>
+                    <div style="display:flex; gap:var(--space-3);">
+                        <button class="btn btn-sm btn-primary" id="key-save-anthropic">Save</button>
+                        <button class="btn btn-sm btn-secondary" id="key-clear-anthropic">Clear</button>
+                    </div>
+                    <div class="field-hint" id="key-status-anthropic" style="grid-column:1/-1;"></div>
+                </div>
             </div>
         </div>
-        <div class="settings-footer">
-            <button class="btn btn-primary settings-close" id="settings-close-btn">Done</button>
+
+        <div class="modal-footer">
+            <button class="btn btn-primary" id="settings-close-btn">Done</button>
         </div>
     </dialog>
 
@@ -385,6 +390,7 @@
     <script src="static/app/ui/tooltip.js"></script>
     <script src="static/app/ui/status-bar.js"></script>
     <script src="static/app/ui/toast.js"></script>
+    <script src="static/app/ui/modal.js"></script>
     <script src="static/app/00-core.js"></script>
     <script src="static/app/01-reservation-policy.js"></script>
     <script src="static/app/01-reservations.js"></script>

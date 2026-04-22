@@ -6,7 +6,7 @@
  * The dialog uses a sidebar / content-area layout.  Each *section* is a
  * pair of DOM nodes that share a `data-section` attribute:
  *
- *   nav button:  <button class="settings-nav-btn" data-section="id">
+ *   nav button:  <button class="modal-nav-item" data-section="id">
  *   content div: <div class="settings-section" data-section="id">
  *
  * Clicking a nav button activates the matching content div (and
@@ -40,11 +40,11 @@ function switchSettingsSection(sectionId) {
     const content = $('settings-content');
     if (!nav || !content) return;
 
-    nav.querySelectorAll('.settings-nav-btn').forEach((btn) => {
-        btn.classList.toggle('active', btn.dataset.section === sectionId);
+    nav.querySelectorAll('.modal-nav-item').forEach((btn) => {
+        btn.classList.toggle('is-active', btn.dataset.section === sectionId);
     });
     content.querySelectorAll('.settings-section').forEach((sec) => {
-        sec.classList.toggle('active', sec.dataset.section === sectionId);
+        sec.classList.toggle('is-active', sec.dataset.section === sectionId);
     });
 }
 
@@ -173,13 +173,13 @@ function showSettingsDialog() {
     if (!dialog || dialog.open) return;
     refreshKeyStatuses();
     refreshVerificationProvider();
-    dialog.showModal();
+    window.PickleUI.modal.open('settings-dialog');
 }
 
 function hideSettingsDialog() {
     const dialog = $('settings-dialog');
     if (!dialog?.open) return;
-    dialog.close();
+    window.PickleUI.modal.close('settings-dialog');
 }
 
 // ── Wiring ─────────────────────────────────────────────────────────────
@@ -205,11 +205,17 @@ function wireSettingsDialog() {
     const closeBtn = $('settings-close-btn');
     if (closeBtn) closeBtn.addEventListener('click', () => dialog.close());
 
+    // Header close button
+    const headerCloseBtn = $('settings-close-header-btn');
+    if (headerCloseBtn) {
+        headerCloseBtn.addEventListener('click', () => dialog.close());
+    }
+
     // Section nav
     const nav = $('settings-nav');
     if (nav) {
         nav.addEventListener('click', (e) => {
-            const btn = e.target.closest('.settings-nav-btn');
+            const btn = e.target.closest('.modal-nav-item');
             if (btn?.dataset.section) switchSettingsSection(btn.dataset.section);
         });
     }
