@@ -1,5 +1,10 @@
 # Logbook
 
+## 2026-04-22
+
+- Lane A PR #8 polish: restored `.about-icon` keep-list rule (80×80 rounded + margin-bottom) so the About-dialog icon renders at the original size; hardened `PickleUI.modal` — idempotent `open(id)` (focusStack guards anchor + listener stacking), `confirm()` guards on missing `document`/`body` and labels the transient dialog via `aria-label`; dropped the `<span style="flex:1">` spacer in the package-dialog footer for `margin-left:auto` on Close; added 4 modal tests (idempotent open, missing-document confirm, DOM cleanup on close, settled-guard against double-resolve).
+- Lane A close-out: final cross-PR review passed (READY_WITH_FOLLOWUP). Added `structure.test.js` guardrails that tokens.css loads first among component stylesheets and `00-namespace.js` loads first among `ui/*.js` helpers. Trimmed the done Lane A entry from `todo.md` and queued the deferred follow-ups (remaining `title="…"` sweep, dead primitive classes, dead legacy `.key-*` rows) under Backlog.
+
 ## 2026-04-21
 
 - Lane A PR #8: modal primitive landed. All three dialogs (Package, About, Settings) migrated. window.confirm replaced with PickleUI.modal.confirm for delete-overlay. Lane A complete.

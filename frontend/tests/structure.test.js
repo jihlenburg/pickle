@@ -71,6 +71,34 @@ test('style.css imports all split stylesheet modules in order', () => {
     }
 });
 
+test('style.css imports tokens.css first among components', () => {
+    const manifest = read(styleManifestPath);
+    const tokensIndex = manifest.indexOf('styles/components/tokens.css');
+    assert.notEqual(tokensIndex, -1, 'styles/components/tokens.css should be imported');
+
+    const otherComponents = manifest.matchAll(/styles\/components\/(?!tokens\.css)[^"]+\.css/g);
+    for (const match of otherComponents) {
+        assert.ok(
+            match.index > tokensIndex,
+            `${match[0]} must be imported after tokens.css so CSS custom properties resolve`,
+        );
+    }
+});
+
+test('index.html loads 00-namespace.js first among ui/*.js helpers', () => {
+    const html = read(htmlPath);
+    const namespaceIndex = html.indexOf('static/app/ui/00-namespace.js');
+    assert.notEqual(namespaceIndex, -1, 'static/app/ui/00-namespace.js should be referenced');
+
+    const otherUiHelpers = html.matchAll(/static\/app\/ui\/(?!00-namespace\.js)[^"]+\.js/g);
+    for (const match of otherUiHelpers) {
+        assert.ok(
+            match.index > namespaceIndex,
+            `${match[0]} must load after 00-namespace.js so window.PickleUI exists`,
+        );
+    }
+});
+
 test('index.html exposes the file-action controls in the expected order', () => {
     const html = read(htmlPath);
 

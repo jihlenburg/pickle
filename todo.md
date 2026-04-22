@@ -17,7 +17,7 @@
 
 ## Backlog
 
-- Execute Lane A design-system-unification PRs #6–#8 (tab strip → empty state → modal), per `docs/superpowers/plans/2026-04-19-lane-a-design-system-unification.md`. PRs #1–#5 are DONE.
-- Lanes C (feedback & safety policy — toasts, progress, diff-before-apply), B (keyboard nav, undo/redo UI, ARIA polish), D (view density & clarity — Pin/Peripheral legends and filters) — queued after Lane A lands.
+- Lane A follow-ups: sweep remaining `title="…"` attrs in `frontend/index.html` (convert to `data-tip` or drop where redundant with visible labels); prune dead primitive classes (`.empty-state-action`, `.modal-lg`, `.stepper*`, `.checkbox/.switch`, `.btn-link`) and dead legacy `.key-row`/`.key-label`/`.key-field`/`.key-actions`.
+- Lanes C (feedback & safety policy — toasts, progress, diff-before-apply), B (keyboard nav, undo/redo UI, ARIA polish), D (view density & clarity — Pin/Peripheral legends and filters) — Lane A is complete; these are next.
 - Continue separating concerns in `src-tauri/src/parser/edc_parser.rs`.
 - Add deeper dsPIC33AK-MPS-specific code generation support beyond the shared AK clock/CLC layer.
