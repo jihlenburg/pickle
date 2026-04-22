@@ -295,7 +295,7 @@
         return `
             ${renderSyntheticPackageNotice(device)}
             <div class="empty-state">
-                <div class="empty-state-icon">&#10003;</div>
+                <div class="empty-state-icon" aria-hidden="true">&#10003;</div>
                 <h3 class="empty-state-title">No verification yet</h3>
                 <p class="empty-state-body">Load a device and click <strong>Verify Pinout</strong> to cross-check pin assignments against the datasheet.</p>
             </div>`;

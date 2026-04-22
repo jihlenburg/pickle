@@ -53,15 +53,9 @@ function clcEmptyMessage() {
             body: 'Load a device to configure CLC modules.',
         };
     }
-    if (!deviceHasClc()) {
-        return {
-            title: 'No CLC peripheral',
-            body: 'This device has no CLC peripheral. The CLC editor and datasheet CLC lookup are disabled for this part.',
-        };
-    }
     return {
-        title: 'CLC sources unavailable',
-        body: 'CLC input sources are not available yet. Verify the datasheet to import them if needed.',
+        title: 'No CLC peripheral',
+        body: 'This device has no CLC peripheral. The CLC editor and datasheet CLC lookup are disabled for this part.',
     };
 }
 

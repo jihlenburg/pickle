@@ -5,7 +5,7 @@
  * CTA slot. Replaces .verify-empty / .clc-empty / .device-info-empty.
  */
 .empty-state {
-    padding: var(--space-10) var(--space-10);
+    padding: var(--space-10);
     text-align: center;
     border: 1px dashed var(--border);
     border-radius: var(--radius-md);
