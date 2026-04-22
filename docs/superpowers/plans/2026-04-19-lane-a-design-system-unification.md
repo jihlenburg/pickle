@@ -3880,6 +3880,11 @@ EOF
 
 Adds `components/modal.css` + `ui/modal.js` (with `PickleUI.modal.confirm(...)`). Migrates the three existing dialogs (Package, About, Settings). This is the largest PR — the last one in the sequence.
 
+**Known scope notes:**
+- Existing per-dialog event wiring (backdrop-click close in `05-settings.js:196`, keydown handlers in `06-shell.js`, etc.) stays in place; the primitive only abstracts `open`/`close`/`confirm`. The `modal.js` helper intentionally does not bake in backdrop-click or Esc handling — native `<dialog>` already handles Esc, and backdrop-click is a per-dialog decision.
+- The legacy `.package-dialog`/`.about-dialog`/`.settings-dialog` stylesheets include open animations (opacity/transform + `@starting-style`). The new `.modal` primitive does not reproduce these — dialogs will pop in without animation. This is an accepted minor UX regression for Lane A; if the team wants to reintroduce animation later, add it once in `components/modal.css` rather than per-dialog.
+- The codebase uses the `$(id)` shorthand (defined in `00-core.js`) in preference to `document.getElementById(...)`. Greps below account for this.
+
 ### Task 8.1: Modal — tests
 
 **Files:**
@@ -4321,12 +4326,19 @@ Expected: PASS.
 
 - [ ] **Step 2: Swap open/close calls**
 
-Replace every direct `document.getElementById('package-dialog').showModal()` / `.close()` with `window.PickleUI.modal.open('package-dialog')` / `.close('package-dialog')`. Grep for `'package-dialog'`:
+Replace every direct `.showModal()` / `.close()` on the package dialog with `window.PickleUI.modal.open('package-dialog')` / `.close('package-dialog')`. The codebase uses the `$(id)` shorthand (defined in `00-core.js`), not `document.getElementById(...)`, so grep accordingly:
 
 ```bash
-rg "getElementById\('package-dialog'\)" frontend/static/app/
+rg "\\\$\\('package-dialog'\\)" frontend/static/app/
 ```
-Update each occurrence accordingly.
+
+Known callsites in `frontend/static/app/00-core.js`:
+- `line 588`: inside `openPackageManagerDialog()` — `$('package-dialog').showModal()` — replace with `window.PickleUI.modal.open('package-dialog')`
+- `line 665`: inside `syncVerificationPackageDelete()` — reads `dialog.open` first, then calls `.close()` — keep the `dialog.open` read, replace `.close()` with `window.PickleUI.modal.close('package-dialog')`
+- `line 677`: `$('package-dialog')?.close()` in `closePackageManagerDialog()` — replace with `window.PickleUI.modal.close('package-dialog')`
+- `line 795`: inside `wirePackageManagerDialog()` — gets the dialog for event binding; do NOT replace (still need the element reference for `.addEventListener` calls)
+
+Leave any existing per-dialog event wiring (click listeners, backdrop-click handlers) alone. Focus this task purely on the open/close call sites.
 
 ### Task 8.4: Migrate About dialog
 
@@ -4372,7 +4384,14 @@ Update each occurrence accordingly.
 
 - [ ] **Step 2: Swap open/close**
 
-Repeat the grep + rename for `'about-dialog'`.
+Grep:
+```bash
+rg "\\\$\\('about-dialog'\\)" frontend/static/app/
+```
+
+Known callsites in `frontend/static/app/06-shell.js`:
+- `line 596`: inside `showAboutDialog()` — `dialog.showModal()` — replace with `window.PickleUI.modal.open('about-dialog')`
+- `line 616`: inside `hideAboutDialog()` — `dialog.close()` — replace with `window.PickleUI.modal.close('about-dialog')`
 
 ### Task 8.5: Migrate Settings dialog
 
@@ -4450,65 +4469,131 @@ Repeat the grep + rename for `'about-dialog'`.
 </dialog>
 ```
 
-- [ ] **Step 2: Update nav-button wiring**
+- [ ] **Step 2: Update nav-button class names in `05-settings.js`**
 
-In `05-settings.js`, find the block that toggles `.settings-nav-btn.active` and `.settings-section.active` classes. Change the class names to `.modal-nav-item` / `.is-active` for the nav buttons and keep `.settings-section.is-active` for the content. If you prefer the `data-tab-id` pattern to match other tab strips, rewire via a small custom helper rather than `PickleUI.tabStrip` (the nav is vertical, not a tab strip).
+Three call sites need the `.settings-nav-btn` → `.modal-nav-item` + `'active'` → `'is-active'` renames. Near `line 43-47` (inside `switchSettingsSection()`):
 
-Wire the new close buttons:
 ```javascript
-document.getElementById('settings-close-header-btn')
-    .addEventListener('click', () => window.PickleUI.modal.close('settings-dialog'));
-document.getElementById('settings-close-btn')
-    .addEventListener('click', () => window.PickleUI.modal.close('settings-dialog'));
+nav.querySelectorAll('.modal-nav-item').forEach((btn) => {
+    btn.classList.toggle('is-active', btn.dataset.section === sectionId);
+});
+content.querySelectorAll('.settings-section').forEach((sec) => {
+    sec.classList.toggle('is-active', sec.dataset.section === sectionId);
+});
 ```
 
-Replace `.settings-dialog.showModal()` with `window.PickleUI.modal.open('settings-dialog')`.
+Near `line 212` (inside `wireSettingsDialog()`):
+
+```javascript
+const btn = e.target.closest('.modal-nav-item');
+```
+
+Do NOT touch `.settings-section` as a selector — it remains the section container class. Only the state modifier flips from `.active` to `.is-active`.
+
+- [ ] **Step 3: Swap open/close + wire header close**
+
+In `05-settings.js`:
+- `line 176`: `dialog.showModal();` → `window.PickleUI.modal.open('settings-dialog');`
+- `line 182`: `dialog.close();` → `window.PickleUI.modal.close('settings-dialog');`
+- `line 200`: inside the backdrop-click handler → leave the `dialog.close()` as-is (it's triggered by coordinate math on the same dialog reference; keeping native `.close()` preserves the event chain without a redundant lookup)
+- `line 206`: inside Done-button handler → leave as `dialog.close()` (same reason)
+
+Add the new header close button wiring (the `settings-close-header-btn` is introduced in the migrated HTML):
+
+```javascript
+const headerCloseBtn = $('settings-close-header-btn');
+if (headerCloseBtn) {
+    headerCloseBtn.addEventListener('click', () => dialog.close());
+}
+```
+
+Place this next to the existing Done-button wiring inside `wireSettingsDialog()`.
 
 ### Task 8.6: Migrate the "Delete Overlay" confirm to `PickleUI.modal.confirm`
 
 **Files:**
-- Modify: `frontend/static/app/06-shell.js`
+- Modify: `frontend/static/app/00-core.js`
 
-- [ ] **Step 1: Replace the inline `window.confirm(...)` in the delete-overlay flow**
-
-```javascript
-// before:
-if (!window.confirm('Delete overlay for this package?')) return;
-
-// after:
-if (!(await window.PickleUI.modal.confirm({
-    title: 'Delete overlay?',
-    message: 'This will remove the shared overlay for this package.',
-    action: 'Delete',
-    tone: 'danger',
-}))) return;
-```
-
-Ensure the surrounding function is `async`. Repeat for any other `window.confirm` in the app (grep):
-
+Grep first:
 ```bash
 rg -n 'window\.confirm\(' frontend/static/app/
 ```
 
+The only hit is inside `deleteSelectedOverlayPackage()` at `00-core.js:769`. The surrounding function is already `async`.
+
+- [ ] **Step 1: Replace the inline `window.confirm(...)` in the delete-overlay flow**
+
+Current code:
+
+```javascript
+const packageName = deviceData.selected_package;
+const confirmed = window.confirm(appConfig.format(appConfig.ui.packageManager.deleteConfirm, {
+    packageName: displayPackageName(packageName, { long: true }),
+}));
+if (!confirmed) {
+    return;
+}
+```
+
+Replacement:
+
+```javascript
+const packageName = deviceData.selected_package;
+const confirmed = await window.PickleUI.modal.confirm({
+    title: 'Delete overlay?',
+    message: appConfig.format(appConfig.ui.packageManager.deleteConfirm, {
+        packageName: displayPackageName(packageName, { long: true }),
+    }),
+    action: 'Delete',
+    tone: 'danger',
+});
+if (!confirmed) {
+    return;
+}
+```
+
+The `deleteSelectedOverlayPackage` function is already `async` (declared at `00-core.js:763`), so no function-signature change is needed.
+
 ### Task 8.7: Delete legacy dialog CSS
 
 **Files:**
-- Modify: `frontend/static/styles/02-package-config.css`
 - Modify: `frontend/static/styles/04-shell-layout.css`
 
-- [ ] **Step 1: Remove rules**
+Pre-scan result: all legacy dialog rules live in `04-shell-layout.css` (roughly lines 726–1124). `02-package-config.css` has no `.package-dialog` rules, so it is not in the delete list.
 
-Delete every rule prefixed with `.package-dialog-`, `.about-dialog`, `.about-icon` (if the rule only styled positioning inside the old layout — new layout uses `.modal-body` centering), `.settings-dialog`, `.settings-layout`, `.settings-nav`, `.settings-nav-title`, `.settings-nav-btn`, `.settings-section`, `.settings-section-title`, `.settings-section-desc`, `.settings-content`, `.settings-footer`, `.settings-close`.
+- [ ] **Step 1: Remove legacy dialog rules**
 
-Keep content-specific rules that aren't covered by primitives: `.about-version`, `.about-desc`, `.about-tech`, `.about-tag`, `.about-copy`, `.about-legal`, `.key-row`, `.key-label`, `.key-field`, `.key-status`, `.package-dialog-value`, `.package-dialog-value-mono` — these still apply to content inside the modals.
+Delete every rule for these selectors (and their `[open]`, `::backdrop`, `@starting-style` siblings):
 
-- [ ] **Step 2: Final sanity gate**
+- `.package-dialog`, `.package-dialog-card`, `.package-dialog-header`, `.package-dialog-actions`, `.package-dialog-body`, `.package-dialog-field`, `.package-dialog-input-wrap`, `.package-dialog-label`, `.package-dialog-note`, `.package-dialog-action-row`, `.package-dialog-close` — **but keep `.package-dialog-value` and `.package-dialog-value-mono`** (still used by content inside the migrated dialog)
+- `.about-dialog`, `.about-icon`, `.about-title`, `.about-subtitle` — the migrated markup uses `.modal-title` / `.modal-subtitle` in their place
+- `.settings-dialog`, `.settings-layout`, `.settings-nav`, `.settings-nav-title`, `.settings-nav-btn`, `.settings-content`, `.settings-section-title`, `.settings-section-desc`, `.settings-section-desc code`, `.settings-footer`, `.settings-close`
+
+- [ ] **Step 2: Rename `.settings-section` state modifier**
+
+The rules
+
+```css
+.settings-section { display: none; }
+.settings-section.active { display: block; }
+```
+
+must remain — they are what hides inactive content panels in the nav/body layout. Rename `.settings-section.active` → `.settings-section.is-active` to match the new state convention. Keep the `.settings-section { display: none; }` rule as-is.
+
+Leave the following content-specific rules untouched (still referenced by the migrated HTML):
+- `.about-version`, `.about-desc`, `.about-tech`, `.about-tag`, `.about-links`, `.about-copy`, `.about-legal`
+- `.key-row`, `.key-label`, `.key-field`, `.key-actions`, `.key-status`, `.key-status-badge` (and its `.keychain`/`.env`/`.dotenv` variants)
+- `.package-dialog-value`, `.package-dialog-value-mono`
+
+- [ ] **Step 3: Sanity gate**
 
 ```bash
-rg '^\s*\.(package-dialog|settings-(layout|nav|nav-btn|nav-title|section-title|section-desc|content|footer|close|dialog|section))\b' frontend/static/styles/
-rg '^\s*\.about-dialog\b' frontend/static/styles/
+rg '^\s*\.(package-dialog(-card|-header|-actions|-body|-field|-input-wrap|-label|-note|-action-row|-close)?)\b' frontend/static/styles/
+rg '^\s*\.(settings-(dialog|layout|nav|nav-btn|nav-title|content|section-title|section-desc|footer|close))\b' frontend/static/styles/
+rg '^\s*\.(about-dialog|about-icon|about-title|about-subtitle)\b' frontend/static/styles/
+rg '\.settings-section\.active\b' frontend/static/styles/
 ```
-Expected: zero matches for every gate.
+Expected: zero matches for every gate. `.settings-section` alone (without `.active`) should still match exactly twice in `04-shell-layout.css` (base rule + `.is-active` variant after rename).
 
 ### Task 8.8: Commit PR #8
 
@@ -4529,7 +4614,7 @@ Run: `cargo tauri dev`. Open every dialog (Settings via gear/⌘,, Package actio
 - [ ] **Step 3: Commit**
 
 ```bash
-git add frontend/static/styles/components/modal.css frontend/static/app/ui/modal.js frontend/tests/ui/modal.test.js frontend/static/style.css frontend/index.html frontend/static/app/05-settings.js frontend/static/app/06-shell.js frontend/static/styles/02-package-config.css frontend/static/styles/04-shell-layout.css
+git add frontend/static/styles/components/modal.css frontend/static/app/ui/modal.js frontend/tests/ui/modal.test.js frontend/static/style.css frontend/index.html frontend/static/app/00-core.js frontend/static/app/05-settings.js frontend/static/app/06-shell.js frontend/static/styles/04-shell-layout.css
 git commit -m "$(cat <<'EOF'
 Lane A: modal primitive + dialog migration
 
@@ -4537,6 +4622,7 @@ Lane A: modal primitive + dialog migration
 - Add ui/modal.js (PickleUI.modal.{open,close,confirm})
 - Migrate Package, About, Settings dialogs to the new primitive
 - Replace window.confirm for delete-overlay with PickleUI.modal.confirm (danger tone)
+- Rename .settings-section.active state modifier to .is-active
 - Delete .package-dialog-*, .settings-*, .about-dialog CSS
 EOF
 )"
