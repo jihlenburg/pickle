@@ -15,26 +15,29 @@
     let installed = false;
 
     function ensureElement() {
-        if (element) return;
         const doc = global.document;
+        const host = (PickleUI.floatingHost && PickleUI.floatingHost()) || doc.body;
+        if (element) {
+            if (element.parentNode !== host) host.appendChild(element);
+            return;
+        }
         element = doc.createElement('div');
         element.classList.add('tooltip');
         arrow = doc.createElement('div');
         arrow.classList.add('tooltip-arrow');
         element.appendChild(arrow);
-        doc.body.appendChild(element);
+        host.appendChild(element);
     }
 
     function capture(el) {
         if (!el) return;
-        if (el.dataset && el.dataset.tip) {
-            if (el.getAttribute && el.getAttribute('title')) {
-                el.removeAttribute('title');
-            }
-            return;
-        }
         const title = el.getAttribute && el.getAttribute('title');
         if (title) {
+            // Always refresh data-tip from the live title= so dynamic updates
+            // (verify-btn API-key status, index-badge live counter, CLC tab
+            // state copy, pkg-select synthetic-package warning) flow through
+            // after the initial sweep, then strip the native attribute so the
+            // browser tooltip does not double-render.
             el.dataset.tip = title;
             el.removeAttribute('title');
         }

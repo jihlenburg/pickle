@@ -102,7 +102,8 @@
                 menu.style.left = rect.left + 'px';
             }
 
-            doc.body.appendChild(menu);
+            const host = (PickleUI.floatingHost && PickleUI.floatingHost()) || doc.body;
+            host.appendChild(menu);
             if (trigger.setAttribute) trigger.setAttribute('aria-expanded', 'true');
 
             outsideHandler = (event) => {
@@ -116,10 +117,17 @@
         if (trigger.addEventListener) {
             trigger.setAttribute && trigger.setAttribute('aria-haspopup', 'menu');
             trigger.setAttribute && trigger.setAttribute('aria-expanded', 'false');
-            trigger.addEventListener('click', (event) => {
-                event.preventDefault();
-                if (menu) close(); else open();
-            });
+            // Skip the click-to-toggle binding when the trigger is an <input>.
+            // Inputs have their own focus/click semantics (caret placement,
+            // selection): toggling on click would dismiss suggestion lists on
+            // routine clicks inside the field. Consumers (e.g. part picker)
+            // drive open/close imperatively via input/focus listeners.
+            if (trigger.tagName !== 'INPUT') {
+                trigger.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    if (menu) close(); else open();
+                });
+            }
         }
 
         return { open, close };

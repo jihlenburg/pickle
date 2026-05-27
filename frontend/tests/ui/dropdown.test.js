@@ -192,6 +192,60 @@ test('PickleUI.dropdown renders is-active on items marked active', () => {
         'second item does not have is-active');
 });
 
+test('PickleUI.dropdown skips click-to-toggle when the trigger is an <input>', () => {
+    const source = load();
+    const doc = mkDoc();
+    const trigger = doc.createElement('input');
+    const sandbox = { window: {}, document: doc };
+    sandbox.window.document = doc;
+    sandbox.window.innerHeight = 600;
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox);
+
+    const handle = sandbox.window.PickleUI.dropdown(trigger, {
+        items: [{ id: 'a', label: 'Alpha' }],
+        onSelect: () => {},
+    });
+    // Click on an input must NOT toggle the menu — input-driven consumers
+    // (e.g. part picker) drive open/close imperatively via their own listeners.
+    trigger.click();
+    assert.equal(doc.body._children.length, 0,
+        'no menu appended after click on input trigger');
+
+    // The imperative API still works for these consumers.
+    handle.open();
+    const menu = doc.body._children[doc.body._children.length - 1];
+    assert.ok(menu, 'imperative open() still appends menu');
+    assert.equal(menu.classList.contains('dropdown-menu'), true);
+});
+
+test('PickleUI.dropdown appends menu inside an open modal dialog (top-layer host)', () => {
+    const source = load();
+    const doc = mkDoc();
+    // Simulate a modal dialog open in the top layer; the menu must land inside
+    // it, not on body, or it renders behind the dialog backdrop.
+    const dialog = doc.createElement('dialog');
+    dialog.appendChild = function(c) { this.children.push(c); c.parentNode = this; };
+    doc.querySelector = (sel) => (sel === 'dialog[open].modal' ? dialog : null);
+
+    const trigger = doc.createElement('button');
+    const sandbox = { window: {}, document: doc };
+    sandbox.window.document = doc;
+    sandbox.window.innerHeight = 600;
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox);
+
+    sandbox.window.PickleUI.dropdown(trigger, {
+        items: [{ id: 'a', label: 'Alpha' }],
+        onSelect: () => {},
+    });
+    trigger.click();
+    const menuInDialog = dialog.children.find((c) => c.classList.contains('dropdown-menu'));
+    assert.ok(menuInDialog, 'menu appended inside open modal dialog');
+    const onBody = doc.body._children.find((c) => c && c.classList && c.classList.contains('dropdown-menu'));
+    assert.equal(onBody, undefined, 'menu is not on body when a modal is open');
+});
+
 test('PickleUI.dropdown tolerates no opts and empty items', () => {
     const source = load();
     const doc = mkDoc();

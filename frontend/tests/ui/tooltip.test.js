@@ -55,7 +55,12 @@ test('PickleUI.tooltip.install captures title= and strips it', () => {
     assert.equal(el.dataset.tip, 'Hello');
 });
 
-test('PickleUI.tooltip.capture prefers existing [data-tip] over [title]', () => {
+test('PickleUI.tooltip.capture refreshes data-tip from live title= updates', () => {
+    // Regression: callers like verify-btn (07-verification.js), index-badge
+    // (06-shell.js), CLC tab (05-clc-designer.js), and pkg-select (00-core.js)
+    // update element.title= dynamically after install()'s initial sweep.
+    // capture() must reflect those updates into data-tip on the next hover
+    // instead of silently keeping the first-sighting copy.
     const source = loadTooltip();
     const document = fakeDoc();
     const window = { innerWidth: 800, innerHeight: 600, document };
@@ -65,16 +70,45 @@ test('PickleUI.tooltip.capture prefers existing [data-tip] over [title]', () => 
     vm.runInContext(source, sandbox);
 
     const el = {
-        attributes: { title: 'Native' },
-        dataset: { tip: 'Custom' },
+        attributes: { title: 'Cross-check pinout against the datasheet' },
+        dataset: {},
         getAttribute(n) { return this.attributes[n]; },
         removeAttribute(n) { delete this.attributes[n]; },
         setAttribute(n, v) { this.attributes[n] = v; },
     };
-
     sandbox.window.PickleUI.tooltip.capture(el);
-    assert.equal(el.attributes.title, undefined);
-    assert.equal(el.dataset.tip, 'Custom');
+    assert.equal(el.dataset.tip, 'Cross-check pinout against the datasheet');
+    assert.equal(el.attributes.title, undefined, 'native title stripped');
+
+    // Simulate the post-install title= update path (e.g. checkApiKey()).
+    el.attributes.title = 'API key configured (OpenAI)';
+    sandbox.window.PickleUI.tooltip.capture(el);
+    assert.equal(el.dataset.tip, 'API key configured (OpenAI)',
+        'data-tip reflects the live title= update');
+    assert.equal(el.attributes.title, undefined, 'native title stripped again');
+});
+
+test('PickleUI.tooltip.capture leaves data-tip alone when no title= is present', () => {
+    // After the initial sweep, hovering an element that never had title=
+    // (consumers like 05-clc-designer.js write tab.title only conditionally)
+    // shouldn't clear a previously-set data-tip.
+    const source = loadTooltip();
+    const document = fakeDoc();
+    const window = { innerWidth: 800, innerHeight: 600, document };
+    document.defaultView = window;
+    const sandbox = { window, document };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox);
+
+    const el = {
+        attributes: {},
+        dataset: { tip: 'Previously captured' },
+        getAttribute(n) { return this.attributes[n]; },
+        removeAttribute(n) { delete this.attributes[n]; },
+        setAttribute(n, v) { this.attributes[n] = v; },
+    };
+    sandbox.window.PickleUI.tooltip.capture(el);
+    assert.equal(el.dataset.tip, 'Previously captured');
 });
 
 test('PickleUI.tooltip exposes show/hide helpers', () => {

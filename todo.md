@@ -14,6 +14,10 @@
 - Verify in the Tauri app that the left-panel `Pin View` / `Peripheral View` control now reads as real section tabs connected to the content pane instead of detached pill buttons.
 - Verify in the Tauri app that dsPIC33AK devices with visible CLC endpoints no longer show the right-side `CLC` tab as disabled after a stale cache reload.
 - Verify in the Tauri app that dsPIC33AK256MPS205 now exposes all 10 CLC modules in the CLC designer instead of the old fixed 4-tab limit, and that loading a saved config preserves higher-numbered CLC modules until the device reload completes.
+- Verify in the Tauri app that opening Settings and clicking the verify-provider select now shows the menu above the modal backdrop and lets the user actually pick a provider, after the `PickleUI.floatingHost()` fix routed dropdown/tooltip/toast overlays through the open `<dialog>` instead of `<body>`.
+- Verify in the Tauri app that clicking inside the part-input no longer dismisses an open suggestion list, and that picking a suggestion no longer leaves a single-item dropdown reopened over the just-selected device.
+- Verify in the Tauri app that the verify-btn tooltip now reflects the live API-key status (and the index-badge tooltip shows the current device-count + cache-age string) instead of staying frozen at the initial install-sweep copy.
+- Verify in the Tauri app that the save-menu chevron no longer offers `Rename...` until a config has been saved/opened, so the label and the resulting action stay in sync.
 
 ## Backlog
 

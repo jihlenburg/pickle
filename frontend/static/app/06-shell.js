@@ -17,6 +17,7 @@ let partPickerDropdown = null;
 let rightTabsHandle = null;
 let viewToggleHandle = null;
 let lastPartSuggestions = [];
+let suppressPartPickerRefresh = false;
 let welcomeIntroBound = false;
 const shellActionHandlers = {
     load: async () => {
@@ -257,6 +258,7 @@ function findPartSuggestions(query) {
 }
 
 function refreshPartPickerSuggestions() {
+    if (suppressPartPickerRefresh) return; // bracketed by onSelect's input.focus()
     const input = $('part-input');
     if (!input || !partPickerDropdown) return;
     const normalizedValue = input.value.toUpperCase();
@@ -286,7 +288,18 @@ function wirePartPicker() {
         onSelect: (deviceName) => {
             if (!deviceName) return;
             input.value = deviceName;
-            input.focus();
+            // The item-click handler in dropdown.js already closed the menu,
+            // but the post-select input.focus() below transitions focus from
+            // body (the menu+button were removed) back to the input, which
+            // would otherwise re-fire the focus listener and reopen the menu
+            // showing only the just-selected device. Bracket the focus call
+            // so the refresh listener no-ops once.
+            suppressPartPickerRefresh = true;
+            try {
+                input.focus();
+            } finally {
+                suppressPartPickerRefresh = false;
+            }
         },
     });
 
@@ -307,10 +320,18 @@ function wireSaveMenu() {
     const configFileUi = appConfig.ui.configFiles;
     saveMenuDropdown = window.PickleUI.dropdown(button, {
         placement: 'bottom-end',
-        items: [
-            { id: 'save-as', label: configFileUi.saveAsButton },
-            { id: 'rename', label: configFileUi.renameButton },
-        ],
+        // Factory mirrors wirePackageMenu's pattern: re-evaluated on every
+        // open() so the Rename item is hidden until a path exists. Without
+        // this gate, clicking Rename on an unsaved doc silently falls through
+        // to Save As (renameConfig() in 05-config-files.js) — a confusing
+        // label/action mismatch.
+        items: () => {
+            const items = [{ id: 'save-as', label: configFileUi.saveAsButton }];
+            if (configDocument.path) {
+                items.push({ id: 'rename', label: configFileUi.renameButton });
+            }
+            return items;
+        },
         onSelect: (id) => {
             if (id === 'save-as') return runShellAction('save_as');
             if (id === 'rename') return runShellAction('rename');

@@ -31,11 +31,15 @@
     const handles = [];
 
     function ensureStack() {
-        if (stack) return stack;
         const doc = global.document;
+        const host = (PickleUI.floatingHost && PickleUI.floatingHost()) || doc.body;
+        if (stack) {
+            if (stack.parentNode !== host) host.appendChild(stack);
+            return stack;
+        }
         stack = doc.createElement('div');
         stack.classList.add('toast-stack');
-        doc.body.appendChild(stack);
+        host.appendChild(stack);
         return stack;
     }
 
