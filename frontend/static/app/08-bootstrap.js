@@ -38,22 +38,26 @@ async function initializeApp() {
     wireMenuActionListener();
     window.PickleUI.tooltip.install();
 
-    await loadAppSettings();
-    setupTheme();
-    void checkApiKey();
-    setupOscUI();
-    setupFuseUI();
-    populateDeviceList();
+    try {
+        await loadAppSettings();
+        setupTheme();
+        void checkApiKey();
+        setupOscUI();
+        setupFuseUI();
+        populateDeviceList();
 
-    const startupTarget = resolveStartupTarget(appSettings);
-    if (!startupTarget) {
-        syncWelcomeIntroVisibility({ allow: true });
-        return;
+        const startupTarget = resolveStartupTarget(appSettings);
+        if (!startupTarget) {
+            syncWelcomeIntroVisibility({ allow: true });
+            return;
+        }
+
+        $('part-input').value = startupTarget.partNumber;
+        await loadDevice(startupTarget.package || undefined, { preserveState: false });
+        syncWelcomeIntroVisibility({ allow: !deviceData });
+    } finally {
+        hideBootSplash();
     }
-
-    $('part-input').value = startupTarget.partNumber;
-    await loadDevice(startupTarget.package || undefined, { preserveState: false });
-    syncWelcomeIntroVisibility({ allow: !deviceData });
 }
 
 // Auto-invoke only when the shell dependencies (06-shell.js, etc.) are loaded.

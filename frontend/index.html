@@ -8,9 +8,58 @@
     <script>
         window.PickleConfig.applyDocumentTheme(document, window.PickleConfig.defaults.themeMode);
     </script>
+    <style>
+        /* Boot splash. Inlined here so it can paint before style.css /
+           tokens.css load. The static fallback covers the worst-case
+           "JS hasn't yet set --bg / --text on <html>" race; the
+           prefers-color-scheme query covers users on system theme; and
+           the var() declarations win once applyDocumentTheme() above
+           has set the inline CSS variables on <html>. */
+        #boot-splash {
+            position: fixed;
+            inset: 0;
+            z-index: 99999;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            background: #ffffff;
+            color: #1a1a1a;
+            opacity: 1;
+            transition: opacity 150ms ease-out;
+        }
+        @media (prefers-color-scheme: dark) {
+            #boot-splash { background: #0b1220; color: #ebf2ff; }
+        }
+        #boot-splash {
+            background: var(--bg, #ffffff);
+            color: var(--text, #1a1a1a);
+        }
+        #boot-splash.is-hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        #boot-splash .boot-splash-icon {
+            width: 96px;
+            height: 96px;
+            object-fit: contain;
+        }
+        #boot-splash .boot-splash-name {
+            font-family: var(--font-body, "Avenir Next", "IBM Plex Sans", "Segoe UI", sans-serif);
+            font-size: 28px;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+        }
+    </style>
     <link rel="stylesheet" href="static/style.css">
 </head>
 <body>
+    <div id="boot-splash" aria-hidden="true">
+        <img src="static/pickle-icon.png" alt="" class="boot-splash-icon">
+        <div class="boot-splash-name">pickle</div>
+    </div>
+
     <header class="app-header">
         <div class="header-brand">
             <img src="static/pickle-icon.png" alt="pickle" class="brand-icon">
