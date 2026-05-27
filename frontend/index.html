@@ -59,6 +59,20 @@
         <img src="static/pickle-icon.png" alt="" class="boot-splash-icon">
         <div class="boot-splash-name">pickle</div>
     </div>
+    <script>
+        // Show the native window once the splash has had a chance to paint.
+        // tauri.conf.json starts the window with visible: false to avoid the
+        // pre-splash black flash; requestAnimationFrame ensures the splash
+        // element is in the layout tree before show() runs.
+        requestAnimationFrame(() => {
+            try {
+                window.__TAURI__?.window?.getCurrentWindow?.()?.show?.();
+            } catch (_) {
+                // 08-bootstrap.js retries show() defensively at the top of
+                // initializeApp() so a failure here is recoverable.
+            }
+        });
+    </script>
 
     <header class="app-header">
         <div class="header-brand">

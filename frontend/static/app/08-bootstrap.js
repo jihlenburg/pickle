@@ -34,6 +34,14 @@ function wireMenuActionListener() {
 
 // Initialize UI and load the configured startup device if one is available.
 async function initializeApp() {
+    // Defensive retry: the inline <script> after #boot-splash already calls
+    // show() inside requestAnimationFrame. This second call covers the rare
+    // case where the inline call failed or never ran, so the user can never
+    // be left looking at a permanently invisible window.
+    try {
+        window.__TAURI__?.window?.getCurrentWindow?.()?.show?.();
+    } catch (_) { /* swallowed; the splash → shell-ready fade will still run */ }
+
     initializeShellChrome();
     wireMenuActionListener();
     window.PickleUI.tooltip.install();
