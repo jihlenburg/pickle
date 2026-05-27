@@ -6,6 +6,19 @@
  * those flows.
  */
 
+/**
+ * Hide and remove the inline boot-splash element. Safe to call when no
+ * splash is in the DOM (e.g. unit tests, or a future refactor that drops the
+ * markup). The 200ms timeout matches the 150ms opacity transition declared
+ * in index.html's inline <style> plus a small safety margin for slow paints.
+ */
+function hideBootSplash() {
+    const splash = document.getElementById('boot-splash');
+    if (!splash) return;
+    splash.classList.add('is-hidden');
+    setTimeout(() => splash.remove(), 200);
+}
+
 let menuEventsBound = false;
 
 function wireMenuActionListener() {
@@ -43,4 +56,9 @@ async function initializeApp() {
     syncWelcomeIntroVisibility({ allow: !deviceData });
 }
 
-initializeApp();
+// Auto-invoke only when the shell dependencies (06-shell.js, etc.) are loaded.
+// Lets the file be evaluated in isolation by unit tests without triggering
+// initializeApp's full dependency chain.
+if (typeof initializeShellChrome === 'function') {
+    initializeApp();
+}
